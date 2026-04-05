@@ -22,9 +22,6 @@ from typing import Optional
 
 import websockets
 
-import numpy as np
-import pandas as pd
-
 import binance_client as bc
 import config
 import db
@@ -155,11 +152,17 @@ def _parse_kline_msg(msg: dict) -> Optional[tuple[str, str, dict, bool]]:
 
 
 def _compute_ema_tail(buf: list[dict], period: int) -> float:
-    """Fast EMA of the last value in buf using the stored close prices."""
+    """
+    Lightweight pure-Python EMA of closes in buf.
+    Never creates a pandas Series — safe to call on the event loop.
+    """
     if len(buf) < period:
         return 0.0
-    closes = pd.Series([c["close"] for c in buf])
-    return float(closes.ewm(span=period, adjust=False).mean().iloc[-1])
+    k = 2.0 / (period + 1)
+    ema = buf[0]["close"]
+    for candle in buf[1:]:
+        ema = candle["close"] * k + ema * (1 - k)
+    return ema
 
 
 def _update_buffer(symbol: str, interval: str, candle: dict, is_closed: bool) -> None:
@@ -235,7 +238,11 @@ async def _evaluate_symbols() -> None:
             if now - _last_signal_ts.get(symbol, 0) < _SIGNAL_COOLDOWN_S:
                 continue
 
-            sig = signal_engine.check_pullback(symbol, k15, k5)
+            # Run CPU-heavy pandas computation in a thread so the event
+            # loop stays free for HTTP/WebSocket serving
+            sig = await asyncio.to_thread(
+                signal_engine.check_pullback, symbol, k15[:], k5[:]
+            )
             if sig is None:
                 continue
 
@@ -317,12 +324,13 @@ async def start(order_manager=None) -> None:
         {"symbols": active_watchlist, "count": len(active_watchlist)},
     )
 
-    # Seed klines for all symbols (REST, throttled)
+    # Seed klines concurrently in batches of 10 (Binance rate-limit safe)
     logger.info("Seeding klines for %d symbols...", len(active_watchlist))
-    for i, sym in enumerate(active_watchlist):
-        await _seed_klines(sym)
-        if i % 10 == 9:
-            await asyncio.sleep(0.5)  # avoid rate limit
+    batch_size = 10
+    for i in range(0, len(active_watchlist), batch_size):
+        batch = active_watchlist[i : i + batch_size]
+        await asyncio.gather(*[_seed_klines(sym) for sym in batch])
+        await asyncio.sleep(0.5)  # brief pause between batches
 
     # Start background tasks (fire and forget)
     asyncio.create_task(_run_kline_ws(active_watchlist), name="kline_ws")
