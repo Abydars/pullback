@@ -914,10 +914,11 @@ function handleMessage(type, data) {
     case 'scanner_alert':   onScannerAlert(data);   break;
     case 'scanner_watchlist': onWatchlist(data);    break;
     case 'position_update': onPositionUpdate(data); break;
-    case 'trade_closed':    onTradeClosed(data);    break;
-    case 'kline_update':    onKlineUpdate(data);    break;
-    case 'kline_history':   onKlineHistory(data);   break;
-    case 'system_status':   onSystemStatus(data);   break;
+    case 'trade_closed':             onTradeClosed(data);          break;
+    case 'portfolio_stop_triggered': onPortfolioStop(data);         break;
+    case 'kline_update':             onKlineUpdate(data);           break;
+    case 'kline_history':            onKlineHistory(data);          break;
+    case 'system_status':            onSystemStatus(data);          break;
   }
 }
 
@@ -1051,6 +1052,18 @@ function onTradeClosed(trade) {
   toast(cfg.type, cfg.icon,
     `${sym} ${dir} — ${cfg.label}`,
     `PnL: ${pnlStr}`, 7000);
+}
+
+function onPortfolioStop(data) {
+  const isSL = data.reason === 'PORTFOLIO_SL';
+  const pnlStr = fmtUsdt(data.total_pnl ?? 0);
+  toast(
+    isSL ? 't-red' : 't-green',
+    isSL ? '🛑' : '🏆',
+    isSL ? `Portfolio stop-loss triggered` : `Portfolio take-profit triggered`,
+    `${data.count} position(s) closed · Total PnL: ${pnlStr}`,
+    10000,
+  );
 }
 
 function onKlineUpdate(data) {
@@ -1524,7 +1537,14 @@ const CFG_FIELDS = [
       { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)', type: 'number', step: '1',   hint: 'Fixed dollar amount risked on each entry' },
       { key: 'MAX_OPEN_TRADES',     label: 'Max Open Positions',    type: 'number',               hint: 'Hard cap on concurrent open trades' },
       { key: 'LEVERAGE',            label: 'Leverage',              type: 'number', hint: '1–125×' },
-      { key: 'TRAIL_STEP_RATIO',    label: 'Trail Step Ratio',      type: 'number', step: '0.05', hint: 'Trailing stop = ratio × initial risk (0.5 = half)' },
+      { key: 'TRAIL_STEP_RATIO',           label: 'Trail Step Ratio',               type: 'number', step: '0.05', hint: 'Trailing stop = ratio × initial risk (0.5 = half)' },
+    ],
+  },
+  {
+    section: 'Portfolio Stops',
+    fields: [
+      { key: 'PORTFOLIO_STOP_LOSS_USDT',   label: 'Portfolio Stop-Loss (USDT)',    type: 'number', step: '1', hint: 'Close ALL positions if total unrealized PnL ≤ this (e.g. -50). 0 = disabled.' },
+      { key: 'PORTFOLIO_TAKE_PROFIT_USDT', label: 'Portfolio Take-Profit (USDT)',  type: 'number', step: '1', hint: 'Close ALL positions if total unrealized PnL ≥ this (e.g. 100). 0 = disabled.' },
     ],
   },
   {

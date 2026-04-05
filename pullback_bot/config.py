@@ -65,6 +65,13 @@ MAX_OPEN_TRADES: int = _int("MAX_OPEN_TRADES", 5)
 LEVERAGE: int = _int("LEVERAGE", 10)
 TRAIL_STEP_RATIO: float = _float("TRAIL_STEP_RATIO", 0.5)
 
+# ── Portfolio-level stops ─────────────────────────────────────────────────────
+# If total unrealized PnL across all open positions reaches either threshold,
+# close every position immediately.
+# 0.0 = disabled (default).
+PORTFOLIO_STOP_LOSS_USDT: float  = _float("PORTFOLIO_STOP_LOSS_USDT",  0.0)   # e.g. -50
+PORTFOLIO_TAKE_PROFIT_USDT: float = _float("PORTFOLIO_TAKE_PROFIT_USDT", 0.0)  # e.g. 100
+
 # ── Server ────────────────────────────────────────────────────────────────────
 PORT: int = _int("PORT", 8080)
 
@@ -87,9 +94,11 @@ EDITABLE_KEYS: dict[str, type] = {
     "RISK_PER_TRADE_USDT":      float,
     "MAX_OPEN_TRADES":          int,
     "LEVERAGE":                 int,
-    "TRAIL_STEP_RATIO":         float,
-    "LOG_LEVEL":                str,
-    "MODE":                     str,
+    "TRAIL_STEP_RATIO":             float,
+    "PORTFOLIO_STOP_LOSS_USDT":    float,
+    "PORTFOLIO_TAKE_PROFIT_USDT":  float,
+    "LOG_LEVEL":                   str,
+    "MODE":                        str,
 }
 
 # Keys that require a bot restart to take full effect

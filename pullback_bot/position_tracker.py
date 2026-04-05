@@ -191,6 +191,62 @@ async def _keepalive_listen_key(listen_key: str) -> None:
 
 # ── PAPER mode: PnL simulation ────────────────────────────────────────────────
 
+async def _close_all_paper(
+    trades: list[dict],
+    mark_prices: dict,
+    reason: str,
+) -> None:
+    """Close every trade in `trades` at current mark price (paper mode)."""
+    total_pnl = 0.0
+    for trade in trades:
+        if trade.get("mode") != "paper":
+            continue
+        tid = trade["id"]
+        symbol = trade["symbol"]
+        mark = mark_prices.get(symbol) or float(trade["entry_price"])
+        direction = trade["direction"]
+        entry = float(trade["entry_price"])
+        qty   = float(trade["qty"])
+
+        if direction == "LONG":
+            pnl = (mark - entry) * qty
+        else:
+            pnl = (entry - mark) * qty
+        pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0
+        close_time = int(time.time() * 1000)
+
+        await db.update_trade_close(
+            trade_id=tid,
+            close_price=mark,
+            close_time=close_time,
+            pnl_usdt=round(pnl, 4),
+            pnl_pct=round(pnl_pct, 2),
+        )
+        paper_unrealized.pop(tid, None)
+        _trail_active.pop(tid, None)
+        _trail_extreme.pop(tid, None)
+        total_pnl += pnl
+
+        await wsb.broadcaster.broadcast("trade_closed", {
+            **trade,
+            "close_price": mark,
+            "close_reason": reason,
+            "pnl_usdt": round(pnl, 4),
+            "pnl_pct": round(pnl_pct, 2),
+            "close_time": close_time,
+        })
+
+    await wsb.broadcaster.broadcast("portfolio_stop_triggered", {
+        "reason": reason,
+        "total_pnl": round(total_pnl, 4),
+        "count": len(trades),
+    })
+    logger.warning(
+        "Portfolio stop (%s): closed %d trades, total_pnl=%.4f",
+        reason, len(trades), total_pnl,
+    )
+
+
 async def _paper_pnl_loop() -> None:
     """
     Poll open paper trades, calculate unrealized PnL from mark prices,
@@ -324,6 +380,24 @@ async def _paper_pnl_loop() -> None:
 
             if positions_payload:
                 await wsb.broadcaster.broadcast("position_update", positions_payload)
+
+            # ── Portfolio-level stop check ────────────────────────────────────
+            total_unrealized = sum(paper_unrealized.values())
+            stop_loss_limit   = config.PORTFOLIO_STOP_LOSS_USDT
+            take_profit_limit = config.PORTFOLIO_TAKE_PROFIT_USDT
+
+            triggered_reason: Optional[str] = None
+            if stop_loss_limit != 0.0 and total_unrealized <= stop_loss_limit:
+                triggered_reason = "PORTFOLIO_SL"
+            elif take_profit_limit != 0.0 and total_unrealized >= take_profit_limit:
+                triggered_reason = "PORTFOLIO_TP"
+
+            if triggered_reason and open_trades:
+                logger.warning(
+                    "Portfolio stop triggered (%s): total_unrealized=%.4f",
+                    triggered_reason, total_unrealized,
+                )
+                await _close_all_paper(open_trades, mark_prices, triggered_reason)
 
         except Exception as exc:
             logger.error("paper_pnl_loop error: %s", exc)
