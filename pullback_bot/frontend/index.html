@@ -287,6 +287,9 @@ function initMainChart() {
       background: { color: '#0d0d0d' },
       textColor: '#888',
     },
+    localization: {
+      priceFormatter: fmtPrice,
+    },
     grid: {
       vertLines: { color: '#1a1a1a' },
       horzLines: { color: '#1a1a1a' },
@@ -764,7 +767,7 @@ function renderPositions() {
       <td style="color:${dirColor}">${t.direction === 'LONG' ? '▲' : '▼'}</td>
       <td>${fmtPrice(t.entry_price)}</td>
       <td>${mark ? fmtPrice(mark) : '—'}</td>
-      <td class="${pnlCls}${blink}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
+      <td class="${pnlCls}${blink}">${fmtUsdt(pnl)}</td>
     `;
     tr.onclick = () => selectSymbol(t.symbol);
     tbody.appendChild(tr);
@@ -784,7 +787,7 @@ function renderHistory() {
     row.innerHTML = `
       <span class="hist-sym">${t.symbol.replace('USDT','')}</span>
       <span class="hist-dir ${t.direction === 'LONG' ? 'long' : 'short'}">${t.direction === 'LONG' ? 'LONG' : 'SHRT'}</span>
-      <span class="hist-pnl ${pnlCls}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</span>
+      <span class="hist-pnl ${pnlCls}">${fmtUsdt(pnl)}</span>
       <span class="hist-time">${fmtTime(t.close_time)}</span>
     `;
     list.appendChild(row);
@@ -796,7 +799,7 @@ function updateStats(stats) {
   document.getElementById('st-wr').textContent    = (stats.win_rate ?? 0) + '%';
   const pnl = stats.total_pnl_today ?? 0;
   const el = document.getElementById('st-pnl');
-  el.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+  el.textContent = fmtUsdt(pnl);
   el.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
 }
 
@@ -848,11 +851,29 @@ document.getElementById('sym-search').addEventListener('keydown', e => {
 // UTILS
 // ============================================================
 function fmtPrice(p) {
-  if (!p) return '—';
+  if (p === null || p === undefined || p === '') return '—';
   const n = Number(p);
-  if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (n >= 1)    return n.toFixed(4);
-  return n.toFixed(6);
+  if (!isFinite(n) || n === 0) return '0';
+  const abs = Math.abs(n);
+  // Large prices: BTC, ETH etc — 2dp
+  if (abs >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Mid-range: SOL, BNB etc — 4dp
+  if (abs >= 1)    return n.toFixed(4);
+  // Small: DOGE, XRP etc — 6dp
+  if (abs >= 0.01) return n.toFixed(6);
+  // Very small: SHIB, PEPE etc — show 4 significant figures
+  // e.g. 0.000012345 → exp=-5 → decimals=9
+  const exp = Math.floor(Math.log10(abs));
+  const decimals = Math.min(-exp + 4, 10);
+  return n.toFixed(decimals);
+}
+
+function fmtUsdt(v) {
+  // Format a USDT amount: enough precision to never show $0.00 for small values
+  const n = Number(v) || 0;
+  const abs = Math.abs(n);
+  const dp = abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6;
+  return (n >= 0 ? '+' : '') + '$' + n.toFixed(dp);
 }
 
 function fmtTime(ms) {
