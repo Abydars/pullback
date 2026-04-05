@@ -298,6 +298,11 @@ async def _run_mark_price_ws(symbols: list[str]) -> None:
                             s = item.get("s", "")
                             if s in symbols:
                                 mark_prices[s] = float(item.get("p", 0))
+                        # Signal position_tracker to wake up and re-evaluate
+                        import sys as _sys
+                        _pt = _sys.modules.get("position_tracker")
+                        if _pt and hasattr(_pt, "_price_event"):
+                            _pt._price_event.set()
         except asyncio.CancelledError:
             break
         except Exception as exc:

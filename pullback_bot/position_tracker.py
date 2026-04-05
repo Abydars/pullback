@@ -93,6 +93,9 @@ logger = logging.getLogger(__name__)
 # trade_id -> current unrealized PnL (USDT)
 paper_unrealized: dict[int, float] = {}
 
+# Event set by scanner whenever a new batch of mark prices arrives (~1s cadence)
+_price_event: asyncio.Event = asyncio.Event()
+
 # ── Trailing take-profit state (paper mode) ───────────────────────────────────
 # Trailing activates when mark crosses tp1_price (the trail arm).
 # TRAIL_STEP_RATIO is read from config each tick so UI changes apply immediately.
@@ -196,7 +199,13 @@ async def _paper_pnl_loop() -> None:
     from scanner import mark_prices  # avoid circular at module level
 
     while True:
-        await asyncio.sleep(2)  # update every 2 seconds
+        # Wake immediately when scanner fires a mark-price batch; fall through
+        # after 3 s even if the event never comes (safety net for live mode).
+        try:
+            await asyncio.wait_for(_price_event.wait(), timeout=3.0)
+        except asyncio.TimeoutError:
+            pass
+        _price_event.clear()
         try:
             open_trades = await db.get_open_trades()
             if not open_trades:
