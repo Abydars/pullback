@@ -86,36 +86,48 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
 /* ── Chart panel ──────────────────────────────────────────────────────────── */
 #chart-panel {
-  background: var(--bg); display: flex; flex-direction: column;
-  overflow-y: auto; overflow-x: hidden;
-  /* Custom scrollbar */
+  background: var(--bg); display: flex; flex-direction: column; overflow: hidden;
 }
-#chart-panel::-webkit-scrollbar { width: 4px; }
-#chart-panel::-webkit-scrollbar-track { background: transparent; }
-#chart-panel::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+/* Tab bar inside chart panel */
+#chart-tabs {
+  display: flex; align-items: stretch; gap: 0;
+  background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#chart-tabs .ctab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 16px; height: 36px; cursor: pointer;
+  font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted); border: none; background: none; font-family: var(--font);
+  border-bottom: 2px solid transparent; transition: all .15s;
+}
+#chart-tabs .ctab:hover { color: var(--text); }
+#chart-tabs .ctab.active { color: var(--amber); border-bottom-color: var(--amber); }
+#chart-tabs .ctab-count { color: var(--amber); }
+
+/* The two content panes */
+#chart-pane, #hist-pane {
+  flex: 1; overflow: hidden; display: none; flex-direction: column;
+}
+#chart-pane.active, #hist-pane.active { display: flex; }
+
 #chart-header {
   display: flex; align-items: center; gap: 12px; padding: 6px 12px;
   border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg2);
-  position: sticky; top: 0; z-index: 10;
 }
 #chart-container {
-  /* Taller than the viewport so the panel always scrolls to reveal history below */
-  min-height: calc(100vh - 80px); /* fill past stats bar — panel scrolls */
-  flex-shrink: 0;
-  position: relative;
+  flex: 1; position: relative; min-height: 0;
 }
-/* History section inside chart panel */
-#hist-section {
-  flex-shrink: 0; border-top: 1px solid var(--border);
-}
-#hist-section .panel-title {
-  position: sticky; top: 44px; z-index: 9; background: var(--bg2);
-}
+
+/* History pane */
+#hist-pane { overflow-y: auto; }
+#hist-pane::-webkit-scrollbar { width: 4px; }
+#hist-pane::-webkit-scrollbar-track { background: transparent; }
+#hist-pane::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
 .hist-table { width: 100%; border-collapse: collapse; }
 .hist-table th {
   padding: 5px 10px; text-align: left; font-size: 9px; font-weight: 600;
   letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--border);
-  text-transform: uppercase; background: var(--bg2);
+  text-transform: uppercase; background: var(--bg2); position: sticky; top: 0; z-index: 1;
 }
 .hist-table th:last-child { text-align: right; }
 .hist-table td {
@@ -265,7 +277,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
   #chart-panel.mob-active,
   #right-panel.mob-active { display: flex; }
 
-  #chart-container { min-height: 60vh; }
+  #chart-panel { min-height: 60vh; }
 
   /* Compact header on mobile */
   #header { gap: 8px; padding: 0 10px; flex-wrap: wrap; height: auto; min-height: 44px; }
@@ -329,28 +341,39 @@ canvas.sparkline { display: block; border-radius: 2px; }
       </div>
     </div>
 
-    <!-- Chart Panel (scrollable: chart + history below) -->
+    <!-- Chart Panel — tabbed: Chart | Trade History -->
     <div id="chart-panel">
-      <div id="chart-header">
-        <span id="chart-symbol">—</span>
-        <span id="chart-price">—</span>
-        <span id="chart-change"></span>
-        <div class="sym-search-wrap">
-          <input id="sym-search" type="text" placeholder="Search symbol…" autocomplete="off" spellcheck="false" />
-          <button id="sym-search-btn">GO</button>
-        </div>
-        <div class="tf-bar">
-          <button class="tf-btn" data-tf="1m">1m</button>
-          <button class="tf-btn" data-tf="5m">5m</button>
-          <button class="tf-btn active" data-tf="15m">15m</button>
-          <button class="tf-btn" data-tf="1h">1h</button>
-        </div>
-      </div>
-      <div id="chart-container"></div>
 
-      <!-- Trade History — below the chart, scrolls with the panel -->
-      <div id="hist-section">
-        <div class="panel-title">Trade History <span id="hist-count" style="color:var(--amber)"></span></div>
+      <!-- Tab bar -->
+      <div id="chart-tabs">
+        <button class="ctab active" data-ctab="chart-pane">Chart</button>
+        <button class="ctab" data-ctab="hist-pane">
+          Trade History <span class="ctab-count" id="hist-count"></span>
+        </button>
+      </div>
+
+      <!-- Chart pane -->
+      <div id="chart-pane" class="active">
+        <div id="chart-header">
+          <span id="chart-symbol">—</span>
+          <span id="chart-price">—</span>
+          <span id="chart-change"></span>
+          <div class="sym-search-wrap">
+            <input id="sym-search" type="text" placeholder="Search symbol…" autocomplete="off" spellcheck="false" />
+            <button id="sym-search-btn">GO</button>
+          </div>
+          <div class="tf-bar">
+            <button class="tf-btn" data-tf="1m">1m</button>
+            <button class="tf-btn" data-tf="5m">5m</button>
+            <button class="tf-btn active" data-tf="15m">15m</button>
+            <button class="tf-btn" data-tf="1h">1h</button>
+          </div>
+        </div>
+        <div id="chart-container"></div>
+      </div>
+
+      <!-- History pane -->
+      <div id="hist-pane">
         <table class="hist-table">
           <thead>
             <tr>
@@ -369,6 +392,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
           </tbody>
         </table>
       </div>
+
     </div>
 
     <!-- Right Panel — positions only -->
@@ -1276,6 +1300,34 @@ setInterval(() => {
   const d = new Date();
   document.getElementById('server-time').textContent = d.toUTCString().slice(-12, -4) + ' UTC';
 }, 1000);
+
+// ============================================================
+// CHART PANEL TABS (Chart / Trade History)
+// ============================================================
+(function() {
+  function switchCTab(tabId) {
+    document.querySelectorAll('#chart-tabs .ctab').forEach(t =>
+      t.classList.toggle('active', t.dataset.ctab === tabId)
+    );
+    document.querySelectorAll('#chart-pane, #hist-pane').forEach(p =>
+      p.classList.toggle('active', p.id === tabId)
+    );
+    // Re-fit chart when switching back to chart tab
+    if (tabId === 'chart-pane' && mainChart) {
+      requestAnimationFrame(() => {
+        const container = document.getElementById('chart-container');
+        mainChart.resize(container.offsetWidth, container.offsetHeight);
+      });
+    }
+  }
+
+  document.querySelectorAll('#chart-tabs .ctab').forEach(btn => {
+    btn.addEventListener('click', () => switchCTab(btn.dataset.ctab));
+  });
+
+  // Expose so renderHistory can switch to history tab on new trade
+  window.switchCTab = switchCTab;
+})();
 
 // ============================================================
 // CLOSE ALL BUTTON
