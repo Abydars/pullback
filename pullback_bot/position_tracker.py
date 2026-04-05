@@ -232,6 +232,139 @@ async def _paper_pnl_loop() -> None:
             logger.error("paper_pnl_loop error: %s", exc)
 
 
+# ── Startup reconciliation ────────────────────────────────────────────────────
+
+async def _reconcile_live() -> None:
+    """
+    Compare DB open trades against real Binance positions.
+    Any trade in DB with status=OPEN that has no matching Binance position
+    (positionAmt == 0) was closed while the server was down — mark it CLOSED.
+    """
+    logger.info("Reconciling live positions against Binance...")
+    try:
+        open_trades = await db.get_open_trades()
+        if not open_trades:
+            logger.info("No open trades in DB — nothing to reconcile")
+            return
+
+        binance_positions = await bc.get_positions()
+        # Build map: symbol -> positionAmt (non-zero means still open)
+        live_map: dict[str, float] = {}
+        for pos in binance_positions:
+            amt = float(pos.get("positionAmt", 0))
+            if amt != 0:
+                live_map[pos["symbol"]] = amt
+
+        closed_count = 0
+        for trade in open_trades:
+            symbol = trade["symbol"]
+            if symbol not in live_map:
+                # Position no longer exists on Binance — it was closed during downtime
+                # Best-effort: fetch current mark price as close price
+                try:
+                    close_price = await bc.get_mark_price(symbol)
+                except Exception:
+                    close_price = float(trade["entry_price"])
+
+                direction = trade["direction"]
+                entry = float(trade["entry_price"])
+                qty = float(trade["qty"])
+                if direction == "LONG":
+                    pnl = (close_price - entry) * qty
+                else:
+                    pnl = (entry - close_price) * qty
+                pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0
+
+                await db.update_trade_close(
+                    trade_id=trade["id"],
+                    close_price=close_price,
+                    close_time=int(time.time() * 1000),
+                    pnl_usdt=round(pnl, 4),
+                    pnl_pct=round(pnl_pct, 2),
+                    status="CLOSED",
+                )
+                logger.warning(
+                    "Reconciled ghost trade #%d %s %s — closed at %.4f pnl=%.4f",
+                    trade["id"], symbol, direction, close_price, pnl,
+                )
+                closed_count += 1
+
+        logger.info("Reconciliation complete: %d ghost trade(s) closed", closed_count)
+    except Exception as exc:
+        logger.error("Live reconciliation error: %s", exc)
+
+
+async def _reconcile_paper() -> None:
+    """
+    For paper mode: on restart, immediately evaluate any open trades against
+    the current mark price. If price has already blown through SL or TP,
+    close them at the configured level (conservative — no slippage modelling).
+    Runs once before the paper_pnl_loop starts.
+    """
+    logger.info("Reconciling paper positions after restart...")
+    try:
+        open_trades = await db.get_open_trades()
+        if not open_trades:
+            return
+
+        # Wait a few seconds for mark_prices to populate from WebSocket
+        await asyncio.sleep(5)
+        from scanner import mark_prices
+
+        for trade in open_trades:
+            symbol = trade["symbol"]
+            mark = mark_prices.get(symbol)
+            if not mark:
+                # No mark price yet — skip, pnl_loop will handle it
+                continue
+
+            direction = trade["direction"]
+            sl = float(trade["sl_price"])
+            tp2 = float(trade["tp2_price"])
+            tp1 = float(trade["tp1_price"])
+            entry = float(trade["entry_price"])
+            qty = float(trade["qty"])
+
+            hit_price: Optional[float] = None
+            close_reason: Optional[str] = None
+
+            if direction == "LONG":
+                if mark <= sl:
+                    hit_price, close_reason = sl, "SL"
+                elif mark >= tp2:
+                    hit_price, close_reason = tp2, "TP2"
+                elif mark >= tp1:
+                    hit_price, close_reason = tp1, "TP1"
+            else:
+                if mark >= sl:
+                    hit_price, close_reason = sl, "SL"
+                elif mark <= tp2:
+                    hit_price, close_reason = tp2, "TP2"
+                elif mark <= tp1:
+                    hit_price, close_reason = tp1, "TP1"
+
+            if hit_price and close_reason:
+                if direction == "LONG":
+                    pnl = (hit_price - entry) * qty
+                else:
+                    pnl = (entry - hit_price) * qty
+                pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0
+
+                await db.update_trade_close(
+                    trade_id=trade["id"],
+                    close_price=hit_price,
+                    close_time=int(time.time() * 1000),
+                    pnl_usdt=round(pnl, 4),
+                    pnl_pct=round(pnl_pct, 2),
+                )
+                logger.warning(
+                    "Paper restart reconcile: #%d %s %s hit %s at %.4f pnl=%.4f",
+                    trade["id"], symbol, direction, close_reason, hit_price, pnl,
+                )
+    except Exception as exc:
+        logger.error("Paper reconciliation error: %s", exc)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def start() -> None:
@@ -241,6 +374,8 @@ async def start() -> None:
             logger.warning("No API key — skipping live position tracker")
             return
         try:
+            # Reconcile before connecting user-data stream
+            await _reconcile_live()
             listen_key = await bc.create_listen_key()
             asyncio.create_task(_run_user_data_ws(listen_key), name="user_data_ws")
             asyncio.create_task(_keepalive_listen_key(listen_key), name="listenkey_keepalive")
@@ -248,5 +383,7 @@ async def start() -> None:
         except Exception as exc:
             logger.error("Failed to start live position tracker: %s", exc)
     else:
+        # Paper: start pnl loop, then reconcile in background after mark prices arrive
         asyncio.create_task(_paper_pnl_loop(), name="paper_pnl_loop")
+        asyncio.create_task(_reconcile_paper(), name="paper_reconcile")
         logger.info("Paper position tracker started")
