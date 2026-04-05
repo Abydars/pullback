@@ -28,6 +28,65 @@ import config
 import db
 import ws_broadcaster as wsb
 
+# ── Constants ─────────────────────────────────────────────────────────────────
+TAKER_FEE_RATE = 0.0004          # 0.04% — Binance futures market order
+MAINTENANCE_MARGIN_RATE = 0.004  # 0.4% — conservative estimate
+
+
+def _enrich_position(trade: dict, mark: float, raw_pnl: float) -> dict:
+    """
+    Compute derived position fields from stored trade data.
+    All monetary values in USDT.
+    """
+    entry   = float(trade["entry_price"])
+    qty     = float(trade["qty"])
+    lev     = int(trade.get("leverage") or config.LEVERAGE)
+    direction = trade["direction"]
+    entry_time = int(trade.get("entry_time") or 0)
+
+    notional     = entry * qty                              # position size in USDT
+    margin_usdt  = notional / lev                          # initial margin
+    fee_usdt     = notional * TAKER_FEE_RATE               # entry fee (taker)
+
+    # Estimated liquidation price (simplified — ignores funding, cross-margin buffer)
+    if direction == "LONG":
+        liq_price = entry * (1 - 1 / lev + MAINTENANCE_MARGIN_RATE)
+    else:
+        liq_price = entry * (1 + 1 / lev - MAINTENANCE_MARGIN_RATE)
+
+    roe_pct = (raw_pnl / margin_usdt * 100) if margin_usdt else 0.0
+
+    duration_s = int(time.time()) - entry_time // 1000   # entry_time is ms
+    duration_str = _fmt_duration(duration_s)
+
+    pnl_pct = (raw_pnl / notional * 100) if notional else 0.0
+
+    return {
+        **trade,
+        "mark_price":          round(mark, 8),
+        "unrealized_pnl":      round(raw_pnl, 4),
+        "unrealized_pnl_pct":  round(pnl_pct, 4),
+        "roe_pct":             round(roe_pct, 2),
+        "notional_usdt":       round(notional, 2),
+        "margin_usdt":         round(margin_usdt, 2),
+        "fee_usdt":            round(fee_usdt, 4),
+        "liq_price":           round(liq_price, 8),
+        "leverage":            lev,
+        "duration":            duration_str,
+    }
+
+
+def _fmt_duration(seconds: int) -> str:
+    if seconds < 0:
+        return "—"
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60}s"
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    return f"{h}h {m}m"
+
 logger = logging.getLogger(__name__)
 
 # ── Paper-mode unrealized PnL store ──────────────────────────────────────────
@@ -145,7 +204,7 @@ async def _paper_pnl_loop() -> None:
                 symbol = trade["symbol"]
                 mark = mark_prices.get(symbol)
                 if not mark:
-                    positions_payload.append({**trade, "mark_price": 0, "unrealized_pnl": 0})
+                    positions_payload.append(_enrich_position(trade, float(trade["entry_price"]), 0.0))
                     continue
 
                 direction = trade["direction"]
@@ -218,12 +277,7 @@ async def _paper_pnl_loop() -> None:
                         close_reason, symbol, direction, final_pnl,
                     )
                 else:
-                    positions_payload.append({
-                        **trade,
-                        "mark_price": mark,
-                        "unrealized_pnl": round(raw_pnl, 4),
-                        "unrealized_pnl_pct": round(pnl_pct, 2),
-                    })
+                    positions_payload.append(_enrich_position(trade, mark, raw_pnl))
 
             if positions_payload:
                 await wsb.broadcaster.broadcast("position_update", positions_payload)

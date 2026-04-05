@@ -102,7 +102,15 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     await wsb.broadcaster.connect(ws)
     try:
         # Send initial state snapshot
-        open_trades = await db.get_open_trades()
+        raw_open = await db.get_open_trades()
+        open_trades = [
+            position_tracker._enrich_position(
+                t,
+                scanner.mark_prices.get(t["symbol"], float(t["entry_price"])),
+                0.0,   # unrealized PnL will be updated by position_update within 2s
+            )
+            for t in raw_open
+        ]
         recent_trades = await db.get_recent_trades(50)
         stats = await db.get_today_stats()
         await wsb.broadcaster.send_to(ws, "init", {
@@ -155,27 +163,16 @@ async def api_trades() -> JSONResponse:
 @app.get("/api/positions")
 async def api_positions() -> JSONResponse:
     open_trades = await db.get_open_trades()
-    # Attach current mark price and unrealized PnL
     result = []
     for t in open_trades:
-        mark = scanner.mark_prices.get(t["symbol"], 0.0)
+        mark = scanner.mark_prices.get(t["symbol"], 0.0) or float(t["entry_price"])
         entry = float(t["entry_price"])
         qty = float(t["qty"])
-        if mark and entry and qty:
-            if t["direction"] == "LONG":
-                upnl = (mark - entry) * qty
-            else:
-                upnl = (entry - mark) * qty
-            upnl_pct = upnl / (entry * qty) * 100 if entry * qty else 0
+        if t["direction"] == "LONG":
+            upnl = (mark - entry) * qty
         else:
-            upnl = position_tracker.paper_unrealized.get(t["id"], 0.0)
-            upnl_pct = 0.0
-        result.append({
-            **t,
-            "mark_price": mark,
-            "unrealized_pnl": round(upnl, 4),
-            "unrealized_pnl_pct": round(upnl_pct, 2),
-        })
+            upnl = (entry - mark) * qty
+        result.append(position_tracker._enrich_position(t, mark, upnl))
     return JSONResponse(result)
 
 
