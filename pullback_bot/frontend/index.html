@@ -97,6 +97,21 @@ canvas.sparkline { display: block; border-radius: 2px; }
 #chart-change { font-size: 11px; }
 #chart-change.pos { color: var(--green); }
 #chart-change.neg { color: var(--red); }
+.sym-search-wrap { display: flex; align-items: center; gap: 4px; }
+#sym-search {
+  background: #1a1a1a; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text); font-family: var(--font); font-size: 11px;
+  padding: 3px 8px; width: 110px; outline: none; text-transform: uppercase;
+  transition: border-color .15s;
+}
+#sym-search::placeholder { color: var(--muted); text-transform: none; }
+#sym-search:focus { border-color: var(--amber); }
+#sym-search-btn {
+  padding: 3px 8px; border-radius: 3px; font-family: var(--font); font-size: 10px;
+  background: rgba(245,158,11,.15); border: 1px solid var(--amber); color: var(--amber);
+  cursor: pointer;
+}
+#sym-search-btn:hover { background: rgba(245,158,11,.3); }
 .tf-bar { margin-left: auto; display: flex; gap: 4px; }
 .tf-btn {
   padding: 3px 8px; border-radius: 3px; font-family: var(--font); font-size: 10px;
@@ -126,6 +141,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
 .pnl-neg { color: var(--red); }
 .pnl-blink { animation: blink .4s; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+.pos-table tbody tr:hover td { background: #1a1a1a; }
 
 /* Trade history */
 .hist-row {
@@ -186,6 +202,10 @@ canvas.sparkline { display: block; border-radius: 2px; }
         <span id="chart-symbol">—</span>
         <span id="chart-price">—</span>
         <span id="chart-change"></span>
+        <div class="sym-search-wrap">
+          <input id="sym-search" type="text" placeholder="Search symbol…" autocomplete="off" spellcheck="false" />
+          <button id="sym-search-btn">GO</button>
+        </div>
         <div class="tf-bar">
           <button class="tf-btn" data-tf="1m">1m</button>
           <button class="tf-btn" data-tf="5m">5m</button>
@@ -266,6 +286,9 @@ function initMainChart() {
     layout: {
       background: { color: '#0d0d0d' },
       textColor: '#888',
+    },
+    localization: {
+      priceFormatter: fmtPrice,
     },
     grid: {
       vertLines: { color: '#1a1a1a' },
@@ -737,13 +760,16 @@ function renderPositions() {
     const dirColor = t.direction === 'LONG' ? 'var(--green)' : 'var(--red)';
     const mark = t.mark_price ?? 0;
     const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.title = `Click to view ${t.symbol} chart`;
     tr.innerHTML = `
       <td>${t.symbol.replace('USDT','')}</td>
       <td style="color:${dirColor}">${t.direction === 'LONG' ? '▲' : '▼'}</td>
       <td>${fmtPrice(t.entry_price)}</td>
       <td>${mark ? fmtPrice(mark) : '—'}</td>
-      <td class="${pnlCls}${blink}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
+      <td class="${pnlCls}${blink}">${fmtUsdt(pnl)}</td>
     `;
+    tr.onclick = () => selectSymbol(t.symbol);
     tbody.appendChild(tr);
   });
 }
@@ -761,7 +787,7 @@ function renderHistory() {
     row.innerHTML = `
       <span class="hist-sym">${t.symbol.replace('USDT','')}</span>
       <span class="hist-dir ${t.direction === 'LONG' ? 'long' : 'short'}">${t.direction === 'LONG' ? 'LONG' : 'SHRT'}</span>
-      <span class="hist-pnl ${pnlCls}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</span>
+      <span class="hist-pnl ${pnlCls}">${fmtUsdt(pnl)}</span>
       <span class="hist-time">${fmtTime(t.close_time)}</span>
     `;
     list.appendChild(row);
@@ -773,7 +799,7 @@ function updateStats(stats) {
   document.getElementById('st-wr').textContent    = (stats.win_rate ?? 0) + '%';
   const pnl = stats.total_pnl_today ?? 0;
   const el = document.getElementById('st-pnl');
-  el.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+  el.textContent = fmtUsdt(pnl);
   el.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
 }
 
@@ -804,14 +830,50 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
 });
 
 // ============================================================
+// SYMBOL SEARCH
+// ============================================================
+function goToSymbol() {
+  const input = document.getElementById('sym-search');
+  let sym = input.value.trim().toUpperCase();
+  if (!sym) return;
+  // Auto-append USDT if not already there
+  if (!sym.endsWith('USDT')) sym += 'USDT';
+  input.value = '';
+  selectSymbol(sym);
+}
+
+document.getElementById('sym-search-btn').addEventListener('click', goToSymbol);
+document.getElementById('sym-search').addEventListener('keydown', e => {
+  if (e.key === 'Enter') goToSymbol();
+});
+
+// ============================================================
 // UTILS
 // ============================================================
 function fmtPrice(p) {
-  if (!p) return '—';
+  if (p === null || p === undefined || p === '') return '—';
   const n = Number(p);
-  if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (n >= 1)    return n.toFixed(4);
-  return n.toFixed(6);
+  if (!isFinite(n) || n === 0) return '0';
+  const abs = Math.abs(n);
+  // Large prices: BTC, ETH etc — 2dp
+  if (abs >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Mid-range: SOL, BNB etc — 4dp
+  if (abs >= 1)    return n.toFixed(4);
+  // Small: DOGE, XRP etc — 6dp
+  if (abs >= 0.01) return n.toFixed(6);
+  // Very small: SHIB, PEPE etc — show 4 significant figures
+  // e.g. 0.000012345 → exp=-5 → decimals=9
+  const exp = Math.floor(Math.log10(abs));
+  const decimals = Math.min(-exp + 4, 10);
+  return n.toFixed(decimals);
+}
+
+function fmtUsdt(v) {
+  // Format a USDT amount: enough precision to never show $0.00 for small values
+  const n = Number(v) || 0;
+  const abs = Math.abs(n);
+  const dp = abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6;
+  return (n >= 0 ? '+' : '') + '$' + n.toFixed(dp);
 }
 
 function fmtTime(ms) {
