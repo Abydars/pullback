@@ -99,7 +99,9 @@ canvas.sparkline { display: block; border-radius: 2px; }
   position: sticky; top: 0; z-index: 10;
 }
 #chart-container {
-  height: 60vh; flex-shrink: 0;
+  /* Fill the full viewport so history sits below the fold and the panel scrolls */
+  height: calc(100vh - 124px); /* 44px app-header + 44px chart-header + 36px stats-bar */
+  flex-shrink: 0;
 }
 /* History section inside chart panel */
 #hist-section {
