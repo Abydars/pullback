@@ -47,7 +47,7 @@ daily_bias_cache: dict[str, dict] = {}
 
 # last signal time per symbol (4-hour cooldown for Daily Sweep)
 _last_signal_ts: dict[str, float] = {}
-_SIGNAL_COOLDOWN_S = 14400  # 4 hours
+_SIGNAL_COOLDOWN_S = 5400   # 90 min — one signal per symbol per NY session
 
 # mark price registry (used by position_tracker for paper PnL)
 mark_prices: dict[str, float] = {}

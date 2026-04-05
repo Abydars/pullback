@@ -136,6 +136,20 @@ async def get_positions() -> list[dict]:
 
 # ── Account / Order methods (signed) ──────────────────────────────────────────
 
+async def set_margin_type(symbol: str, margin_type: str) -> dict:
+    """Set margin type to ISOLATED or CROSSED. Binance returns error 400 if already set — ignore it."""
+    try:
+        return await _post(
+            "/fapi/v1/marginType",
+            params={"symbol": symbol, "marginType": margin_type},
+        )
+    except Exception as exc:
+        # Code -4046: "No need to change margin type" — not a real error
+        if "-4046" in str(exc) or "No need to change" in str(exc):
+            return {}
+        raise
+
+
 async def set_leverage(symbol: str, leverage: int) -> dict:
     return await _post(
         "/fapi/v1/leverage",

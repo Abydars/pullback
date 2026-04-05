@@ -162,31 +162,37 @@ def _find_fvg(
     atr: float,
 ) -> Optional[dict]:
     """
-    Look for an FVG in the candles AFTER the sweep candle.
+    Look for an FVG near the sweep candle.
 
     Bullish FVG (for LONG):  candle[i+2].low > candle[i].high
     Bearish FVG (for SHORT): candle[i+2].high < candle[i].low
 
-    Checks the 3 candles immediately after the sweep.
+    Search window: 3 candles BEFORE the sweep through 3 candles AFTER it.
+    This handles both a pre-formed FVG that already existed when the sweep
+    triggered and a freshly formed FVG in the 1-2 candles after the sweep —
+    both are well within the 90-minute NY window.
+
     FVG size must be >= ATR * FVG_MIN_ATR_MULT.
 
     Returns {"fvg_high", "fvg_low", "fvg_mid"} or None.
     """
     min_size = atr * config.FVG_MIN_ATR_MULT
 
-    # Find index of sweep candle in the list
+    # Find index of sweep candle
     sweep_idx = None
     for i, c in enumerate(candles):
         if c.get("time") == sweep_time:
             sweep_idx = i
             break
 
-    if sweep_idx is None or sweep_idx + 2 >= len(candles):
-        # Sweep is too recent — not enough candles after it yet
+    if sweep_idx is None:
         return None
 
-    # Look at 3 consecutive candle triplets starting right after the sweep
-    for i in range(sweep_idx + 1, min(sweep_idx + 4, len(candles) - 2)):
+    # Extended search: 3 before sweep → 3 after sweep (triplet needs i+2 to exist)
+    search_start = max(0, sweep_idx - 3)
+    search_end   = min(sweep_idx + 4, len(candles) - 2)
+
+    for i in range(search_start, search_end):
         c0 = candles[i]
         c2 = candles[i + 2]
         if direction == "LONG":
@@ -263,12 +269,22 @@ def check_daily_sweep(
         logger.debug("%s: sweep found but no FVG yet", symbol)
         return None
 
-    # ── Entry trigger: price inside FVG zone ─────────────────────────────────
+    # ── Entry trigger: price inside OR approaching FVG zone ──────────────────
+    # "Approaching" adds a 0.1 ATR buffer on the entry side so the scanner
+    # can fire slightly before price fully enters the zone.
+    #   LONG (bullish FVG): price pulling back down → allow up to fvg_high + buf
+    #   SHORT (bearish FVG): price bouncing up    → allow down to fvg_low  - buf
     fvg_low  = fvg["fvg_low"]
     fvg_high = fvg["fvg_high"]
-    if not (fvg_low <= current_price <= fvg_high):
+    approach_buf = atr * 0.1
+    if direction == "LONG":
+        in_or_approaching = current_price <= fvg_high + approach_buf
+    else:
+        in_or_approaching = current_price >= fvg_low - approach_buf
+
+    if not in_or_approaching:
         logger.debug(
-            "%s: FVG [%.6f-%.6f] found but price %.6f not inside yet",
+            "%s: FVG [%.6f-%.6f] found but price %.6f not in zone/approaching",
             symbol, fvg_low, fvg_high, current_price,
         )
         return None
@@ -394,12 +410,32 @@ if __name__ == "__main__":
     assert sig_out is None, "Should not fire outside window"
     print("  Outside window → None: OK")
 
-    print("\n=== Test 6: price outside FVG → None ===")
+    print("\n=== Test 6: price well above FVG → None ===")
+    # ATR for candles_with_fvg ≈ 6.8, approach_buf ≈ 0.68, fvg_high+buf ≈ 109.68
+    # price=112 is well above that → should still return None
     sig_out2 = check_daily_sweep("BTCUSDT", candles_with_fvg,
                                   {"bias": "LONG", "pdh": 115.0, "pdl": 95.0},
-                                  current_price=112.0,  # above FVG
+                                  current_price=112.0,  # >2 ATR above FVG
                                   utc_now=utc_in_window)
-    assert sig_out2 is None, "Should not fire when price outside FVG"
-    print("  Price above FVG → None: OK")
+    assert sig_out2 is None, "Should not fire when price well above FVG"
+    print("  Price well above FVG → None: OK")
+
+    print("\n=== Test 7: FVG approach zone — price just above fvg_high ===")
+    # atr ≈ 6.8, approach_buf ≈ 0.68. price = 109.4 is above fvg_high(109)
+    # but within buf → should fire for LONG
+    atr_test = _atr(candles_with_fvg, 14)
+    approach_price = round(109.0 + atr_test * 0.05, 6)  # just above fvg_high, within buf
+    sig_approach = check_daily_sweep(
+        "BTCUSDT", candles_with_fvg,
+        {"bias": "LONG", "pdh": 115.0, "pdl": 95.0},
+        current_price=approach_price,
+        utc_now=utc_in_window,
+    )
+    assert sig_approach is not None, (
+        f"Should fire in approach zone (price={approach_price} fvg_high=109 buf={atr_test*0.1:.4f})"
+    )
+    assert sig_approach["entry_price"] == approach_price
+    assert sig_approach["fvg_high"] == 109.0
+    print(f"  Approach zone (price={approach_price} > fvg_high=109.0) → signal fired: OK")
 
     print("\nAll tests passed ✓")
