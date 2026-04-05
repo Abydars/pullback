@@ -86,12 +86,41 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
 /* ── Chart panel ──────────────────────────────────────────────────────────── */
 #chart-panel {
-  background: var(--bg); display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg); display: flex; flex-direction: column;
+  overflow-y: auto; overflow-x: hidden;
+  /* Custom scrollbar */
 }
+#chart-panel::-webkit-scrollbar { width: 4px; }
+#chart-panel::-webkit-scrollbar-track { background: transparent; }
+#chart-panel::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
 #chart-header {
   display: flex; align-items: center; gap: 12px; padding: 6px 12px;
   border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg2);
+  position: sticky; top: 0; z-index: 10;
 }
+#chart-container {
+  height: 60vh; flex-shrink: 0;
+}
+/* History section inside chart panel */
+#hist-section {
+  flex-shrink: 0; border-top: 1px solid var(--border);
+}
+#hist-section .panel-title {
+  position: sticky; top: 44px; z-index: 9; background: var(--bg2);
+}
+.hist-table { width: 100%; border-collapse: collapse; }
+.hist-table th {
+  padding: 5px 10px; text-align: left; font-size: 9px; font-weight: 600;
+  letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--border);
+  text-transform: uppercase; background: var(--bg2);
+}
+.hist-table th:last-child { text-align: right; }
+.hist-table td {
+  padding: 6px 10px; font-size: 11px; border-bottom: 1px solid #0e0e0e;
+}
+.hist-table td:last-child { text-align: right; }
+.hist-table tbody tr { transition: background .1s; }
+.hist-table tbody tr:hover td { background: #181818; cursor: pointer; }
 #chart-symbol { font-size: 14px; font-weight: 700; }
 #chart-price  { font-size: 14px; font-weight: 700; color: var(--green); }
 #chart-change { font-size: 11px; }
@@ -154,18 +183,9 @@ canvas.sparkline { display: block; border-radius: 2px; }
 .pnl-blink { animation: blink .4s; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-/* Trade history */
-.hist-row {
-  display: grid; grid-template-columns: 80px 36px 1fr 60px;
-  gap: 4px; padding: 5px 10px; border-bottom: 1px solid #0e0e0e;
-  animation: slideIn .25s ease;
-}
-.hist-sym { font-size: 10px; font-weight: 600; }
-.hist-dir { font-size: 9px; padding: 1px 4px; border-radius: 2px; text-align: center; }
+.hist-dir { font-size: 9px; padding: 1px 5px; border-radius: 2px; display: inline-block; }
 .hist-dir.long  { background: rgba(34,197,94,.15); color: var(--green); }
 .hist-dir.short { background: rgba(239,68,68,.15);  color: var(--red); }
-.hist-pnl { font-size: 10px; text-align: right; }
-.hist-time { font-size: 9px; color: var(--muted); text-align: right; }
 
 /* ── Stats bar ────────────────────────────────────────────────────────────── */
 #stats-bar {
@@ -207,7 +227,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
       </div>
     </div>
 
-    <!-- Chart Panel -->
+    <!-- Chart Panel (scrollable: chart + history below) -->
     <div id="chart-panel">
       <div id="chart-header">
         <span id="chart-symbol">—</span>
@@ -225,17 +245,35 @@ canvas.sparkline { display: block; border-radius: 2px; }
         </div>
       </div>
       <div id="chart-container"></div>
+
+      <!-- Trade History — below the chart, scrolls with the panel -->
+      <div id="hist-section">
+        <div class="panel-title">Trade History <span id="hist-count" style="color:var(--amber)"></span></div>
+        <table class="hist-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Dir</th>
+              <th>Entry</th>
+              <th>Close</th>
+              <th>Qty</th>
+              <th>Score</th>
+              <th>Duration</th>
+              <th>PnL</th>
+            </tr>
+          </thead>
+          <tbody id="hist-body">
+            <tr><td colspan="8" class="empty">No closed trades yet</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
-    <!-- Right Panel -->
+    <!-- Right Panel — positions only -->
     <div class="panel" id="right-panel" style="display:flex;flex-direction:column;">
       <div class="panel-title">Open Positions <span id="pos-count" style="color:var(--amber)"></span></div>
-      <div class="scroll" id="pos-list" style="flex-shrink:0;max-height:55%;overflow-y:auto;">
+      <div class="scroll" id="pos-list">
         <div class="empty" id="pos-empty">No open positions</div>
-      </div>
-      <div class="panel-title" style="margin-top:0;border-top:1px solid var(--border);">Trade History</div>
-      <div class="scroll" id="hist-list">
-        <div class="empty">No history yet</div>
       </div>
     </div>
 
@@ -830,23 +868,49 @@ function renderPositions() {
 }
 
 function renderHistory() {
-  const list = document.getElementById('hist-list');
+  const tbody  = document.getElementById('hist-body');
   const trades = state.histTrades.slice(0, 50);
-  if (!trades.length) { list.innerHTML = '<div class="empty">No history</div>'; return; }
-  list.innerHTML = '';
+
+  document.getElementById('hist-count').textContent = trades.length ? `(${trades.length})` : '';
+
+  if (!trades.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">No closed trades yet</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = '';
   trades.forEach(t => {
-    const pnl = t.pnl_usdt ?? 0;
+    const pnl    = t.pnl_usdt ?? 0;
     const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
-    const row = document.createElement('div');
-    row.className = 'hist-row';
-    row.innerHTML = `
-      <span class="hist-sym">${t.symbol.replace('USDT','')}</span>
-      <span class="hist-dir ${t.direction === 'LONG' ? 'long' : 'short'}">${t.direction === 'LONG' ? 'LONG' : 'SHRT'}</span>
-      <span class="hist-pnl ${pnlCls}">${fmtUsdt(pnl)}</span>
-      <span class="hist-time">${fmtTime(t.close_time)}</span>
+    const isLong = t.direction === 'LONG';
+
+    // Duration from entry to close
+    const durS = t.close_time && t.entry_time
+      ? Math.round((t.close_time - t.entry_time) / 1000)
+      : null;
+    const durStr = durS !== null ? _fmtDurS(durS) : '—';
+
+    const tr = document.createElement('tr');
+    tr.style.animation = 'slideIn .2s ease';
+    tr.innerHTML = `
+      <td style="font-weight:600">${t.symbol.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span></td>
+      <td><span class="hist-dir ${isLong ? 'long' : 'short'}">${isLong ? 'LONG' : 'SHORT'}</span></td>
+      <td style="color:var(--muted)">${fmtPrice(t.entry_price)}</td>
+      <td>${fmtPrice(t.close_price)}</td>
+      <td style="color:var(--muted)">${t.qty}</td>
+      <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
+      <td style="color:var(--muted)">${durStr}</td>
+      <td class="${pnlCls}" style="font-weight:600">${fmtUsdt(pnl)}</td>
     `;
-    list.appendChild(row);
+    tr.onclick = () => selectSymbol(t.symbol);
+    tbody.appendChild(tr);
   });
+}
+
+function _fmtDurS(s) {
+  if (s < 60)   return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+  return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
 }
 
 function updateStats(stats) {
