@@ -63,6 +63,7 @@ SIGNAL_SCORE_THRESHOLD: int = _int("SIGNAL_SCORE_THRESHOLD", 70)
 RISK_PER_TRADE_USDT: float = _float("RISK_PER_TRADE_USDT", 10.0)
 MAX_OPEN_TRADES: int = _int("MAX_OPEN_TRADES", 5)
 LEVERAGE: int = _int("LEVERAGE", 10)
+TRAIL_STEP_RATIO: float = _float("TRAIL_STEP_RATIO", 0.5)
 
 # ── Server ────────────────────────────────────────────────────────────────────
 PORT: int = _int("PORT", 8080)
@@ -72,3 +73,80 @@ DB_PATH: str = _get("DB_PATH", str(Path(__file__).parent / "trades.db"))
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_LEVEL: str = _get("LOG_LEVEL", "INFO")
+
+
+# ── Runtime update helpers ────────────────────────────────────────────────────
+
+# Keys that can be changed at runtime via /api/config
+EDITABLE_KEYS: dict[str, type] = {
+    "MIN_VOLUME_24H":           float,
+    "MIN_PRICE_CHANGE_PCT":     float,
+    "SCANNER_INTERVAL_SECONDS": int,
+    "WATCHLIST_REFRESH_MINUTES":int,
+    "SIGNAL_SCORE_THRESHOLD":   int,
+    "RISK_PER_TRADE_USDT":      float,
+    "MAX_OPEN_TRADES":          int,
+    "LEVERAGE":                 int,
+    "TRAIL_STEP_RATIO":         float,
+    "LOG_LEVEL":                str,
+    "MODE":                     str,
+}
+
+# Keys that require a bot restart to take full effect
+RESTART_REQUIRED_KEYS = {"MODE", "PORT"}
+
+
+def get_all() -> dict:
+    """Return all editable config values as a plain dict."""
+    return {k: globals()[k] for k in EDITABLE_KEYS}
+
+
+def update(key: str, raw_value: str) -> None:
+    """
+    Validate, cast, and apply a config change in-memory + persist to .env.
+    Raises ValueError on bad key or type.
+    """
+    if key not in EDITABLE_KEYS:
+        raise ValueError(f"Unknown or non-editable config key: {key!r}")
+
+    cast = EDITABLE_KEYS[key]
+    try:
+        value = cast(raw_value)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Invalid value for {key}: {raw_value!r} ({exc})")
+
+    # Extra validation
+    if key == "MODE" and value not in ("live", "paper"):
+        raise ValueError("MODE must be 'live' or 'paper'")
+    if key == "SIGNAL_SCORE_THRESHOLD" and not (0 <= value <= 100):
+        raise ValueError("SIGNAL_SCORE_THRESHOLD must be 0–100")
+    if key == "LEVERAGE" and not (1 <= value <= 125):
+        raise ValueError("LEVERAGE must be 1–125")
+    if key == "TRAIL_STEP_RATIO" and not (0.1 <= value <= 3.0):
+        raise ValueError("TRAIL_STEP_RATIO must be 0.1–3.0")
+
+    # Apply in-memory
+    globals()[key] = value
+
+    # Persist to .env
+    _write_env(key, str(value))
+
+
+def _write_env(key: str, value: str) -> None:
+    """Upsert KEY=value in the .env file."""
+    lines: list[str] = []
+    found = False
+    if _env_path.exists():
+        for line in _env_path.read_text().splitlines(keepends=True):
+            if line.strip().startswith(f"{key}="):
+                lines.append(f"{key}={value}\n")
+                found = True
+            else:
+                lines.append(line)
+    if not found:
+        # Append a trailing newline if needed before adding
+        if lines and not lines[-1].endswith("\n"):
+            lines.append("\n")
+        lines.append(f"{key}={value}\n")
+    _env_path.write_text("".join(lines))
+

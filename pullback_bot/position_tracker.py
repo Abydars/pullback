@@ -95,8 +95,7 @@ paper_unrealized: dict[int, float] = {}
 
 # ── Trailing take-profit state (paper mode) ───────────────────────────────────
 # Trailing activates when mark crosses tp1_price (the trail arm).
-# The trailing stop sits TRAIL_STEP_RATIO × initial_risk behind the extreme.
-TRAIL_STEP_RATIO = 0.5  # e.g. 0.5 = trail stop is half the original risk behind peak
+# TRAIL_STEP_RATIO is read from config each tick so UI changes apply immediately.
 
 _trail_active: dict[int, bool] = {}    # trade_id -> trailing is armed
 _trail_extreme: dict[int, float] = {}  # trade_id -> best price reached (high for LONG, low for SHORT)
@@ -221,7 +220,7 @@ async def _paper_pnl_loop() -> None:
                 sl    = float(trade["sl_price"])
                 trail_arm  = float(trade["tp1_price"])   # activation level (1:1 RR)
                 risk_dist  = abs(entry - sl)
-                trail_dist = risk_dist * TRAIL_STEP_RATIO
+                trail_dist = risk_dist * config.TRAIL_STEP_RATIO
 
                 tid = trade["id"]
 

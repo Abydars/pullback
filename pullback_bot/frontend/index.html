@@ -50,6 +50,79 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 #server-time { margin-left: auto; color: var(--muted); font-size: 11px; }
 .stat-pill { color: var(--muted); font-size: 11px; }
 .stat-pill span { color: var(--text); }
+#btn-config {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 3px; font-family: var(--font); font-size: 10px;
+  font-weight: 700; letter-spacing: .06em; cursor: pointer; border: 1px solid var(--border);
+  background: transparent; color: var(--muted); transition: all .15s; white-space: nowrap;
+}
+#btn-config:hover { border-color: var(--amber); color: var(--amber); }
+
+/* ── Config Modal ─────────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 900;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-overlay.hidden { display: none; }
+.modal {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+  width: 520px; max-width: 96vw; max-height: 88vh;
+  display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,.6);
+}
+.modal-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.modal-hdr span { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.modal-hdr button {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 16px; font-family: var(--font); line-height: 1; padding: 0 2px;
+}
+.modal-hdr button:hover { color: var(--text); }
+.modal-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+.modal-body::-webkit-scrollbar { width: 4px; }
+.modal-body::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+.cfg-section { margin-bottom: 22px; }
+.cfg-section:last-child { margin-bottom: 0; }
+.cfg-section-title {
+  font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--amber); margin-bottom: 10px; padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+}
+.cfg-row {
+  display: grid; grid-template-columns: 1fr 140px; align-items: start;
+  gap: 6px 12px; margin-bottom: 10px;
+}
+.cfg-label { font-size: 11px; color: var(--text); padding-top: 5px; }
+.cfg-hint  { font-size: 9px; color: var(--muted); margin-top: 2px; }
+.cfg-input, .cfg-select {
+  background: #1a1a1a; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text); font-family: var(--font); font-size: 11px;
+  padding: 4px 8px; outline: none; width: 100%; transition: border-color .15s;
+}
+.cfg-input:focus, .cfg-select:focus { border-color: var(--amber); }
+.cfg-input.err { border-color: var(--red); }
+.cfg-row-err { font-size: 9px; color: var(--red); grid-column: 2; margin-top: -6px; }
+.modal-ftr {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  border-top: 1px solid var(--border); flex-shrink: 0;
+}
+#cfg-save {
+  padding: 5px 18px; border-radius: 3px; font-family: var(--font); font-size: 10px;
+  font-weight: 700; letter-spacing: .06em; cursor: pointer; text-transform: uppercase;
+  background: rgba(245,158,11,.15); border: 1px solid var(--amber); color: var(--amber);
+  transition: all .15s;
+}
+#cfg-save:hover { background: rgba(245,158,11,.3); }
+#cfg-save:disabled { opacity: .4; cursor: not-allowed; }
+#cfg-msg { font-size: 10px; flex: 1; }
+#cfg-msg.ok  { color: var(--green); }
+#cfg-msg.err { color: var(--red); }
+.cfg-restart-note {
+  font-size: 9px; color: var(--amber);
+  background: rgba(245,158,11,.07); border: 1px solid rgba(245,158,11,.2);
+  border-radius: 3px; padding: 4px 8px; margin-bottom: 10px;
+}
 
 /* ── Panel common ─────────────────────────────────────────────────────────── */
 .panel { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
@@ -321,6 +394,24 @@ canvas.sparkline { display: block; border-radius: 2px; }
     <span class="stat-pill">Watchlist: <span id="h-watch">0</span></span>
     <span class="stat-pill">Clients: <span id="h-clients">0</span></span>
     <span id="server-time">--:--:--</span>
+    <button id="btn-config" title="Bot configuration">⚙ Config</button>
+  </div>
+
+  <!-- ── Config Modal ── -->
+  <div id="config-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-hdr">
+        <span>Bot Configuration</span>
+        <button id="cfg-close">✕</button>
+      </div>
+      <div class="modal-body" id="cfg-body">
+        <!-- rendered by JS -->
+      </div>
+      <div class="modal-ftr">
+        <button id="cfg-save">Save</button>
+        <span id="cfg-msg"></span>
+      </div>
+    </div>
   </div>
 
   <!-- ── Mobile Tabs ── -->
@@ -1299,6 +1390,178 @@ setInterval(() => {
   const d = new Date();
   document.getElementById('server-time').textContent = d.toUTCString().slice(-12, -4) + ' UTC';
 }, 1000);
+
+// ============================================================
+// CONFIG MODAL
+// ============================================================
+const CFG_FIELDS = [
+  {
+    section: 'Scanner',
+    fields: [
+      { key: 'MIN_VOLUME_24H',            label: 'Min 24h Volume (USDT)', type: 'number', hint: 'Minimum quoteVolume to include a symbol' },
+      { key: 'MIN_PRICE_CHANGE_PCT',       label: 'Min 24h Price Change %', type: 'number', step: '0.1', hint: 'Filters out sideways / flat coins' },
+      { key: 'SCANNER_INTERVAL_SECONDS',   label: 'Scan Interval (sec)', type: 'number', hint: 'How often the signal engine runs' },
+      { key: 'WATCHLIST_REFRESH_MINUTES',  label: 'Watchlist Refresh (min)', type: 'number', hint: 'How often the symbol list is rebuilt' },
+    ],
+  },
+  {
+    section: 'Signal',
+    fields: [
+      { key: 'SIGNAL_SCORE_THRESHOLD', label: 'Min Signal Score (0–100)', type: 'number', hint: 'Lower = more entries, higher = stricter' },
+    ],
+  },
+  {
+    section: 'Risk / Order',
+    fields: [
+      { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)', type: 'number', step: '1',   hint: 'Fixed dollar amount risked on each entry' },
+      { key: 'MAX_OPEN_TRADES',     label: 'Max Open Positions',    type: 'number',               hint: 'Hard cap on concurrent open trades' },
+      { key: 'LEVERAGE',            label: 'Leverage',              type: 'number', hint: '1–125×' },
+      { key: 'TRAIL_STEP_RATIO',    label: 'Trail Step Ratio',      type: 'number', step: '0.05', hint: 'Trailing stop = ratio × initial risk (0.5 = half)' },
+    ],
+  },
+  {
+    section: 'System',
+    fields: [
+      { key: 'LOG_LEVEL', label: 'Log Level', type: 'select', options: ['DEBUG', 'INFO', 'WARNING', 'ERROR'], hint: '' },
+      { key: 'MODE',      label: 'Mode',      type: 'select', options: ['paper', 'live'], hint: '⚠ Requires restart', restart: true },
+    ],
+  },
+];
+
+let _cfgCurrent = {};   // last fetched values
+let _cfgRestartKeys = [];
+
+async function openConfigModal() {
+  document.getElementById('config-modal').classList.remove('hidden');
+  document.getElementById('cfg-msg').textContent = '';
+  document.getElementById('cfg-msg').className = '';
+  await loadConfig();
+}
+
+function closeConfigModal() {
+  document.getElementById('config-modal').classList.add('hidden');
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/config');
+    _cfgCurrent = await r.json();
+    _cfgRestartKeys = _cfgCurrent._restart_required_keys || [];
+    renderConfigForm(_cfgCurrent);
+  } catch (e) {
+    document.getElementById('cfg-body').innerHTML =
+      `<div class="empty">Failed to load config: ${e.message}</div>`;
+  }
+}
+
+function renderConfigForm(values) {
+  const body = document.getElementById('cfg-body');
+  let html = '';
+
+  for (const { section, fields } of CFG_FIELDS) {
+    html += `<div class="cfg-section"><div class="cfg-section-title">${section}</div>`;
+    for (const f of fields) {
+      const val = values[f.key] ?? '';
+      const restartNote = f.restart ? ' <span style="color:var(--amber)">(restart required)</span>' : '';
+      let input;
+      if (f.type === 'select') {
+        const opts = f.options.map(o =>
+          `<option value="${o}" ${o == val ? 'selected' : ''}>${o}</option>`
+        ).join('');
+        input = `<select class="cfg-select" data-key="${f.key}">${opts}</select>`;
+      } else {
+        input = `<input class="cfg-input" type="number" data-key="${f.key}"
+          value="${val}"
+          ${f.step  ? `step="${f.step}"` : ''}
+          ${f.min   !== undefined ? `min="${f.min}"` : ''}
+          ${f.max   !== undefined ? `max="${f.max}"` : ''} />`;
+      }
+      html += `
+        <div class="cfg-row">
+          <div><div class="cfg-label">${f.label}${restartNote}</div>
+               ${f.hint ? `<div class="cfg-hint">${f.hint}</div>` : ''}</div>
+          <div>${input}<div class="cfg-row-err" id="err-${f.key}"></div></div>
+        </div>`;
+    }
+    html += '</div>';
+  }
+
+  body.innerHTML = html;
+}
+
+async function saveConfig() {
+  const btn = document.getElementById('cfg-save');
+  const msg = document.getElementById('cfg-msg');
+  btn.disabled = true;
+  msg.textContent = 'Saving…';
+  msg.className = '';
+
+  // Collect changed values
+  const payload = {};
+  document.querySelectorAll('[data-key]').forEach(el => {
+    const key = el.dataset.key;
+    const val = el.value;
+    if (String(val) !== String(_cfgCurrent[key] ?? '')) {
+      payload[key] = val;
+    }
+    document.getElementById('err-' + key).textContent = '';
+    el.classList.remove('err');
+  });
+
+  if (!Object.keys(payload).length) {
+    msg.textContent = 'No changes.';
+    msg.className = '';
+    btn.disabled = false;
+    return;
+  }
+
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+
+    // Show per-field errors
+    for (const [key, errText] of Object.entries(data.errors || {})) {
+      const errEl = document.getElementById('err-' + key);
+      if (errEl) errEl.textContent = errText;
+      const inputEl = document.querySelector(`[data-key="${key}"]`);
+      if (inputEl) inputEl.classList.add('err');
+    }
+
+    if (data.ok) {
+      _cfgCurrent = { ..._cfgCurrent, ...payload };
+      let note = `Saved ${data.applied.length} setting(s).`;
+      if (data.needs_restart?.length) {
+        note += ` Restart required for: ${data.needs_restart.join(', ')}.`;
+      }
+      msg.textContent = note;
+      msg.className = 'ok';
+      // Update mode badge live
+      if (payload.MODE) updateModeBadge(payload.MODE);
+    } else {
+      msg.textContent = 'Some values failed — see highlighted fields.';
+      msg.className = 'err';
+    }
+  } catch (e) {
+    msg.textContent = 'Save failed: ' + e.message;
+    msg.className = 'err';
+  }
+
+  btn.disabled = false;
+}
+
+document.getElementById('btn-config').addEventListener('click', openConfigModal);
+document.getElementById('cfg-close').addEventListener('click', closeConfigModal);
+document.getElementById('cfg-save').addEventListener('click', saveConfig);
+document.getElementById('config-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeConfigModal(); // click outside closes
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeConfigModal();
+});
 
 // ============================================================
 // CHART PANEL TABS (Chart / Trade History)

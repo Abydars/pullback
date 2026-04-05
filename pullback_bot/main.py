@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -308,6 +308,39 @@ async def close_all_positions() -> JSONResponse:
 @app.get("/api/watchlist")
 async def api_watchlist() -> JSONResponse:
     return JSONResponse({"symbols": scanner.active_watchlist, "count": len(scanner.active_watchlist)})
+
+
+@app.get("/api/config")
+async def api_config_get() -> JSONResponse:
+    """Return all editable config values."""
+    data = config.get_all()
+    data["_restart_required_keys"] = list(config.RESTART_REQUIRED_KEYS)
+    return JSONResponse(data)
+
+
+@app.post("/api/config")
+async def api_config_post(request: Request) -> JSONResponse:
+    """Apply one or more config changes. Body: {key: value, ...}"""
+    body = await request.json()
+    errors: dict[str, str] = {}
+    applied: list[str] = []
+    needs_restart: list[str] = []
+
+    for key, raw in body.items():
+        try:
+            config.update(key, str(raw))
+            applied.append(key)
+            if key in config.RESTART_REQUIRED_KEYS:
+                needs_restart.append(key)
+        except ValueError as exc:
+            errors[key] = str(exc)
+
+    return JSONResponse({
+        "applied": applied,
+        "needs_restart": needs_restart,
+        "errors": errors,
+        "ok": len(errors) == 0,
+    })
 
 
 @app.get("/api/status")
