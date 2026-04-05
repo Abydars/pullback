@@ -58,6 +58,35 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 #btn-config:hover { border-color: var(--amber); color: var(--amber); }
 
+/* ── Toast notifications ──────────────────────────────────────────────────── */
+#toast-stack {
+  position: fixed; top: 52px; right: 12px; z-index: 800;
+  display: flex; flex-direction: column; gap: 6px;
+  pointer-events: none; width: 300px;
+}
+.toast {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 4px;
+  padding: 8px 10px 8px 0; display: flex; align-items: stretch; gap: 0;
+  pointer-events: all; cursor: pointer; box-shadow: 0 4px 20px rgba(0,0,0,.5);
+  animation: toastIn .18s ease; transition: opacity .25s, transform .25s;
+}
+.toast.out { opacity: 0; transform: translateX(10px); }
+@keyframes toastIn { from { opacity:0; transform:translateX(10px); } to { opacity:1; transform:none; } }
+.toast-bar  { width: 3px; border-radius: 2px 0 0 2px; flex-shrink: 0; margin-right: 10px; }
+.toast-icon { font-size: 14px; margin-right: 8px; flex-shrink: 0; line-height: 1.4; }
+.toast-body { flex: 1; min-width: 0; }
+.toast-title { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toast-sub   { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.toast-close { color: var(--muted); font-size: 12px; align-self: flex-start; margin-left: 6px; flex-shrink: 0; line-height: 1.6; }
+.toast-close:hover { color: var(--text); }
+.t-green  .toast-bar { background: var(--green); }
+.t-red    .toast-bar { background: var(--red); }
+.t-amber  .toast-bar { background: var(--amber); }
+.t-indigo .toast-bar { background: var(--indigo); }
+@media (max-width: 900px) {
+  #toast-stack { top: auto; bottom: 52px; right: 8px; left: 8px; width: auto; }
+}
+
 /* ── Config Modal ─────────────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 900;
@@ -508,6 +537,9 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
   </div>
 
+  <!-- ── Toast Stack ── -->
+  <div id="toast-stack"></div>
+
   <!-- ── Stats Bar ── -->
   <div id="stats-bar">
     <span>Trades today: <span class="s" id="st-total">0</span></span>
@@ -770,6 +802,39 @@ function computeEMA(closes, period) {
 }
 
 // ============================================================
+// TOAST NOTIFICATIONS
+// ============================================================
+function toast(type, icon, title, sub, duration = 5000) {
+  // type: 't-green' | 't-red' | 't-amber' | 't-indigo'
+  const stack = document.getElementById('toast-stack');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = `
+    <div class="toast-bar"></div>
+    <div class="toast-icon">${icon}</div>
+    <div class="toast-body">
+      <div class="toast-title">${title}</div>
+      ${sub ? `<div class="toast-sub">${sub}</div>` : ''}
+    </div>
+    <div class="toast-close">✕</div>
+  `;
+  el.querySelector('.toast-close').onclick = (e) => { e.stopPropagation(); _dismissToast(el); };
+  el.onclick = () => _dismissToast(el);
+  stack.appendChild(el);
+  // Cap stack at 6
+  const all = stack.querySelectorAll('.toast');
+  if (all.length > 6) _dismissToast(all[0], 0);
+  setTimeout(() => _dismissToast(el), duration);
+}
+
+function _dismissToast(el, delay = 250) {
+  if (!el || el._dismissing) return;
+  el._dismissing = true;
+  el.classList.add('out');
+  setTimeout(() => el.remove(), delay);
+}
+
+// ============================================================
 // SPARKLINES (canvas-based — lightweight, no sizing issues)
 // ============================================================
 function updateSparkline(symbol, closes) {
@@ -915,23 +980,48 @@ function onScannerAlert(sig) {
       text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.score}`,
     }]);
   }
+
+  // Toast — only show if score is worth noting
+  const icon = sig.direction === 'LONG' ? '▲' : '▼';
+  const sym  = sig.symbol.replace('USDT', '');
+  const reasons = sig.reasons ? sig.reasons.join(' · ') : '';
+  toast('t-amber', icon,
+    `Signal: ${sym} ${sig.direction}  (${sig.score}/100)`,
+    reasons, 6000);
 }
 
 function onPositionUpdate(positions) {
   const prevIds = new Set(Object.keys(state.openTrades).map(Number));
+
+  // Detect trail arm events BEFORE overwriting state
+  positions.forEach(t => {
+    const prev = state.openTrades[t.id];
+    if (prev && !prev.trail_active && t.trail_active) {
+      const sym = t.symbol.replace('USDT', '');
+      const dir = t.direction === 'LONG' ? '▲ LONG' : '▼ SHORT';
+      toast('t-amber', '🎯',
+        `${sym} ${dir} — trailing armed`,
+        `Peak: ${fmtPrice(t.trail_extreme)}  ·  Stop: ${fmtPrice(t.trail_stop)}`);
+    }
+  });
+
   state.openTrades = {};
   positions.forEach(t => { state.openTrades[t.id] = t; });
   renderPositions();
 
-  // Auto-switch chart to newly opened trade's symbol
+  // New position toasts + auto-switch chart
   positions.forEach(t => {
     if (!prevIds.has(t.id)) {
-      // This is a new trade — switch chart to its symbol
+      const sym = t.symbol.replace('USDT', '');
+      const dir = t.direction === 'LONG' ? '▲ LONG' : '▼ SHORT';
+      toast('t-green', '⚡',
+        `${sym} ${dir} opened`,
+        `Entry: ${fmtPrice(t.entry_price)}  ·  SL: ${fmtPrice(t.sl_price)}  ·  Arm: ${fmtPrice(t.trail_arm ?? t.tp1_price)}`);
       selectSymbol(t.symbol);
     }
   });
 
-  // Redraw trade lines for selected symbol (handles both new and existing)
+  // Redraw trade lines for selected symbol
   if (state.selectedSymbol) drawTradeLines(state.selectedSymbol);
 }
 
@@ -941,8 +1031,26 @@ function onTradeClosed(trade) {
   if (state.histTrades.length > 50) state.histTrades.pop();
   renderPositions();
   renderHistory();
-  // Remove trade lines if this was the selected symbol
   if (state.selectedSymbol === trade.symbol) clearTradeLines();
+
+  // Toast
+  const pnl    = trade.pnl_usdt ?? 0;
+  const sym    = trade.symbol.replace('USDT', '');
+  const dir    = trade.direction === 'LONG' ? '▲ LONG' : '▼ SHORT';
+  const pnlStr = fmtUsdt(pnl);
+  const reason = (trade.close_reason || 'CLOSED').toUpperCase();
+
+  const cfg = {
+    SL:     { type: 't-red',    icon: '🛑', label: 'SL hit' },
+    TRAIL:  { type: pnl >= 0 ? 't-green' : 't-red', icon: pnl >= 0 ? '✅' : '📉', label: 'trail stop hit' },
+    TP1:    { type: 't-green',  icon: '✅', label: 'TP1 hit' },
+    TP2:    { type: 't-green',  icon: '🏆', label: 'TP2 hit' },
+    MANUAL: { type: 't-indigo', icon: '✋', label: 'closed manually' },
+  }[reason] ?? { type: pnl >= 0 ? 't-green' : 't-red', icon: '📋', label: reason };
+
+  toast(cfg.type, cfg.icon,
+    `${sym} ${dir} — ${cfg.label}`,
+    `PnL: ${pnlStr}`, 7000);
 }
 
 function onKlineUpdate(data) {
