@@ -125,23 +125,34 @@ canvas.sparkline { display: block; border-radius: 2px; }
 /* ── Right panel ──────────────────────────────────────────────────────────── */
 #right-panel { background: var(--bg2); border-right: none; }
 
-/* Open Positions table */
-.pos-table { width: 100%; border-collapse: collapse; }
-.pos-table th {
-  padding: 5px 8px; text-align: right; font-size: 9px; font-weight: 600;
-  letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--border);
-  text-transform: uppercase;
+/* Open Position cards */
+.pos-card {
+  border-bottom: 1px solid var(--border); padding: 10px 12px;
+  cursor: pointer; transition: background .15s; animation: slideIn .25s ease;
 }
-.pos-table th:first-child { text-align: left; }
-.pos-table td {
-  padding: 5px 8px; text-align: right; font-size: 10px; border-bottom: 1px solid #0e0e0e;
+.pos-card:hover { background: #181818; }
+.pos-card-header {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
 }
-.pos-table td:first-child { text-align: left; }
+.pos-card-sym { font-size: 12px; font-weight: 700; }
+.pos-card-dir {
+  font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 2px; letter-spacing: .08em;
+}
+.pos-dir-long  { background: rgba(34,197,94,.15);  color: var(--green); }
+.pos-dir-short { background: rgba(239,68,68,.15);   color: var(--red); }
+.pos-card-pnl  { font-size: 13px; font-weight: 700; text-align: right; }
+.pos-card-roe  { font-size: 10px; text-align: right; }
+.pos-card-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px;
+}
+.pos-kv { display: flex; flex-direction: column; }
+.pos-kv .k { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.pos-kv .v { font-size: 10px; font-weight: 600; }
+.pos-liq { color: var(--amber); }
 .pnl-pos { color: var(--green); }
 .pnl-neg { color: var(--red); }
 .pnl-blink { animation: blink .4s; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
-.pos-table tbody tr:hover td { background: #1a1a1a; }
 
 /* Trade history */
 .hist-row {
@@ -218,22 +229,9 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
     <!-- Right Panel -->
     <div class="panel" id="right-panel" style="display:flex;flex-direction:column;">
-      <div class="panel-title">Open Positions</div>
-      <div style="flex-shrink:0;overflow-x:auto;">
-        <table class="pos-table" id="pos-table">
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              <th>Dir</th>
-              <th>Entry</th>
-              <th>Mark</th>
-              <th>PnL</th>
-            </tr>
-          </thead>
-          <tbody id="pos-body">
-            <tr><td colspan="5" class="empty">No open positions</td></tr>
-          </tbody>
-        </table>
+      <div class="panel-title">Open Positions <span id="pos-count" style="color:var(--amber)"></span></div>
+      <div class="scroll" id="pos-list" style="flex-shrink:0;max-height:55%;overflow-y:auto;">
+        <div class="empty" id="pos-empty">No open positions</div>
       </div>
       <div class="panel-title" style="margin-top:0;border-top:1px solid var(--border);">Trade History</div>
       <div class="scroll" id="hist-list">
@@ -279,6 +277,7 @@ let volSeries = null;
 let ema50Series = null;
 let ema200Series = null;
 let slLine = null, tp1Line = null, tp2Line = null, entryLine = null;
+let _loadChartId = 0;  // increments on each loadChart() call to cancel stale fetches
 
 function initMainChart() {
   const container = document.getElementById('chart-container');
@@ -352,24 +351,41 @@ function initMainChart() {
 
 async function loadChart(symbol, interval) {
   if (!mainChart) initMainChart();
+  // Stamp this load so stale fetches can be discarded
+  const loadId = ++_loadChartId;
+
   state.selectedSymbol = symbol;
   state.selectedInterval = interval;
 
   document.getElementById('chart-symbol').textContent = symbol;
   document.getElementById('chart-price').textContent = '—';
+  document.getElementById('chart-change').textContent = '';
 
   // Update TF button active state
   document.querySelectorAll('.tf-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.tf === interval);
   });
 
-  // Remove old trade lines
+  // Clear old data and trade lines immediately — don't wait for the fetch
   clearTradeLines();
+  candleSeries.setData([]);
+  volSeries.setData([]);
+  ema50Series.setData([]);
+  ema200Series.setData([]);
+
+  // Force price scale to re-autofit for the new symbol's price range
+  mainChart.priceScale('right').applyOptions({ autoScale: true });
+
+  // Subscribe to live kline_update before the fetch so no ticks are missed
+  sendWS({ type: 'subscribe_chart', symbol, interval });
 
   // Fetch historical klines
   try {
     const resp = await fetch(`/api/klines?symbol=${symbol}&interval=${interval}&limit=200`);
     const candles = await resp.json();
+
+    // Discard if user switched symbol again while fetch was in flight
+    if (loadId !== _loadChartId) return;
     if (!Array.isArray(candles) || candles.length === 0) return;
 
     candleSeries.setData(candles);
@@ -390,16 +406,18 @@ async function loadChart(symbol, interval) {
     ema50Series.setData(ema50data);
     ema200Series.setData(ema200data);
 
+    // Force both axes to fit the new symbol's data
+    mainChart.priceScale('right').applyOptions({ autoScale: true });
     mainChart.timeScale().fitContent();
+
+    // Update header price from last candle
+    document.getElementById('chart-price').textContent = fmtPrice(candles[candles.length - 1].close);
 
     // Add signal markers from recent scanner log
     addSignalMarkers(symbol, candles);
   } catch(e) {
     console.error('loadChart error', e);
   }
-
-  // Subscribe to live kline_update
-  sendWS({ type: 'subscribe_chart', symbol, interval });
 
   // Draw trade lines for open positions in this symbol
   drawTradeLines(symbol);
@@ -742,35 +760,72 @@ function renderScannerRow(sym, isSignal) {
 }
 
 function renderPositions() {
-  const tbody = document.getElementById('pos-body');
+  const list   = document.getElementById('pos-list');
+  const empty  = document.getElementById('pos-empty');
   const trades = Object.values(state.openTrades);
+
+  document.getElementById('st-open').textContent = trades.length;
+  document.getElementById('pos-count').textContent = trades.length ? `(${trades.length})` : '';
+
+  // Remove stale cards
+  list.querySelectorAll('.pos-card').forEach(el => {
+    if (!trades.find(t => String(t.id) === el.dataset.id)) el.remove();
+  });
+
   if (!trades.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty">No open positions</td></tr>';
-    document.getElementById('st-open').textContent = 0;
+    empty.style.display = '';
     return;
   }
-  document.getElementById('st-open').textContent = trades.length;
-  tbody.innerHTML = '';
+  empty.style.display = 'none';
+
   trades.forEach(t => {
-    const pnl = t.unrealized_pnl ?? 0;
+    const pnl  = t.unrealized_pnl ?? 0;
     const prev = state.prevPnl[t.id];
-    const blink = prev !== undefined && prev !== pnl ? ' pnl-blink' : '';
+    const blink = prev !== undefined && Math.abs(prev - pnl) > 0.0001 ? ' pnl-blink' : '';
     state.prevPnl[t.id] = pnl;
+
     const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
-    const dirColor = t.direction === 'LONG' ? 'var(--green)' : 'var(--red)';
-    const mark = t.mark_price ?? 0;
-    const tr = document.createElement('tr');
-    tr.style.cursor = 'pointer';
-    tr.title = `Click to view ${t.symbol} chart`;
-    tr.innerHTML = `
-      <td>${t.symbol.replace('USDT','')}</td>
-      <td style="color:${dirColor}">${t.direction === 'LONG' ? '▲' : '▼'}</td>
-      <td>${fmtPrice(t.entry_price)}</td>
-      <td>${mark ? fmtPrice(mark) : '—'}</td>
-      <td class="${pnlCls}${blink}">${fmtUsdt(pnl)}</td>
+    const roe    = t.roe_pct ?? 0;
+    const mark   = t.mark_price ?? 0;
+    const isLong = t.direction === 'LONG';
+
+    // Reuse existing card or create new
+    let card = document.getElementById('poscard-' + t.id);
+    if (!card) {
+      card = document.createElement('div');
+      card.className = 'pos-card';
+      card.id = 'poscard-' + t.id;
+      card.dataset.id = String(t.id);
+      card.onclick = () => selectSymbol(t.symbol);
+      list.appendChild(card);
+    }
+
+    card.innerHTML = `
+      <div class="pos-card-header">
+        <div>
+          <span class="pos-card-sym">${t.symbol.replace('USDT','')}<span style="font-size:9px;color:var(--muted)">/USDT</span></span>
+          &nbsp;<span class="pos-card-dir ${isLong ? 'pos-dir-long' : 'pos-dir-short'}">${isLong ? 'LONG' : 'SHORT'}</span>
+        </div>
+        <div style="text-align:right;">
+          <div class="pos-card-pnl ${pnlCls}${blink}">${fmtUsdt(pnl)}</div>
+          <div class="pos-card-roe ${pnlCls}">ROE ${roe >= 0 ? '+' : ''}${roe.toFixed(2)}%</div>
+        </div>
+      </div>
+      <div class="pos-card-grid">
+        <div class="pos-kv"><span class="k">Entry</span><span class="v">${fmtPrice(t.entry_price)}</span></div>
+        <div class="pos-kv"><span class="k">Mark</span><span class="v">${mark ? fmtPrice(mark) : '—'}</span></div>
+        <div class="pos-kv"><span class="k">SL</span><span class="v" style="color:var(--red)">${fmtPrice(t.sl_price)}</span></div>
+        <div class="pos-kv"><span class="k">TP2</span><span class="v" style="color:var(--green)">${fmtPrice(t.tp2_price)}</span></div>
+        <div class="pos-kv"><span class="k">Liq</span><span class="v pos-liq">${fmtPrice(t.liq_price)}</span></div>
+        <div class="pos-kv"><span class="k">Margin</span><span class="v">$${(t.margin_usdt ?? 0).toFixed(2)}</span></div>
+        <div class="pos-kv"><span class="k">Size</span><span class="v">$${(t.notional_usdt ?? 0).toFixed(2)}</span></div>
+        <div class="pos-kv"><span class="k">Fee</span><span class="v" style="color:var(--muted)">$${(t.fee_usdt ?? 0).toFixed(4)}</span></div>
+        <div class="pos-kv"><span class="k">Qty</span><span class="v">${t.qty}</span></div>
+        <div class="pos-kv"><span class="k">Lev</span><span class="v">${t.leverage ?? '—'}×</span></div>
+        <div class="pos-kv"><span class="k">Score</span><span class="v">${t.signal_score ?? '—'}</span></div>
+        <div class="pos-kv"><span class="k">Open</span><span class="v">${t.duration ?? '—'}</span></div>
+      </div>
     `;
-    tr.onclick = () => selectSymbol(t.symbol);
-    tbody.appendChild(tr);
   });
 }
 
