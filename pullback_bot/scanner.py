@@ -1,16 +1,33 @@
 """
 scanner.py — Background scanner loop (Daily Sweep / ICT-SMC strategy).
 
-Responsibilities:
-  1. Activity filter: builds the active watchlist from Binance exchange info + 24h tickers.
-     Runs once at startup then refreshes every WATCHLIST_REFRESH_MINUTES.
-  2. Daily bias refresh: fetches daily klines at 00:05 UTC and computes bias for each symbol.
-  3. Kline WebSocket subscription: combined multi-stream for all watchlist symbols.
-     Streams: <symbol>@kline_1m, <symbol>@kline_1h
-  4. Scanner loop: for each symbol calls signal_engine.check_daily_sweep every
-     SCANNER_INTERVAL_SECONDS during the NY open window.
-  5. On valid signal: logs to DB, broadcasts via ws_broadcaster, calls
-     order_manager.handle_signal.
+Architecture
+------------
+Event-driven — no polling loop. Three triggers:
+
+  TRIGGER 1  _run_kline_ws()  on every 1h candle CLOSE
+    a. Skip if outside NY window or bias is NEUTRAL
+    b. Run sweep detection → if found, cache in sweep_cache[symbol]
+       and broadcast "sweep_detected"
+    c. If sweep cached, run FVG detection → if found, cache in
+       fvg_cache[symbol] and broadcast "fvg_formed"
+
+  TRIGGER 2  _run_mark_price_ws()  on every mark-price tick
+    For each symbol in fvg_cache:
+    a. Skip if outside NY window or bias is NEUTRAL
+    b. Call check_daily_sweep() with the current mark price
+    c. If signal returned: clear caches, fire order, log, broadcast
+
+  DAILY     _daily_bias_refresh_loop()  at 00:05 UTC
+    Recomputes daily bias for every watchlist symbol from REST.
+
+Public state (read by main.py)
+-------------------------------
+  active_watchlist  list[str]
+  daily_bias_cache  dict[str, dict]
+  mark_prices       dict[str, float]
+  sweep_cache       dict[str, dict]   # symbol -> sweep info
+  fvg_cache         dict[str, dict]   # symbol -> fvg zone info
 """
 from __future__ import annotations
 
@@ -32,27 +49,25 @@ import ws_broadcaster as wsb
 
 logger = logging.getLogger(__name__)
 
-# ── State ──────────────────────────────────────────────────────────────────────
-# active_watchlist: list of symbol strings currently being scanned
+# ── Public state ───────────────────────────────────────────────────────────────
 active_watchlist: list[str] = []
 
 # kline buffers: symbol -> interval -> list[candle_dict]
-# Intervals: "1m" (last 10), "1h" (last 50)
 _kline_buffers: dict[str, dict[str, list[dict]]] = defaultdict(
     lambda: {"1m": [], "1h": []}
 )
 
+# Phase caches — cleared when a signal fires; repopulate on next sweep+FVG
+sweep_cache: dict[str, dict] = {}   # symbol -> {candle, sweep_level, direction, time}
+fvg_cache:   dict[str, dict] = {}   # symbol -> {fvg_high, fvg_low, fvg_mid, direction}
+
 # Daily bias cache: symbol -> {"bias": str, "pdh": float, "pdl": float}
 daily_bias_cache: dict[str, dict] = {}
 
-# last signal time per symbol (4-hour cooldown for Daily Sweep)
-_last_signal_ts: dict[str, float] = {}
-_SIGNAL_COOLDOWN_S = 5400   # 90 min — one signal per symbol per NY session
-
-# mark price registry (used by position_tracker for paper PnL)
+# Mark price registry (used by position_tracker for paper PnL)
 mark_prices: dict[str, float] = {}
 
-# reference to order_manager (set by start() to avoid circular import)
+# Reference to order_manager (set by start() to avoid circular import)
 _order_manager = None
 
 
@@ -61,13 +76,10 @@ def set_order_manager(om) -> None:
     _order_manager = om
 
 
-# ── Watchlist builder ─────────────────────────────────────────────────────────
+# ── Watchlist builder ──────────────────────────────────────────────────────────
 
 async def build_watchlist() -> list[str]:
-    """
-    Fetch active USDT-M perpetuals, apply volume + movement filter.
-    Returns list of symbol strings.
-    """
+    """Fetch active USDT-M perpetuals, apply volume + movement filter."""
     logger.info("Building watchlist...")
     try:
         perpetuals = await bc.get_active_perpetual_symbols()
@@ -89,7 +101,7 @@ async def build_watchlist() -> list[str]:
         return watchlist
     except Exception as exc:
         logger.error("build_watchlist error: %s", exc)
-        return active_watchlist  # keep old list on error
+        return active_watchlist
 
 
 async def refresh_watchlist_loop() -> None:
@@ -104,7 +116,7 @@ async def refresh_watchlist_loop() -> None:
         await asyncio.sleep(config.WATCHLIST_REFRESH_MINUTES * 60)
 
 
-# ── Daily bias ────────────────────────────────────────────────────────────────
+# ── Daily bias ─────────────────────────────────────────────────────────────────
 
 async def _seed_daily_klines(symbol: str) -> None:
     """Fetch daily klines and compute daily bias for one symbol."""
@@ -141,25 +153,19 @@ async def _refresh_daily_bias() -> None:
 
 
 async def _daily_bias_refresh_loop() -> None:
-    """
-    Wait until 00:05 UTC then refresh daily bias once per day.
-    Runs continuously so restarts across midnight are handled.
-    """
+    """Wait until 00:05 UTC then refresh daily bias once per day."""
     h, m = map(int, config.DAILY_BIAS_REFRESH_UTC.split(":"))
     while True:
         now = datetime.now(timezone.utc)
-        # Seconds until next HH:MM UTC
         target_s = h * 3600 + m * 60
         now_s = now.hour * 3600 + now.minute * 60 + now.second
-        wait = (target_s - now_s) % 86400
-        if wait == 0:
-            wait = 86400  # avoid spinning if we're exactly on time
+        wait = (target_s - now_s) % 86400 or 86400
         logger.debug("Daily bias refresh in %.0fs", wait)
         await asyncio.sleep(wait)
         await _refresh_daily_bias()
 
 
-# ── Kline REST seed ───────────────────────────────────────────────────────────
+# ── Kline REST seed ────────────────────────────────────────────────────────────
 
 async def _seed_klines(symbol: str) -> None:
     """Pre-fill 1h and 1m kline buffers from REST API."""
@@ -182,24 +188,17 @@ async def _seed_klines(symbol: str) -> None:
             logger.warning("Seed klines %s/%s: %s", symbol, interval, exc)
 
 
-# ── WebSocket kline stream ─────────────────────────────────────────────────────
+# ── Buffer helpers ─────────────────────────────────────────────────────────────
 
 def _make_stream_url(symbols: list[str]) -> str:
-    """Build combined stream URL for 1m + 1h klines."""
     streams = []
     for sym in symbols:
         s = sym.lower()
         streams += [f"{s}@kline_1m", f"{s}@kline_1h"]
-    combined = "/".join(streams)
-    return f"{config.BINANCE_WS_BASE}/stream?streams={combined}"
+    return f"{config.BINANCE_WS_BASE}/stream?streams={'/'.join(streams)}"
 
 
 def _parse_kline_msg(msg: dict) -> Optional[tuple[str, str, dict, bool]]:
-    """
-    Parse a combined stream kline message.
-    Returns (symbol, interval, candle_dict, is_closed) or None.
-    candle_dict includes 'time' in UNIX seconds (for Lightweight Charts).
-    """
     data = msg.get("data", {})
     if data.get("e") != "kline":
         return None
@@ -212,32 +211,162 @@ def _parse_kline_msg(msg: dict) -> Optional[tuple[str, str, dict, bool]]:
         "close":  float(k["c"]),
         "volume": float(k["v"]),
     }
-    return data["s"], k["i"], candle, k["x"]  # x=True when candle closed
+    return data["s"], k["i"], candle, k["x"]
 
 
 def _update_buffer(symbol: str, interval: str, candle: dict, is_closed: bool) -> None:
-    """Update the in-memory kline buffer for a symbol/interval."""
     buf = _kline_buffers[symbol][interval]
-    if buf and buf[-1]["time"] == candle["time"] and not is_closed:
-        buf[-1] = candle
-    elif is_closed or (not buf) or buf[-1]["time"] != candle["time"]:
-        # Closed candle or genuinely new timestamp — append
-        if buf and buf[-1]["time"] == candle["time"]:
-            buf[-1] = candle  # replace in-progress with final
-        else:
-            buf.append(candle)
+    if buf and buf[-1]["time"] == candle["time"]:
+        buf[-1] = candle          # update in-progress or replace with final
+    else:
+        buf.append(candle)
+    if is_closed:
         limit = {"1h": 50, "1m": 10}.get(interval, 50)
         if len(buf) > limit:
             _kline_buffers[symbol][interval] = buf[-limit:]
 
 
+# ── Trigger 1: 1h candle close → sweep + FVG detection ───────────────────────
+
+async def _on_1h_close(symbol: str, utc_now: datetime) -> None:
+    """
+    Called each time a 1h candle closes for a watchlist symbol.
+    Runs sweep detection, then FVG detection if a sweep is cached.
+    All work is pure-Python — safe to call directly on the event loop
+    for a single symbol (no pandas, no blocking I/O).
+    """
+    bias = daily_bias_cache.get(symbol)
+    if not bias or bias.get("bias") == "NEUTRAL":
+        return
+
+    if not signal_engine._in_ny_window(utc_now):
+        return
+
+    direction = bias["bias"]
+    k1h = _kline_buffers[symbol]["1h"]
+
+    if len(k1h) < config.SWEEP_LOOKBACK + 3:
+        return
+
+    # ── Phase 2: Sweep ──────────────────────────────────────────────────────
+    sweep = signal_engine._find_sweep(k1h, direction, config.SWEEP_LOOKBACK)
+
+    if sweep is not None:
+        existing = sweep_cache.get(symbol)
+        if not existing or existing.get("time") != sweep.get("time"):
+            # New (or updated) sweep found — cache it
+            sweep_cache[symbol] = {
+                "candle":      sweep,
+                "sweep_level": sweep["sweep_level"],
+                "direction":   direction,
+                "time":        sweep.get("time", 0),
+            }
+            logger.info(
+                "Sweep detected: %s %s at level=%.6f sweep_candle_time=%s",
+                symbol, direction, sweep["sweep_level"], sweep.get("time"),
+            )
+            await wsb.broadcaster.broadcast("sweep_detected", {
+                "symbol":      symbol,
+                "direction":   direction,
+                "sweep_level": sweep["sweep_level"],
+                "sweep_time":  sweep.get("time", 0),
+            })
+    elif symbol in sweep_cache and sweep_cache[symbol].get("direction") != direction:
+        # Bias flipped — invalidate stale sweep/FVG
+        sweep_cache.pop(symbol, None)
+        fvg_cache.pop(symbol, None)
+        return
+
+    # ── Phase 3: FVG (only if we have a cached sweep) ───────────────────────
+    cached_sweep = sweep_cache.get(symbol)
+    if not cached_sweep:
+        return
+
+    atr = signal_engine._atr(k1h, period=14)
+    if atr <= 0:
+        return
+
+    fvg = signal_engine._find_fvg(
+        k1h, direction, cached_sweep["time"], atr
+    )
+
+    if fvg is not None:
+        existing_fvg = fvg_cache.get(symbol)
+        if not existing_fvg or (
+            existing_fvg.get("fvg_low")  != fvg["fvg_low"] or
+            existing_fvg.get("fvg_high") != fvg["fvg_high"]
+        ):
+            fvg_cache[symbol] = {**fvg, "direction": direction}
+            logger.info(
+                "FVG formed: %s %s [%.6f - %.6f]",
+                symbol, direction, fvg["fvg_low"], fvg["fvg_high"],
+            )
+            await wsb.broadcaster.broadcast("fvg_formed", {
+                "symbol":    symbol,
+                "direction": direction,
+                "fvg_high":  fvg["fvg_high"],
+                "fvg_low":   fvg["fvg_low"],
+            })
+
+
+# ── Trigger 2: mark price tick → entry check ──────────────────────────────────
+
+async def _on_mark_price(symbol: str, mark: float, utc_now: datetime) -> None:
+    """
+    Called on every mark-price update for symbols that have an FVG cached.
+    Runs the full check_daily_sweep() with current mark price.
+    """
+    bias = daily_bias_cache.get(symbol)
+    if not bias or bias.get("bias") == "NEUTRAL":
+        return
+
+    if not signal_engine._in_ny_window(utc_now):
+        return
+
+    k1h = _kline_buffers[symbol]["1h"]
+
+    sig = signal_engine.check_daily_sweep(
+        symbol, k1h, bias, mark, utc_now,
+    )
+    if sig is None:
+        return
+
+    # ── Signal fired ─────────────────────────────────────────────────────────
+    # Clear caches — repopulate only when next sweep+FVG forms
+    sweep_cache.pop(symbol, None)
+    fvg_cache.pop(symbol, None)
+
+    acted = False
+    if _order_manager:
+        acted = await _order_manager.handle_signal(sig)
+
+    await db.insert_scanner_log(
+        symbol=symbol,
+        score=sig["score"],
+        direction=sig["direction"],
+        timestamp=sig["timestamp"],
+        acted_on=acted,
+    )
+
+    await wsb.broadcaster.broadcast("scanner_alert", sig)
+    logger.info(
+        "Signal fired: %s %s entry=%.6f sl=%.6f tp1=%.6f",
+        symbol, sig["direction"], sig["entry_price"],
+        sig["sl_price"], sig["tp1_price"],
+    )
+
+
+# ── Kline WebSocket ────────────────────────────────────────────────────────────
+
 async def _run_kline_ws(symbols: list[str]) -> None:
     """
-    Subscribe to kline WebSocket for given symbols.
-    Auto-reconnects with exponential backoff.
+    Subscribe to combined 1m + 1h kline stream.
+    On every 1h close → call _on_1h_close() (Trigger 1).
     Broadcasts kline_update to subscribed UI clients.
+    Auto-reconnects with exponential backoff.
     """
     backoff = 1
+    watchlist_set = set(symbols)
     while True:
         url = _make_stream_url(symbols)
         logger.info("Connecting kline WS (%d symbols)...", len(symbols))
@@ -248,18 +377,28 @@ async def _run_kline_ws(symbols: list[str]) -> None:
                 async for raw in ws:
                     msg = json.loads(raw)
                     parsed = _parse_kline_msg(msg)
-                    if parsed:
-                        sym, interval, candle, is_closed = parsed
-                        _update_buffer(sym, interval, candle, is_closed)
-                        await wsb.broadcaster.broadcast_kline(
-                            sym, interval,
-                            {
-                                "symbol":    sym,
-                                "interval":  interval,
-                                "candle":    candle,
-                                "is_closed": is_closed,
-                            },
-                        )
+                    if not parsed:
+                        continue
+
+                    sym, interval, candle, is_closed = parsed
+                    _update_buffer(sym, interval, candle, is_closed)
+
+                    # Broadcast to subscribed UI clients
+                    await wsb.broadcaster.broadcast_kline(
+                        sym, interval,
+                        {
+                            "symbol":    sym,
+                            "interval":  interval,
+                            "candle":    candle,
+                            "is_closed": is_closed,
+                        },
+                    )
+
+                    # Trigger 1 — 1h candle close
+                    if is_closed and interval == "1h" and sym in watchlist_set:
+                        utc_now = datetime.now(timezone.utc)
+                        await _on_1h_close(sym, utc_now)
+
         except asyncio.CancelledError:
             break
         except Exception as exc:
@@ -268,79 +407,18 @@ async def _run_kline_ws(symbols: list[str]) -> None:
             backoff = min(backoff * 2, 30)
 
 
-# ── Scanner evaluation loop ───────────────────────────────────────────────────
-
-async def _evaluate_symbols() -> None:
-    """Run Daily Sweep signal check on all watchlist symbols."""
-    utc_now = datetime.now(timezone.utc)
-
-    for symbol in list(active_watchlist):
-        try:
-            k1h = _kline_buffers[symbol]["1h"]
-            bias = daily_bias_cache.get(symbol)
-
-            # Need enough 1h candles and a bias reading
-            if len(k1h) < config.SWEEP_LOOKBACK + 3 or bias is None:
-                continue
-
-            # Cooldown check
-            now = time.time()
-            if now - _last_signal_ts.get(symbol, 0) < _SIGNAL_COOLDOWN_S:
-                continue
-
-            mark = mark_prices.get(symbol)
-            if not mark:
-                # Fall back to last 1h close
-                mark = k1h[-1]["close"] if k1h else 0.0
-            if not mark:
-                continue
-
-            # Run signal check in a thread (pure-Python but still keeps event loop free)
-            sig = await asyncio.to_thread(
-                signal_engine.check_daily_sweep,
-                symbol, k1h[:], bias, mark, utc_now,
-            )
-            if sig is None:
-                continue
-
-            # Signal found
-            _last_signal_ts[symbol] = now
-            acted = False
-
-            if _order_manager:
-                acted = await _order_manager.handle_signal(sig)
-
-            await db.insert_scanner_log(
-                symbol=symbol,
-                score=sig["score"],
-                direction=sig["direction"],
-                timestamp=sig["timestamp"],
-                acted_on=acted,
-            )
-
-            await wsb.broadcaster.broadcast("scanner_alert", sig)
-            logger.info(
-                "Daily Sweep signal: %s %s entry=%.6f",
-                symbol, sig["direction"], sig["entry_price"],
-            )
-
-        except Exception as exc:
-            logger.error("Evaluate %s error: %s", symbol, exc)
-
-
-async def scanner_loop() -> None:
-    """Evaluate watchlist on SCANNER_INTERVAL_SECONDS cadence."""
-    while True:
-        await asyncio.sleep(config.SCANNER_INTERVAL_SECONDS)
-        await _evaluate_symbols()
-
-
-# ── Mark-price WebSocket (for paper PnL) ─────────────────────────────────────
+# ── Mark-price WebSocket ───────────────────────────────────────────────────────
 
 async def _run_mark_price_ws(symbols: list[str]) -> None:
-    """Subscribe to !markPrice@arr to get mark prices for all symbols."""
+    """
+    Subscribe to !markPrice@arr.
+    Updates mark_prices dict (used by position_tracker for paper PnL).
+    Trigger 2 — runs _on_mark_price() for every symbol in fvg_cache.
+    Auto-reconnects with exponential backoff.
+    """
     url = f"{config.BINANCE_WS_BASE}/ws/!markPrice@arr"
     backoff = 1
+    symbol_set = set(symbols)
     while True:
         logger.info("Connecting mark-price WS...")
         try:
@@ -348,11 +426,23 @@ async def _run_mark_price_ws(symbols: list[str]) -> None:
                 backoff = 1
                 async for raw in ws:
                     data = json.loads(raw)
-                    if isinstance(data, list):
-                        for item in data:
-                            s = item.get("s", "")
-                            if s in symbols:
-                                mark_prices[s] = float(item.get("p", 0))
+                    if not isinstance(data, list):
+                        continue
+
+                    utc_now = datetime.now(timezone.utc)
+                    for item in data:
+                        sym = item.get("s", "")
+                        if sym not in symbol_set:
+                            continue
+                        price = float(item.get("p", 0))
+                        if price <= 0:
+                            continue
+                        mark_prices[sym] = price
+
+                        # Trigger 2 — only for symbols with an FVG cached
+                        if sym in fvg_cache:
+                            await _on_mark_price(sym, price, utc_now)
+
         except asyncio.CancelledError:
             break
         except Exception as exc:
@@ -361,25 +451,23 @@ async def _run_mark_price_ws(symbols: list[str]) -> None:
             backoff = min(backoff * 2, 30)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Entry point ────────────────────────────────────────────────────────────────
 
 async def start(order_manager=None) -> None:
     """
-    Main entry: build watchlist, seed klines + daily bias, start all async tasks.
+    Build watchlist, seed klines + daily bias, start all async tasks.
     Called from main.py startup event.
     """
     global active_watchlist
     if order_manager:
         set_order_manager(order_manager)
 
-    # Initial watchlist
     active_watchlist = await build_watchlist()
     await wsb.broadcaster.broadcast(
         "scanner_watchlist",
         {"symbols": active_watchlist, "count": len(active_watchlist)},
     )
 
-    # Seed klines + daily bias concurrently in batches
     logger.info("Seeding klines + daily bias for %d symbols...", len(active_watchlist))
     batch_size = 10
     for i in range(0, len(active_watchlist), batch_size):
@@ -388,12 +476,10 @@ async def start(order_manager=None) -> None:
             *[_seed_klines(sym) for sym in batch],
             *[_seed_daily_klines(sym) for sym in batch],
         )
-        await asyncio.sleep(0.5)  # brief pause between batches
+        await asyncio.sleep(0.5)
 
-    # Start background tasks
-    asyncio.create_task(_run_kline_ws(active_watchlist), name="kline_ws")
+    asyncio.create_task(_run_kline_ws(active_watchlist),      name="kline_ws")
     asyncio.create_task(_run_mark_price_ws(active_watchlist), name="mark_price_ws")
-    asyncio.create_task(scanner_loop(), name="scanner_loop")
-    asyncio.create_task(refresh_watchlist_loop(), name="watchlist_refresh")
-    asyncio.create_task(_daily_bias_refresh_loop(), name="daily_bias_refresh")
-    logger.info("Scanner started.")
+    asyncio.create_task(refresh_watchlist_loop(),             name="watchlist_refresh")
+    asyncio.create_task(_daily_bias_refresh_loop(),           name="daily_bias_refresh")
+    logger.info("Scanner started (event-driven mode).")

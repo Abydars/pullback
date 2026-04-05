@@ -113,6 +113,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         ]
         recent_trades = await db.get_recent_trades(50)
         stats = await db.get_today_stats()
+        # Build sweep_status snapshot for the UI
+        sweep_status = {
+            sym: {
+                "has_sweep":   scanner.sweep_cache.get(sym) is not None,
+                "has_fvg":     scanner.fvg_cache.get(sym)  is not None,
+                "direction":   (scanner.fvg_cache.get(sym) or scanner.sweep_cache.get(sym) or {}).get("direction"),
+                "fvg_high":    scanner.fvg_cache[sym]["fvg_high"]       if sym in scanner.fvg_cache   else None,
+                "fvg_low":     scanner.fvg_cache[sym]["fvg_low"]        if sym in scanner.fvg_cache   else None,
+                "sweep_level": scanner.sweep_cache[sym]["sweep_level"]  if sym in scanner.sweep_cache else None,
+            }
+            for sym in scanner.active_watchlist
+        }
         await wsb.broadcaster.send_to(ws, "init", {
             "mode": config.MODE,
             "open_trades": open_trades,
@@ -120,6 +132,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             "stats": stats,
             "watchlist": scanner.active_watchlist,
             "daily_bias": scanner.daily_bias_cache,
+            "sweep_status": sweep_status,
         })
 
         # Listen for client messages (e.g. subscribe_chart)
@@ -216,6 +229,24 @@ async def api_klines(symbol: str = "BTCUSDT", interval: str = "15m", limit: int 
 @app.get("/api/daily-bias")
 async def api_daily_bias() -> JSONResponse:
     return JSONResponse(scanner.daily_bias_cache)
+
+
+@app.get("/api/sweep-status")
+async def api_sweep_status() -> JSONResponse:
+    """Return current sweep/FVG pipeline state for all watchlist symbols."""
+    result = {}
+    for sym in scanner.active_watchlist:
+        sw  = scanner.sweep_cache.get(sym)
+        fvg = scanner.fvg_cache.get(sym)
+        result[sym] = {
+            "has_sweep":   sw is not None,
+            "has_fvg":     fvg is not None,
+            "direction":   (fvg or sw or {}).get("direction"),
+            "fvg_high":    fvg["fvg_high"]    if fvg else None,
+            "fvg_low":     fvg["fvg_low"]     if fvg else None,
+            "sweep_level": sw["sweep_level"]  if sw  else None,
+        }
+    return JSONResponse(result)
 
 
 @app.get("/api/watchlist")
