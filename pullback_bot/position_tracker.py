@@ -93,8 +93,13 @@ logger = logging.getLogger(__name__)
 # trade_id -> current unrealized PnL (USDT)
 paper_unrealized: dict[int, float] = {}
 
-# Tracks which trade IDs have already had their SL moved to breakeven
-_breakeven_set: set[int] = set()
+# ── Trailing take-profit state (paper mode) ───────────────────────────────────
+# Trailing activates when mark crosses tp1_price (the trail arm).
+# The trailing stop sits TRAIL_STEP_RATIO × initial_risk behind the extreme.
+TRAIL_STEP_RATIO = 0.5  # e.g. 0.5 = trail stop is half the original risk behind peak
+
+_trail_active: dict[int, bool] = {}    # trade_id -> trailing is armed
+_trail_extreme: dict[int, float] = {}  # trade_id -> best price reached (high for LONG, low for SHORT)
 
 
 # ── LIVE mode: User Data Stream ───────────────────────────────────────────────
@@ -212,10 +217,13 @@ async def _paper_pnl_loop() -> None:
 
                 direction = trade["direction"]
                 entry = float(trade["entry_price"])
-                qty = float(trade["qty"])
-                sl = float(trade["sl_price"])
-                tp1 = float(trade["tp1_price"])
-                tp2 = float(trade["tp2_price"])
+                qty   = float(trade["qty"])
+                sl    = float(trade["sl_price"])
+                trail_arm  = float(trade["tp1_price"])   # activation level (1:1 RR)
+                risk_dist  = abs(entry - sl)
+                trail_dist = risk_dist * TRAIL_STEP_RATIO
+
+                tid = trade["id"]
 
                 # PnL calculation
                 if direction == "LONG":
@@ -224,43 +232,49 @@ async def _paper_pnl_loop() -> None:
                     raw_pnl = (entry - mark) * qty
 
                 pnl_pct = raw_pnl / (entry * qty) * 100 if entry * qty else 0
-                paper_unrealized[trade["id"]] = raw_pnl
+                paper_unrealized[tid] = raw_pnl
 
-                # ── Move SL to breakeven once PnL >= 50% of initial risk ──────
-                # Initial risk per trade in USDT = config.RISK_PER_TRADE_USDT
-                breakeven_trigger = config.RISK_PER_TRADE_USDT * 0.5
-                if trade["id"] not in _breakeven_set and raw_pnl >= breakeven_trigger:
-                    _breakeven_set.add(trade["id"])
-                    sl = entry  # move SL to entry (breakeven)
-                    logger.info(
-                        "Breakeven SL set for #%d %s %s (pnl=%.4f)",
-                        trade["id"], symbol, direction, raw_pnl,
-                    )
+                # ── Activate trailing when mark crosses trail arm ─────────────
+                trail_active = _trail_active.get(tid, False)
+                if not trail_active:
+                    armed = (direction == "LONG" and mark >= trail_arm) or \
+                            (direction == "SHORT" and mark <= trail_arm)
+                    if armed:
+                        _trail_active[tid] = True
+                        _trail_extreme[tid] = mark
+                        trail_active = True
+                        logger.info(
+                            "Trail armed: #%d %s %s mark=%.6f arm=%.6f",
+                            tid, symbol, direction, mark, trail_arm,
+                        )
 
+                # ── Compute hit price ─────────────────────────────────────────
                 hit_price: Optional[float] = None
                 close_reason: Optional[str] = None
+                trail_stop: Optional[float] = None
 
-                # Check SL hit (uses potentially updated breakeven sl)
-                if direction == "LONG" and mark <= sl:
-                    hit_price = sl
-                    close_reason = "SL"
-                elif direction == "SHORT" and mark >= sl:
-                    hit_price = sl
-                    close_reason = "SL"
-
-                # Check TP2 hit (prioritise over TP1 if both hit same tick)
-                if direction == "LONG" and mark >= tp2:
-                    hit_price = tp2
-                    close_reason = "TP2"
-                elif direction == "SHORT" and mark <= tp2:
-                    hit_price = tp2
-                    close_reason = "TP2"
-                elif direction == "LONG" and mark >= tp1:
-                    hit_price = tp1
-                    close_reason = "TP1"
-                elif direction == "SHORT" and mark <= tp1:
-                    hit_price = tp1
-                    close_reason = "TP1"
+                if trail_active:
+                    # Update extreme and derive trailing stop
+                    if direction == "LONG":
+                        _trail_extreme[tid] = max(_trail_extreme.get(tid, mark), mark)
+                        trail_stop = _trail_extreme[tid] - trail_dist
+                        if mark <= trail_stop:
+                            hit_price = trail_stop
+                            close_reason = "TRAIL"
+                    else:
+                        _trail_extreme[tid] = min(_trail_extreme.get(tid, mark), mark)
+                        trail_stop = _trail_extreme[tid] + trail_dist
+                        if mark >= trail_stop:
+                            hit_price = trail_stop
+                            close_reason = "TRAIL"
+                else:
+                    # Pre-trail: only original SL is active
+                    if direction == "LONG" and mark <= sl:
+                        hit_price = sl
+                        close_reason = "SL"
+                    elif direction == "SHORT" and mark >= sl:
+                        hit_price = sl
+                        close_reason = "SL"
 
                 if hit_price and close_reason:
                     # Close the paper trade
@@ -272,14 +286,15 @@ async def _paper_pnl_loop() -> None:
                     close_time = int(time.time() * 1000)
 
                     await db.update_trade_close(
-                        trade_id=trade["id"],
+                        trade_id=tid,
                         close_price=hit_price,
                         close_time=close_time,
                         pnl_usdt=round(final_pnl, 4),
                         pnl_pct=round(final_pct, 2),
                     )
-                    paper_unrealized.pop(trade["id"], None)
-                    _breakeven_set.discard(trade["id"])
+                    paper_unrealized.pop(tid, None)
+                    _trail_active.pop(tid, None)
+                    _trail_extreme.pop(tid, None)
                     await wsb.broadcaster.broadcast("trade_closed", {
                         **trade,
                         "close_price": hit_price,
@@ -292,7 +307,12 @@ async def _paper_pnl_loop() -> None:
                         close_reason, symbol, direction, final_pnl,
                     )
                 else:
-                    positions_payload.append(_enrich_position(trade, mark, raw_pnl))
+                    enriched = _enrich_position(trade, mark, raw_pnl)
+                    enriched["trail_arm"]     = round(trail_arm, 8)
+                    enriched["trail_active"]  = trail_active
+                    enriched["trail_stop"]    = round(trail_stop, 8) if trail_stop is not None else None
+                    enriched["trail_extreme"] = round(_trail_extreme[tid], 8) if tid in _trail_extreme else None
+                    positions_payload.append(enriched)
 
             if positions_payload:
                 await wsb.broadcaster.broadcast("position_update", positions_payload)

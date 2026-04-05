@@ -232,12 +232,13 @@ def check_pullback(
     if risk <= 0:
         return None
 
+    # Trail arm: price level at which trailing take-profit activates (1:1 RR).
+    # Once mark crosses this level the position tracker starts trailing;
+    # there is no fixed TP2 — tp2_price reuses the same value for DB compat.
     if direction == "LONG":
-        tp1_price = round(entry_price + risk, 8)       # 1:1 RR
-        tp2_price = round(entry_price + risk * 2, 8)   # 1:2 RR
+        trail_arm = round(entry_price + risk, 8)
     else:
-        tp1_price = round(entry_price - risk, 8)
-        tp2_price = round(entry_price - risk * 2, 8)
+        trail_arm = round(entry_price - risk, 8)
 
     signal: dict = {
         "symbol": symbol,
@@ -245,8 +246,8 @@ def check_pullback(
         "score": score,
         "entry_price": round(entry_price, 8),
         "sl_price": sl_price,
-        "tp1_price": tp1_price,
-        "tp2_price": tp2_price,
+        "tp1_price": trail_arm,   # trail arm activation price
+        "tp2_price": trail_arm,   # kept for DB schema compat (same value)
         "timeframe": "15m",
         "timestamp": int(time.time()),
         "reasons": reasons,

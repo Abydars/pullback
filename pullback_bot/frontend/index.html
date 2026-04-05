@@ -428,7 +428,7 @@ let candleSeries = null;
 let volSeries = null;
 let ema50Series = null;
 let ema200Series = null;
-let slLine = null, tp1Line = null, tp2Line = null, entryLine = null;
+let slLine = null, tp1Line = null, entryLine = null;
 let _loadChartId = 0;  // increments on each loadChart() call to cancel stale fetches
 
 function initMainChart() {
@@ -591,20 +591,47 @@ function addSignalMarkers(symbol, candles) {
 }
 
 function clearTradeLines() {
-  [slLine, tp1Line, tp2Line, entryLine].forEach(l => {
+  [slLine, tp1Line, entryLine].forEach(l => {
     if (l) try { candleSeries.removePriceLine(l); } catch(e) {}
   });
-  slLine = tp1Line = tp2Line = entryLine = null;
+  slLine = tp1Line = entryLine = null;
 }
 
 function drawTradeLines(symbol) {
   clearTradeLines();
   const trade = Object.values(state.openTrades).find(t => t.symbol === symbol);
   if (!trade || !candleSeries) return;
-  entryLine = candleSeries.createPriceLine({ price: trade.entry_price, color: 'rgba(255,255,255,0.6)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
-  slLine    = candleSeries.createPriceLine({ price: trade.sl_price,    color: '#ef4444',              lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL' });
-  tp1Line   = candleSeries.createPriceLine({ price: trade.tp1_price,   color: '#22c55e',              lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP1' });
-  tp2Line   = candleSeries.createPriceLine({ price: trade.tp2_price,   color: '#22c55e',              lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP2' });
+
+  entryLine = candleSeries.createPriceLine({
+    price: trade.entry_price, color: 'rgba(255,255,255,0.6)',
+    lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Entry',
+  });
+
+  const trailActive = trade.trail_active ?? false;
+  const trailArm    = trade.trail_arm ?? trade.tp1_price;
+  const trailStop   = trade.trail_stop ?? null;
+
+  if (trailActive && trailStop !== null) {
+    // Trailing is armed: show trail stop (solid amber) instead of SL
+    slLine  = candleSeries.createPriceLine({
+      price: trailStop, color: '#f59e0b',
+      lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'Trail Stop',
+    });
+    tp1Line = candleSeries.createPriceLine({
+      price: trailArm, color: 'rgba(245,158,11,0.4)',
+      lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Trail Arm',
+    });
+  } else {
+    // Pre-trail: show original SL + trail arm target
+    slLine  = candleSeries.createPriceLine({
+      price: trade.sl_price, color: '#ef4444',
+      lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL',
+    });
+    tp1Line = candleSeries.createPriceLine({
+      price: trailArm, color: '#f59e0b',
+      lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Trail Arm',
+    });
+  }
 }
 
 // ============================================================
@@ -977,27 +1004,40 @@ function renderPositions() {
 
     // Percentage helpers (all relative to entry price)
     const entry = t.entry_price;
-    const pct = (price) => entry ? ((price - entry) / entry * 100) : 0;
+    const fromEntry = (price) => entry ? ((price - entry) / entry * 100) : 0;
+    const fromMark  = (price) => mark  ? ((price - mark)  / mark  * 100) : 0;
     const fmtPct = (p, color) => {
       const s = (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
       return `<span class="pct" style="color:${color}">${s}</span>`;
     };
-    const markPct   = mark && entry ? pct(mark)        : null;
-    const slPct     = entry ? pct(t.sl_price)          : null;
-    const tp1Pct    = entry ? pct(t.tp1_price)         : null;
-    const tp2Pct    = entry ? pct(t.tp2_price)         : null;
-    const liqPct    = mark  ? ((t.liq_price - mark) / mark * 100) : null; // dist from mark
 
-    // SL/TP colors: for LONG sl is negative, tps positive; SHORT inverse
-    const slColor  = 'var(--red)';
-    const tpColor  = 'var(--green)';
+    const markPct   = mark && entry ? fromEntry(mark) : null;
+    const slPct     = entry ? fromEntry(t.sl_price)   : null;
+    const armPct    = entry ? fromEntry(t.trail_arm ?? t.tp1_price) : null;
+    const liqPct    = mark  ? fromMark(t.liq_price)   : null;
+
     const markColor = markPct !== null ? (markPct >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--muted)';
+
+    // Trail state
+    const trailActive  = t.trail_active  ?? false;
+    const trailStop    = t.trail_stop    ?? null;
+    const trailExtreme = t.trail_extreme ?? null;
+    const trailArm     = t.trail_arm     ?? t.tp1_price;
+
+    const trailStopPct    = (trailStop    && entry) ? fromEntry(trailStop)    : null;
+    const trailExtremePct = (trailExtreme && entry) ? fromEntry(trailExtreme) : null;
+
+    // Trail arm badge
+    const armBadge = trailActive
+      ? `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:2px;background:rgba(245,158,11,.2);color:var(--amber);margin-left:6px;">TRAILING</span>`
+      : '';
 
     card.innerHTML = `
       <div class="pos-card-header">
         <div style="cursor:pointer;" onclick="selectSymbol('${t.symbol}')">
           <span class="pos-card-sym">${t.symbol.replace('USDT','')}<span style="font-size:9px;color:var(--muted)">/USDT</span></span>
           &nbsp;<span class="pos-card-dir ${isLong ? 'pos-dir-long' : 'pos-dir-short'}">${isLong ? 'LONG' : 'SHORT'}</span>
+          ${armBadge}
         </div>
         <div style="text-align:right;">
           <div class="pos-card-pnl ${pnlCls}${blink}">${fmtUsdt(pnl)}</div>
@@ -1014,21 +1054,29 @@ function renderPositions() {
           <span class="v" style="color:${markColor}">${mark ? fmtPrice(mark) : '—'}</span>
           ${markPct !== null ? fmtPct(markPct, markColor) : ''}
         </div>
+        ${!trailActive ? `
         <div class="pos-kv">
           <span class="k">SL</span>
-          <span class="v" style="color:${slColor}">${fmtPrice(t.sl_price)}</span>
-          ${slPct !== null ? fmtPct(slPct, slColor) : ''}
-        </div>
+          <span class="v" style="color:var(--red)">${fmtPrice(t.sl_price)}</span>
+          ${slPct !== null ? fmtPct(slPct, 'var(--red)') : ''}
+        </div>` : ''}
         <div class="pos-kv">
-          <span class="k">TP1</span>
-          <span class="v" style="color:${tpColor}">${fmtPrice(t.tp1_price)}</span>
-          ${tp1Pct !== null ? fmtPct(tp1Pct, tpColor) : ''}
+          <span class="k">Trail Arm</span>
+          <span class="v" style="color:var(--amber)">${fmtPrice(trailArm)}</span>
+          ${armPct !== null ? fmtPct(armPct, 'var(--amber)') : ''}
         </div>
+        ${trailActive && trailExtreme !== null ? `
         <div class="pos-kv">
-          <span class="k">TP2</span>
-          <span class="v" style="color:${tpColor}">${fmtPrice(t.tp2_price)}</span>
-          ${tp2Pct !== null ? fmtPct(tp2Pct, tpColor) : ''}
-        </div>
+          <span class="k">Trail Peak</span>
+          <span class="v" style="color:var(--green)">${fmtPrice(trailExtreme)}</span>
+          ${trailExtremePct !== null ? fmtPct(trailExtremePct, 'var(--green)') : ''}
+        </div>` : ''}
+        ${trailActive && trailStop !== null ? `
+        <div class="pos-kv">
+          <span class="k">Trail Stop</span>
+          <span class="v" style="color:var(--amber);font-weight:700">${fmtPrice(trailStop)}</span>
+          ${trailStopPct !== null ? fmtPct(trailStopPct, 'var(--amber)') : ''}
+        </div>` : ''}
         <div class="pos-kv">
           <span class="k">Liq</span>
           <span class="v pos-liq">${fmtPrice(t.liq_price)}</span>
