@@ -279,6 +279,7 @@ let volSeries = null;
 let ema50Series = null;
 let ema200Series = null;
 let slLine = null, tp1Line = null, tp2Line = null, entryLine = null;
+let _loadChartId = 0;  // increments on each loadChart() call to cancel stale fetches
 
 function initMainChart() {
   const container = document.getElementById('chart-container');
@@ -352,24 +353,41 @@ function initMainChart() {
 
 async function loadChart(symbol, interval) {
   if (!mainChart) initMainChart();
+  // Stamp this load so stale fetches can be discarded
+  const loadId = ++_loadChartId;
+
   state.selectedSymbol = symbol;
   state.selectedInterval = interval;
 
   document.getElementById('chart-symbol').textContent = symbol;
   document.getElementById('chart-price').textContent = '—';
+  document.getElementById('chart-change').textContent = '';
 
   // Update TF button active state
   document.querySelectorAll('.tf-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.tf === interval);
   });
 
-  // Remove old trade lines
+  // Clear old data and trade lines immediately — don't wait for the fetch
   clearTradeLines();
+  candleSeries.setData([]);
+  volSeries.setData([]);
+  ema50Series.setData([]);
+  ema200Series.setData([]);
+
+  // Force price scale to re-autofit for the new symbol's price range
+  mainChart.priceScale('right').applyOptions({ autoScale: true });
+
+  // Subscribe to live kline_update before the fetch so no ticks are missed
+  sendWS({ type: 'subscribe_chart', symbol, interval });
 
   // Fetch historical klines
   try {
     const resp = await fetch(`/api/klines?symbol=${symbol}&interval=${interval}&limit=200`);
     const candles = await resp.json();
+
+    // Discard if user switched symbol again while fetch was in flight
+    if (loadId !== _loadChartId) return;
     if (!Array.isArray(candles) || candles.length === 0) return;
 
     candleSeries.setData(candles);
@@ -390,16 +408,18 @@ async function loadChart(symbol, interval) {
     ema50Series.setData(ema50data);
     ema200Series.setData(ema200data);
 
+    // Force both axes to fit the new symbol's data
+    mainChart.priceScale('right').applyOptions({ autoScale: true });
     mainChart.timeScale().fitContent();
+
+    // Update header price from last candle
+    document.getElementById('chart-price').textContent = fmtPrice(candles[candles.length - 1].close);
 
     // Add signal markers from recent scanner log
     addSignalMarkers(symbol, candles);
   } catch(e) {
     console.error('loadChart error', e);
   }
-
-  // Subscribe to live kline_update
-  sendWS({ type: 'subscribe_chart', symbol, interval });
 
   // Draw trade lines for open positions in this symbol
   drawTradeLines(symbol);
