@@ -93,6 +93,9 @@ logger = logging.getLogger(__name__)
 # trade_id -> current unrealized PnL (USDT)
 paper_unrealized: dict[int, float] = {}
 
+# Tracks which trade IDs have already had their SL moved to breakeven
+_breakeven_set: set[int] = set()
+
 
 # ── LIVE mode: User Data Stream ───────────────────────────────────────────────
 
@@ -223,10 +226,21 @@ async def _paper_pnl_loop() -> None:
                 pnl_pct = raw_pnl / (entry * qty) * 100 if entry * qty else 0
                 paper_unrealized[trade["id"]] = raw_pnl
 
+                # ── Move SL to breakeven once PnL >= 50% of initial risk ──────
+                # Initial risk per trade in USDT = config.RISK_PER_TRADE_USDT
+                breakeven_trigger = config.RISK_PER_TRADE_USDT * 0.5
+                if trade["id"] not in _breakeven_set and raw_pnl >= breakeven_trigger:
+                    _breakeven_set.add(trade["id"])
+                    sl = entry  # move SL to entry (breakeven)
+                    logger.info(
+                        "Breakeven SL set for #%d %s %s (pnl=%.4f)",
+                        trade["id"], symbol, direction, raw_pnl,
+                    )
+
                 hit_price: Optional[float] = None
                 close_reason: Optional[str] = None
 
-                # Check SL hit
+                # Check SL hit (uses potentially updated breakeven sl)
                 if direction == "LONG" and mark <= sl:
                     hit_price = sl
                     close_reason = "SL"
@@ -265,6 +279,7 @@ async def _paper_pnl_loop() -> None:
                         pnl_pct=round(final_pct, 2),
                     )
                     paper_unrealized.pop(trade["id"], None)
+                    _breakeven_set.discard(trade["id"])
                     await wsb.broadcaster.broadcast("trade_closed", {
                         **trade,
                         "close_price": hit_price,
