@@ -3,7 +3,7 @@ module.exports = {
     {
       name: "pullback-bot",
       script: "main.py",
-      interpreter: "python3",
+      interpreter: "./venv/bin/python",
       watch: false,
       autorestart: true,
       max_restarts: 10,
