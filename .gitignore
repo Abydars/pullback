@@ -1,2 +1,4 @@
 .env
 pullback_bot/__pycache__
+pullback_bot/*.db
+pullback_bot/logs/

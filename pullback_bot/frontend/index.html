@@ -66,7 +66,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 /* ── Scanner panel ────────────────────────────────────────────────────────── */
 #scanner-panel { background: var(--bg2); }
 .sym-row {
-  display: grid; grid-template-columns: 1fr 72px 28px;
+  display: grid; grid-template-columns: 1fr auto 72px;
   align-items: center; gap: 6px;
   padding: 6px 10px; border-bottom: 1px solid #0e0e0e;
   cursor: pointer; transition: background .15s;
@@ -76,11 +76,13 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .sym-row.active { background: #1d1a0a; }
 .sym-row.signal { background: rgba(245,158,11,.07); border-left: 2px solid var(--amber); }
 .sym-name { font-size: 11px; font-weight: 600; }
-.sym-score-bar { position: relative; height: 4px; background: #1f1f1f; border-radius: 2px; }
-.sym-score-fill { height: 100%; border-radius: 2px; background: var(--amber); transition: width .3s; }
-.sym-dir { font-size: 10px; text-align: right; }
-.dir-long  { color: var(--green); }
-.dir-short { color: var(--red); }
+/* Pipeline status indicator */
+.sym-pipeline { font-size: 9px; text-align: right; white-space: nowrap; color: var(--muted); }
+.sym-pipeline.sweep  { color: var(--amber); }
+.sym-pipeline.fvg-long  { color: var(--green); }
+.sym-pipeline.fvg-short { color: var(--red); }
+.sym-pipeline.entered { color: #fff; font-weight: 700; }
+.sym-pipeline-zone { font-size: 8px; color: var(--muted); display: block; }
 .sparkline-wrap { display: flex; align-items: center; justify-content: center; }
 canvas.sparkline { display: block; border-radius: 2px; }
 
@@ -331,7 +333,6 @@ canvas.sparkline { display: block; border-radius: 2px; }
 const state = {
   mode: 'paper',
   watchlist: [],
-  scannerRows: {},       // symbol -> {score, direction, lastSignal}
   openTrades: {},        // id -> trade object
   histTrades: [],        // array of closed trades (last 50)
   selectedSymbol: null,
@@ -339,6 +340,9 @@ const state = {
   sparklineData: {},     // symbol -> last 50 close prices (1m)
   prevPnl: {},           // trade_id -> prev pnl for blink
   dailyBias: {},         // symbol -> {bias, pdh, pdl}
+  sweepCache: {},        // symbol -> {direction, sweep_level, sweep_time}
+  fvgCache: {},          // symbol -> {direction, fvg_high, fvg_low}
+  enteredSymbols: {},    // symbol -> timestamp of last scanner_alert
 };
 
 // ============================================================
@@ -659,6 +663,8 @@ function handleMessage(type, data) {
     case 'kline_history':      onKlineHistory(data);      break;
     case 'system_status':      onSystemStatus(data);      break;
     case 'daily_bias_update':  onDailyBiasUpdate(data);  break;
+    case 'sweep_detected':     onSweepDetected(data);    break;
+    case 'fvg_formed':         onFvgFormed(data);        break;
   }
 }
 
@@ -684,6 +690,28 @@ function onInit(data) {
     renderDailyBias();
   }
 
+  // Sweep / FVG pipeline state
+  if (data.sweep_status) {
+    state.sweepCache = {};
+    state.fvgCache   = {};
+    for (const [sym, info] of Object.entries(data.sweep_status)) {
+      if (info.has_sweep) {
+        state.sweepCache[sym] = {
+          direction:   info.direction,
+          sweep_level: info.sweep_level,
+        };
+      }
+      if (info.has_fvg) {
+        state.fvgCache[sym] = {
+          direction: info.direction,
+          fvg_high:  info.fvg_high,
+          fvg_low:   info.fvg_low,
+        };
+      }
+    }
+    // Pipeline status rendered inside renderScanner() below
+  }
+
   // Stats
   if (data.stats) updateStats(data.stats);
 
@@ -694,10 +722,18 @@ function onInit(data) {
 }
 
 function onDailyBiasUpdate(data) {
-  // data is {symbol: {bias, pdh, pdl}, ...}
   Object.assign(state.dailyBias, data);
   renderDailyBias();
-  // Redraw PDH/PDL if selected symbol updated
+  // Refresh bias badges on scanner rows
+  for (const sym of Object.keys(data)) {
+    const b = document.getElementById('biasb-' + sym);
+    if (b) {
+      const bias = state.dailyBias[sym];
+      const cls  = bias.bias === 'LONG' ? 'bias-long' : bias.bias === 'SHORT' ? 'bias-short' : 'bias-neut';
+      b.className = `sym-bias-badge bias-badge ${cls}`;
+      b.textContent = bias.bias[0];
+    }
+  }
   if (state.selectedSymbol && data[state.selectedSymbol]) {
     drawTradeLines(state.selectedSymbol);
   }
@@ -710,33 +746,61 @@ function onWatchlist(data) {
   renderScanner();
 }
 
-function onScannerAlert(sig) {
-  // Store signal for markers
-  const key = 'signals_' + sig.symbol;
-  const existing = JSON.parse(sessionStorage.getItem(key) || '[]');
-  existing.push(sig);
-  if (existing.length > 20) existing.shift();
-  sessionStorage.setItem(key, JSON.stringify(existing));
-
-  // Update scanner row
-  state.scannerRows[sig.symbol] = {
-    score: sig.score,
-    direction: sig.direction,
-    lastSignal: sig.timestamp,
+function onSweepDetected(data) {
+  // { symbol, direction, sweep_level, sweep_time }
+  state.sweepCache[data.symbol] = {
+    direction:   data.direction,
+    sweep_level: data.sweep_level,
+    sweep_time:  data.sweep_time,
   };
-  renderScannerRow(sig.symbol, true);
+  updatePipelineStatus(data.symbol);
+}
 
-  // If chart is showing this symbol, add sweep marker (orange diamond)
+function onFvgFormed(data) {
+  // { symbol, direction, fvg_high, fvg_low }
+  state.fvgCache[data.symbol] = {
+    direction: data.direction,
+    fvg_high:  data.fvg_high,
+    fvg_low:   data.fvg_low,
+  };
+  updatePipelineStatus(data.symbol);
+  // If this symbol is on the chart, draw FVG lines immediately
+  if (state.selectedSymbol === data.symbol) {
+    drawTradeLines(data.symbol);
+  }
+}
+
+function onScannerAlert(sig) {
+  // Store signal for chart markers
+  const key = 'signals_' + sig.symbol;
+  const stored = JSON.parse(sessionStorage.getItem(key) || '[]');
+  stored.push(sig);
+  if (stored.length > 20) stored.shift();
+  sessionStorage.setItem(key, JSON.stringify(stored));
+
+  // Caches cleared server-side; mirror locally
+  delete state.sweepCache[sig.symbol];
+  delete state.fvgCache[sig.symbol];
+  state.enteredSymbols[sig.symbol] = sig.timestamp;
+  updatePipelineStatus(sig.symbol);
+
+  // Flash the row
+  const row = document.getElementById('symrow-' + sig.symbol);
+  if (row) {
+    row.classList.add('signal');
+    setTimeout(() => row.classList.remove('signal'), 10000);
+  }
+
+  // Chart marker
   if (state.selectedSymbol === sig.symbol && candleSeries) {
-    const existing = candleSeries.markers ? candleSeries.markers() : [];
-    candleSeries.setMarkers([...existing, {
-      time: sig.sweep_time || sig.timestamp,
+    const prev = candleSeries.markers ? candleSeries.markers() : [];
+    candleSeries.setMarkers([...prev, {
+      time:     sig.sweep_time || sig.timestamp,
       position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
-      color: '#f59e0b',
-      shape: 'circle',
-      text: `Sweep ${sig.direction}`,
+      color:    '#f59e0b',
+      shape:    'circle',
+      text:     `Sweep ${sig.direction}`,
     }]);
-    // Also refresh FVG lines now that we have signal data
     drawTradeLines(state.selectedSymbol);
   }
 }
@@ -849,12 +913,13 @@ function renderScanner() {
   // Remove any placeholder (.empty) nodes on first real render
   list.querySelectorAll('.empty').forEach(el => el.remove());
 
-  // Build rows (only add new ones)
+  // Build rows (only add new ones) and refresh pipeline status
   state.watchlist.forEach(sym => {
     if (!document.getElementById('symrow-' + sym)) {
       const row = buildScannerRow(sym);
       list.appendChild(row);
     }
+    updatePipelineStatus(sym);
   });
   // Remove rows no longer in watchlist
   list.querySelectorAll('.sym-row').forEach(el => {
@@ -868,42 +933,54 @@ function buildScannerRow(sym) {
   row.id = 'symrow-' + sym;
   row.dataset.sym = sym;
   const bias = state.dailyBias[sym];
-  const biasCls = bias ? (bias.bias === 'LONG' ? 'bias-long' : bias.bias === 'SHORT' ? 'bias-short' : 'bias-neut') : 'bias-neut';
-  const biasLabel = bias ? bias.bias[0] : '?';  // L / S / N
+  const biasCls   = bias ? (bias.bias === 'LONG' ? 'bias-long' : bias.bias === 'SHORT' ? 'bias-short' : 'bias-neut') : 'bias-neut';
+  const biasLabel = bias ? bias.bias[0] : '?';
   row.innerHTML = `
     <div>
       <div class="sym-name">
         ${sym.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span>
         <span class="sym-bias-badge bias-badge ${biasCls}" id="biasb-${sym}">${biasLabel}</span>
       </div>
-      <div class="sym-score-bar"><div class="sym-score-fill" id="fill-${sym}" style="width:0%"></div></div>
     </div>
+    <div id="pipe-${sym}" class="sym-pipeline">—</div>
     <div class="sparkline-wrap">
       <canvas id="spark-${sym}" class="sparkline" width="72" height="28"></canvas>
     </div>
-    <div class="sym-dir" id="dir-${sym}">—</div>
   `;
   row.onclick = () => selectSymbol(sym);
   return row;
 }
 
-function renderScannerRow(sym, isSignal) {
-  const row = document.getElementById('symrow-' + sym);
-  if (!row) return;
-  const info = state.scannerRows[sym];
-  if (!info) return;
-  const fill = document.getElementById('fill-' + sym);
-  const dir  = document.getElementById('dir-' + sym);
-  if (fill) fill.style.width = info.score + '%';
-  if (dir) {
-    dir.textContent = info.direction === 'LONG' ? '▲' : '▼';
-    dir.className = 'sym-dir ' + (info.direction === 'LONG' ? 'dir-long' : 'dir-short');
+function updatePipelineStatus(sym) {
+  const el = document.getElementById('pipe-' + sym);
+  if (!el) return;
+
+  if (state.enteredSymbols[sym]) {
+    el.className = 'sym-pipeline entered';
+    el.innerHTML = 'Entered';
+    return;
   }
-  if (isSignal) {
-    row.classList.add('signal');
-    setTimeout(() => row.classList.remove('signal'), 10000);
+
+  const fvg   = state.fvgCache[sym];
+  const sweep = state.sweepCache[sym];
+
+  if (fvg) {
+    const isLong = fvg.direction === 'LONG';
+    el.className = 'sym-pipeline ' + (isLong ? 'fvg-long' : 'fvg-short');
+    const lo = fmtPrice(fvg.fvg_low);
+    const hi = fmtPrice(fvg.fvg_high);
+    el.innerHTML = `FVG ✓<span class="sym-pipeline-zone">${lo}–${hi}</span>`;
+    return;
   }
-  if (sym === state.selectedSymbol) row.classList.add('active');
+
+  if (sweep) {
+    el.className = 'sym-pipeline sweep';
+    el.innerHTML = 'Sweep ✓';
+    return;
+  }
+
+  el.className = 'sym-pipeline';
+  el.innerHTML = '—';
 }
 
 function renderPositions() {
