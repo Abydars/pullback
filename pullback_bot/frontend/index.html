@@ -396,7 +396,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
     </div>
 
     <!-- Right Panel — positions only -->
-    <div class="panel" id="right-panel" style="display:flex;flex-direction:column;">
+    <div class="panel" id="right-panel">
       <div class="panel-title" style="display:flex;align-items:center;">
         <span>Open Positions <span id="pos-count" style="color:var(--amber)"></span></span>
         <button id="btn-close-all" class="btn-close-all" title="Close all positions">✕ Close All</button>
@@ -458,6 +458,7 @@ let _loadChartId = 0;  // increments on each loadChart() call to cancel stale fe
 function initMainChart() {
   const container = document.getElementById('chart-container');
   mainChart = LightweightCharts.createChart(container, {
+    autoSize: true,   // fills container automatically, no manual resize needed
     layout: {
       background: { color: '#0d0d0d' },
       textColor: '#888',
@@ -479,18 +480,19 @@ function initMainChart() {
       timeVisible: true,
       secondsVisible: false,
     },
-    width: container.offsetWidth,
-    height: container.offsetHeight,
   });
 
-  // Volume (20% height at bottom)
+  // Volume — priceScaleId: '' creates a true overlay (no Y-axis labels)
   volSeries = mainChart.addHistogramSeries({
     priceFormat: { type: 'volume' },
-    priceScaleId: 'vol',
+    priceScaleId: '',
+  });
+  // Position volume in the bottom 20% of the chart area
+  volSeries.priceScale().applyOptions({
     scaleMargins: { top: 0.8, bottom: 0 },
   });
 
-  // Candlestick
+  // Candlestick — leave bottom 20% for volume
   candleSeries = mainChart.addCandlestickSeries({
     upColor: '#22c55e',
     downColor: '#ef4444',
@@ -498,6 +500,8 @@ function initMainChart() {
     borderDownColor: '#ef4444',
     wickUpColor: '#22c55e',
     wickDownColor: '#ef4444',
+  });
+  candleSeries.priceScale().applyOptions({
     scaleMargins: { top: 0.05, bottom: 0.2 },
   });
 
@@ -518,11 +522,6 @@ function initMainChart() {
     lastValueVisible: false,
     crosshairMarkerVisible: false,
   });
-
-  // Resize observer
-  new ResizeObserver(() => {
-    mainChart.resize(container.offsetWidth, container.offsetHeight);
-  }).observe(container);
 }
 
 async function loadChart(symbol, interval) {
@@ -1312,12 +1311,9 @@ setInterval(() => {
     document.querySelectorAll('#chart-pane, #hist-pane').forEach(p =>
       p.classList.toggle('active', p.id === tabId)
     );
-    // Re-fit chart when switching back to chart tab
+    // Re-fit time scale when switching back to chart tab
     if (tabId === 'chart-pane' && mainChart) {
-      requestAnimationFrame(() => {
-        const container = document.getElementById('chart-container');
-        mainChart.resize(container.offsetWidth, container.offsetHeight);
-      });
+      requestAnimationFrame(() => mainChart.timeScale().fitContent());
     }
   }
 
@@ -1350,12 +1346,9 @@ document.getElementById('btn-close-all').disabled = true;
       const el = document.getElementById(id);
       el.classList.toggle('mob-active', id === panelId);
     });
-    // Resize chart when switching to chart tab
+    // Re-fit chart when switching to chart panel on mobile
     if (panelId === 'chart-panel' && mainChart) {
-      setTimeout(() => {
-        const container = document.getElementById('chart-container');
-        mainChart.resize(container.offsetWidth, container.offsetHeight);
-      }, 50);
+      requestAnimationFrame(() => mainChart.timeScale().fitContent());
     }
   }
 
