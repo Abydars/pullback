@@ -56,8 +56,12 @@ MIN_PRICE_CHANGE_PCT: float = _float("MIN_PRICE_CHANGE_PCT", 0.5)
 SCANNER_INTERVAL_SECONDS: int = _int("SCANNER_INTERVAL_SECONDS", 30)
 WATCHLIST_REFRESH_MINUTES: int = _int("WATCHLIST_REFRESH_MINUTES", 15)
 
-# ── Signal Settings ───────────────────────────────────────────────────────────
-SIGNAL_SCORE_THRESHOLD: int = _int("SIGNAL_SCORE_THRESHOLD", 70)
+# ── Daily Sweep Strategy ─────────────────────────────────────────────────────
+NY_OPEN_START_UTC: str = _get("NY_OPEN_START_UTC", "13:30")  # HH:MM
+NY_OPEN_END_UTC:   str = _get("NY_OPEN_END_UTC",   "15:00")  # HH:MM
+FVG_MIN_ATR_MULT:  float = _float("FVG_MIN_ATR_MULT", 0.1)
+SWEEP_LOOKBACK:    int   = _int("SWEEP_LOOKBACK", 6)          # 1h candles
+DAILY_BIAS_REFRESH_UTC: str = _get("DAILY_BIAS_REFRESH_UTC", "00:05")  # HH:MM
 
 # ── Risk / Order Settings ─────────────────────────────────────────────────────
 RISK_PER_TRADE_USDT: float = _float("RISK_PER_TRADE_USDT", 10.0)

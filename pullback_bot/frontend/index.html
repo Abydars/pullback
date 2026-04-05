@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Pullback Bot</title>
+<title>Daily Sweep Bot</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
@@ -202,6 +202,29 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
 /* ── Empty states ─────────────────────────────────────────────────────────── */
 .empty { padding: 20px; color: var(--muted); text-align: center; font-size: 11px; }
+
+/* ── Daily Bias panel ─────────────────────────────────────────────────────── */
+#bias-section { flex-shrink: 0; border-bottom: 1px solid var(--border); max-height: 160px; overflow-y: auto; }
+#bias-section::-webkit-scrollbar { width: 4px; }
+#bias-section::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+.bias-table { width: 100%; border-collapse: collapse; }
+.bias-table th {
+  padding: 4px 8px; text-align: left; font-size: 9px; font-weight: 600;
+  letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--border);
+  text-transform: uppercase; background: var(--bg2); position: sticky; top: 0;
+}
+.bias-table td { padding: 4px 8px; font-size: 10px; border-bottom: 1px solid #0e0e0e; }
+.bias-badge {
+  font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 2px;
+  letter-spacing: .06em;
+}
+.bias-long  { background: rgba(34,197,94,.15);  color: var(--green); }
+.bias-short { background: rgba(239,68,68,.15);   color: var(--red); }
+.bias-neut  { background: rgba(102,102,102,.15); color: var(--muted); }
+.sym-bias-badge {
+  font-size: 8px; font-weight: 700; padding: 1px 4px; border-radius: 2px;
+  margin-left: 4px; letter-spacing: .04em;
+}
 </style>
 </head>
 <body>
@@ -209,7 +232,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
   <!-- ── Header ── -->
   <div id="header">
-    <span class="logo">⬡ PULLBACK BOT</span>
+    <span class="logo">⬡ DAILY SWEEP BOT</span>
     <span id="mode-badge" class="mode-badge mode-paper">PAPER</span>
     <div id="conn-dot" title="WebSocket connection"></div>
     <span class="stat-pill">Positions: <span id="h-open">0</span></span>
@@ -241,9 +264,9 @@ canvas.sparkline { display: block; border-radius: 2px; }
         </div>
         <div class="tf-bar">
           <button class="tf-btn" data-tf="1m">1m</button>
-          <button class="tf-btn" data-tf="5m">5m</button>
-          <button class="tf-btn active" data-tf="15m">15m</button>
-          <button class="tf-btn" data-tf="1h">1h</button>
+          <button class="tf-btn active" data-tf="1h">1h</button>
+          <button class="tf-btn" data-tf="4h">4h</button>
+          <button class="tf-btn" data-tf="1d">1d</button>
         </div>
       </div>
       <div id="chart-container"></div>
@@ -271,8 +294,17 @@ canvas.sparkline { display: block; border-radius: 2px; }
       </div>
     </div>
 
-    <!-- Right Panel — positions only -->
+    <!-- Right Panel — daily bias + positions -->
     <div class="panel" id="right-panel" style="display:flex;flex-direction:column;">
+      <!-- Daily Bias Table -->
+      <div class="panel-title">Daily Bias</div>
+      <div id="bias-section">
+        <table class="bias-table">
+          <thead><tr><th>Symbol</th><th>Bias</th><th>PDH</th><th>PDL</th></tr></thead>
+          <tbody id="bias-body"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <!-- Open Positions -->
       <div class="panel-title">Open Positions <span id="pos-count" style="color:var(--amber)"></span></div>
       <div class="scroll" id="pos-list">
         <div class="empty" id="pos-empty">No open positions</div>
@@ -303,9 +335,10 @@ const state = {
   openTrades: {},        // id -> trade object
   histTrades: [],        // array of closed trades (last 50)
   selectedSymbol: null,
-  selectedInterval: '15m',
-  sparklineData: {},     // symbol -> last 50 close prices (5m)
+  selectedInterval: '1h',
+  sparklineData: {},     // symbol -> last 50 close prices (1m)
   prevPnl: {},           // trade_id -> prev pnl for blink
+  dailyBias: {},         // symbol -> {bias, pdh, pdl}
 };
 
 // ============================================================
@@ -317,6 +350,7 @@ let volSeries = null;
 let ema50Series = null;
 let ema200Series = null;
 let slLine = null, tp1Line = null, tp2Line = null, entryLine = null;
+let fvgLowLine = null, fvgHighLine = null, pdhLine = null, pdlLine = null;
 let _loadChartId = 0;  // increments on each loadChart() call to cancel stale fetches
 
 function initMainChart() {
@@ -412,6 +446,7 @@ async function loadChart(symbol, interval) {
   volSeries.setData([]);
   ema50Series.setData([]);
   ema200Series.setData([]);
+  fvgLowLine = fvgHighLine = pdhLine = pdlLine = null;
 
   // Force price scale to re-autofit for the new symbol's price range
   mainChart.priceScale('right').applyOptions({ autoScale: true });
@@ -455,12 +490,12 @@ async function loadChart(symbol, interval) {
 
     // Add signal markers from recent scanner log
     addSignalMarkers(symbol, candles);
+
+    // Draw trade lines (SL/TP/FVG/PDH/PDL)
+    drawTradeLines(symbol);
   } catch(e) {
     console.error('loadChart error', e);
   }
-
-  // Draw trade lines for open positions in this symbol
-  drawTradeLines(symbol);
 }
 
 function addSignalMarkers(symbol, candles) {
@@ -469,30 +504,53 @@ function addSignalMarkers(symbol, candles) {
   if (!raw) return;
   const signals = JSON.parse(raw);
   const markers = signals.map(sig => ({
-    time: sig.timestamp,
+    time: sig.sweep_time || sig.timestamp,
     position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
-    color: sig.direction === 'LONG' ? '#22c55e' : '#ef4444',
-    shape: sig.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
-    text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.score}`,
+    color: '#f59e0b',   // amber — Daily Sweep signal
+    shape: 'circle',
+    text: `Sweep ${sig.direction}`,
   }));
   if (markers.length) candleSeries.setMarkers(markers);
 }
 
 function clearTradeLines() {
-  [slLine, tp1Line, tp2Line, entryLine].forEach(l => {
+  [slLine, tp1Line, tp2Line, entryLine, fvgLowLine, fvgHighLine, pdhLine, pdlLine].forEach(l => {
     if (l) try { candleSeries.removePriceLine(l); } catch(e) {}
   });
-  slLine = tp1Line = tp2Line = entryLine = null;
+  slLine = tp1Line = tp2Line = entryLine = fvgLowLine = fvgHighLine = pdhLine = pdlLine = null;
 }
 
 function drawTradeLines(symbol) {
   clearTradeLines();
+  if (!candleSeries) return;
+
+  // PDH / PDL from daily bias cache
+  const bias = state.dailyBias[symbol];
+  if (bias && bias.pdh) {
+    pdhLine = candleSeries.createPriceLine({ price: bias.pdh, color: 'rgba(245,158,11,0.5)', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: 'PDH' });
+    pdlLine = candleSeries.createPriceLine({ price: bias.pdl, color: 'rgba(245,158,11,0.5)', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: 'PDL' });
+  }
+
   const trade = Object.values(state.openTrades).find(t => t.symbol === symbol);
-  if (!trade || !candleSeries) return;
+  if (!trade) return;
+
   entryLine = candleSeries.createPriceLine({ price: trade.entry_price, color: 'rgba(255,255,255,0.6)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
-  slLine    = candleSeries.createPriceLine({ price: trade.sl_price,    color: '#ef4444',              lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL' });
-  tp1Line   = candleSeries.createPriceLine({ price: trade.tp1_price,   color: '#22c55e',              lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP1' });
-  tp2Line   = candleSeries.createPriceLine({ price: trade.tp2_price,   color: '#22c55e',              lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP2' });
+  slLine    = candleSeries.createPriceLine({ price: trade.sl_price,    color: '#ef4444',               lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL' });
+  tp1Line   = candleSeries.createPriceLine({ price: trade.tp1_price,   color: '#22c55e',               lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP1' });
+  tp2Line   = candleSeries.createPriceLine({ price: trade.tp2_price,   color: '#22c55e',               lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP2' });
+
+  // FVG zone lines (from signal stored in sessionStorage)
+  const raw = sessionStorage.getItem('signals_' + symbol);
+  if (raw) {
+    const signals = JSON.parse(raw);
+    const last = signals[signals.length - 1];
+    if (last && last.fvg_low && last.fvg_high) {
+      const isLong = last.direction === 'LONG';
+      const zoneColor = isLong ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)';
+      fvgLowLine  = candleSeries.createPriceLine({ price: last.fvg_low,  color: zoneColor, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'FVG Lo' });
+      fvgHighLine = candleSeries.createPriceLine({ price: last.fvg_high, color: zoneColor, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'FVG Hi' });
+    }
+  }
 }
 
 // ============================================================
@@ -592,14 +650,15 @@ function sendWS(obj) {
 // ============================================================
 function handleMessage(type, data) {
   switch (type) {
-    case 'init':            onInit(data);           break;
-    case 'scanner_alert':   onScannerAlert(data);   break;
-    case 'scanner_watchlist': onWatchlist(data);    break;
-    case 'position_update': onPositionUpdate(data); break;
-    case 'trade_closed':    onTradeClosed(data);    break;
-    case 'kline_update':    onKlineUpdate(data);    break;
-    case 'kline_history':   onKlineHistory(data);   break;
-    case 'system_status':   onSystemStatus(data);   break;
+    case 'init':               onInit(data);              break;
+    case 'scanner_alert':      onScannerAlert(data);      break;
+    case 'scanner_watchlist':  onWatchlist(data);         break;
+    case 'position_update':    onPositionUpdate(data);    break;
+    case 'trade_closed':       onTradeClosed(data);       break;
+    case 'kline_update':       onKlineUpdate(data);       break;
+    case 'kline_history':      onKlineHistory(data);      break;
+    case 'system_status':      onSystemStatus(data);      break;
+    case 'daily_bias_update':  onDailyBiasUpdate(data);  break;
   }
 }
 
@@ -619,12 +678,28 @@ function onInit(data) {
   state.histTrades = (data.recent_trades || []).filter(t => t.status === 'CLOSED');
   renderHistory();
 
+  // Daily bias
+  if (data.daily_bias) {
+    state.dailyBias = data.daily_bias;
+    renderDailyBias();
+  }
+
   // Stats
   if (data.stats) updateStats(data.stats);
 
   // Auto-load first symbol chart
   if (!state.selectedSymbol && data.watchlist && data.watchlist.length) {
     selectSymbol(data.watchlist[0]);
+  }
+}
+
+function onDailyBiasUpdate(data) {
+  // data is {symbol: {bias, pdh, pdl}, ...}
+  Object.assign(state.dailyBias, data);
+  renderDailyBias();
+  // Redraw PDH/PDL if selected symbol updated
+  if (state.selectedSymbol && data[state.selectedSymbol]) {
+    drawTradeLines(state.selectedSymbol);
   }
 }
 
@@ -651,16 +726,18 @@ function onScannerAlert(sig) {
   };
   renderScannerRow(sig.symbol, true);
 
-  // If chart is showing this symbol, add marker
+  // If chart is showing this symbol, add sweep marker (orange diamond)
   if (state.selectedSymbol === sig.symbol && candleSeries) {
     const existing = candleSeries.markers ? candleSeries.markers() : [];
     candleSeries.setMarkers([...existing, {
-      time: sig.timestamp,
+      time: sig.sweep_time || sig.timestamp,
       position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
-      color: sig.direction === 'LONG' ? '#22c55e' : '#ef4444',
-      shape: sig.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
-      text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.score}`,
+      color: '#f59e0b',
+      shape: 'circle',
+      text: `Sweep ${sig.direction}`,
     }]);
+    // Also refresh FVG lines now that we have signal data
+    drawTradeLines(state.selectedSymbol);
   }
 }
 
@@ -695,10 +772,11 @@ function onTradeClosed(trade) {
 function onKlineUpdate(data) {
   if (!candleSeries) return;
   if (data.symbol !== state.selectedSymbol || data.interval !== state.selectedInterval) {
-    // Still update sparkline data for 5m
-    if (data.interval === '5m') {
+    // Update sparkline data from 1m candles
+    if (data.interval === '1m') {
       if (!state.sparklineData[data.symbol]) state.sparklineData[data.symbol] = [];
       const arr = state.sparklineData[data.symbol];
+      if (arr.length && arr[arr.length - 1] === data.candle.close) return;
       arr.push(data.candle.close);
       if (arr.length > 50) arr.shift();
       updateSparkline(data.symbol, arr);
@@ -712,9 +790,6 @@ function onKlineUpdate(data) {
     value: data.candle.volume,
     color: data.candle.close >= data.candle.open ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)',
   });
-  // Update EMA lines
-  if (data.ema50) ema50Series.update({ time: data.candle.time, value: data.ema50 });
-  if (data.ema200) ema200Series.update({ time: data.candle.time, value: data.ema200 });
 
   // Update header price
   const price = data.candle.close;
@@ -741,6 +816,32 @@ function onSystemStatus(data) {
 // ============================================================
 // RENDERERS
 // ============================================================
+function renderDailyBias() {
+  const tbody = document.getElementById('bias-body');
+  const entries = Object.entries(state.dailyBias);
+  if (!entries.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">No data yet</td></tr>';
+    return;
+  }
+  // Sort: LONG first, SHORT second, NEUTRAL last; then alphabetical
+  entries.sort(([, a], [, b]) => {
+    const order = { LONG: 0, SHORT: 1, NEUTRAL: 2 };
+    return (order[a.bias] ?? 2) - (order[b.bias] ?? 2);
+  });
+  tbody.innerHTML = '';
+  entries.forEach(([sym, info]) => {
+    const biasCls = info.bias === 'LONG' ? 'bias-long' : info.bias === 'SHORT' ? 'bias-short' : 'bias-neut';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:600;cursor:pointer" onclick="selectSymbol('${sym}')">${sym.replace('USDT', '')}</td>
+      <td><span class="bias-badge ${biasCls}">${info.bias}</span></td>
+      <td style="color:var(--muted)">${fmtPrice(info.pdh)}</td>
+      <td style="color:var(--muted)">${fmtPrice(info.pdl)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
 function renderScanner() {
   const list = document.getElementById('scanner-list');
   if (!state.watchlist.length) { list.innerHTML = '<div class="empty">No symbols</div>'; return; }
@@ -766,9 +867,15 @@ function buildScannerRow(sym) {
   row.className = 'sym-row';
   row.id = 'symrow-' + sym;
   row.dataset.sym = sym;
+  const bias = state.dailyBias[sym];
+  const biasCls = bias ? (bias.bias === 'LONG' ? 'bias-long' : bias.bias === 'SHORT' ? 'bias-short' : 'bias-neut') : 'bias-neut';
+  const biasLabel = bias ? bias.bias[0] : '?';  // L / S / N
   row.innerHTML = `
     <div>
-      <div class="sym-name">${sym.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span></div>
+      <div class="sym-name">
+        ${sym.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span>
+        <span class="sym-bias-badge bias-badge ${biasCls}" id="biasb-${sym}">${biasLabel}</span>
+      </div>
       <div class="sym-score-bar"><div class="sym-score-fill" id="fill-${sym}" style="width:0%"></div></div>
     </div>
     <div class="sparkline-wrap">

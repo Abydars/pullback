@@ -1,19 +1,20 @@
 """
-signal_engine.py — Pullback detection logic with 0-100 scoring.
+signal_engine.py — Daily Sweep (ICT/SMC) strategy.
 
-Indicators implemented manually (no pandas-ta dependency):
-  - EMA (exponential moving average)
-  - ATR (average true range)
-  - StochRSI (K/D lines)
-  - MACD histogram
+Three phases — ALL must pass for a valid signal:
+  Phase 1: Daily Bias  (computed once/day from daily candles)
+  Phase 2: Liquidity Sweep detection on 1h chart within NY open window
+  Phase 3: Fair Value Gap (FVG) confirmation on 1h chart after the sweep
 
-All candle data is passed in as a list of dicts with keys:
-  open, high, low, close, volume  (float values)
+Public API:
+  compute_daily_bias(daily_klines)  -> {"bias", "pdh", "pdl"}
+  check_daily_sweep(symbol, klines_1h, daily_bias, current_price, utc_now) -> signal | None
 """
 from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, time as dtime
 from typing import Optional
 
 import numpy as np
@@ -23,234 +24,382 @@ import config
 
 logger = logging.getLogger(__name__)
 
+
 # ── Indicator helpers ──────────────────────────────────────────────────────────
 
-def _ema(series: pd.Series, period: int) -> pd.Series:
-    return series.ewm(span=period, adjust=False).mean()
+def _atr(candles: list[dict], period: int = 14) -> float:
+    """Return ATR of the last `period` candles."""
+    if len(candles) < period + 1:
+        # Fallback: simple range average
+        ranges = [c["high"] - c["low"] for c in candles[-period:]]
+        return sum(ranges) / len(ranges) if ranges else 0.0
+    highs  = [c["high"]  for c in candles[-(period + 1):]]
+    lows   = [c["low"]   for c in candles[-(period + 1):]]
+    closes = [c["close"] for c in candles[-(period + 1):]]
+    trs = []
+    for i in range(1, len(highs)):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i]  - closes[i - 1]),
+        )
+        trs.append(tr)
+    # Simple moving average of TR
+    return sum(trs[-period:]) / period
 
 
-def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    high = df["high"]
-    low = df["low"]
-    prev_close = df["close"].shift(1)
-    tr = pd.concat(
-        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
-    ).max(axis=1)
-    return tr.ewm(span=period, adjust=False).mean()
+# ── NY Open window check ───────────────────────────────────────────────────────
+
+def _parse_hhmm(s: str) -> dtime:
+    h, m = map(int, s.split(":"))
+    return dtime(h, m)
 
 
-def _rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = (-delta).clip(lower=0)
-    avg_gain = gain.ewm(span=period, adjust=False).mean()
-    avg_loss = loss.ewm(span=period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
+def _in_ny_window(utc_now: datetime) -> bool:
+    t = utc_now.time().replace(second=0, microsecond=0)
+    start = _parse_hhmm(config.NY_OPEN_START_UTC)
+    end   = _parse_hhmm(config.NY_OPEN_END_UTC)
+    return start <= t <= end
 
 
-def _stoch_rsi(
-    series: pd.Series,
-    rsi_period: int = 14,
-    stoch_period: int = 14,
-    smooth_k: int = 3,
-    smooth_d: int = 3,
-) -> tuple[pd.Series, pd.Series]:
-    """Return (K, D) lines scaled 0-100."""
-    rsi = _rsi(series, rsi_period)
-    min_rsi = rsi.rolling(stoch_period).min()
-    max_rsi = rsi.rolling(stoch_period).max()
-    denom = (max_rsi - min_rsi).replace(0, np.nan)
-    raw_k = 100 * (rsi - min_rsi) / denom
-    k = raw_k.rolling(smooth_k).mean()
-    d = k.rolling(smooth_d).mean()
-    return k, d
+# ── Phase 1: Daily Bias ────────────────────────────────────────────────────────
 
+def compute_daily_bias(daily_klines: list[dict]) -> dict:
+    """
+    Determine today's directional bias from the last 3 daily candles.
 
-def _macd(
-    series: pd.Series,
-    fast: int = 12,
-    slow: int = 26,
-    signal: int = 9,
-) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """Return (macd_line, signal_line, histogram)."""
-    fast_ema = _ema(series, fast)
-    slow_ema = _ema(series, slow)
-    macd_line = fast_ema - slow_ema
-    signal_line = _ema(macd_line, signal)
-    histogram = macd_line - signal_line
-    return macd_line, signal_line, histogram
+    Requires at least 3 candles (index -3, -2, -1).
+      - candle[-2] = previous day  → pdh, pdl
+      - candle[-1] = today (or most recent closed day)
 
+    BULLISH:  high[-1] > high[-2] AND low[-1] > low[-2]
+    BEARISH:  high[-1] < high[-2] AND low[-1] < low[-2]
+    NEUTRAL:  otherwise (inside bar / indecision)
 
-def _swing_highs(series: pd.Series, window: int = 5) -> pd.Series:
-    """Boolean series: True where value is local max over window."""
-    return (series == series.rolling(window, center=True).max()) & (
-        series.shift(1) < series
+    Returns: {"bias": str, "pdh": float, "pdl": float}
+    """
+    result = {"bias": "NEUTRAL", "pdh": 0.0, "pdl": 0.0}
+    if len(daily_klines) < 3:
+        return result
+
+    c_prev = daily_klines[-2]   # previous day
+    c_cur  = daily_klines[-1]   # most recent day
+
+    pdh = float(c_prev["high"])
+    pdl = float(c_prev["low"])
+    result["pdh"] = pdh
+    result["pdl"] = pdl
+
+    hh = float(c_cur["high"]) > pdh   # higher high
+    hl = float(c_cur["low"])  > pdl   # higher low
+    lh = float(c_cur["high"]) < pdh   # lower high
+    ll = float(c_cur["low"])  < pdl   # lower low
+
+    if hh and hl:
+        result["bias"] = "LONG"
+    elif lh and ll:
+        result["bias"] = "SHORT"
+    # else NEUTRAL
+
+    logger.debug(
+        "Daily bias: %s | pdh=%.6f pdl=%.6f | cur_high=%.6f cur_low=%.6f",
+        result["bias"], pdh, pdl,
+        float(c_cur["high"]), float(c_cur["low"]),
     )
+    return result
 
 
-def _swing_lows(series: pd.Series, window: int = 5) -> pd.Series:
-    return (series == series.rolling(window, center=True).min()) & (
-        series.shift(1) > series
-    )
+# ── Phase 2: Liquidity Sweep detection ────────────────────────────────────────
+
+def _find_sweep(candles: list[dict], direction: str, lookback: int) -> Optional[dict]:
+    """
+    For LONG bias (direction="LONG") → look for a BEARISH sweep:
+      - Find swing LOW in last `lookback` candles
+      - Find a candle whose LOW broke below that swing low
+        AND whose CLOSE recovered above it  (fake out)
+
+    For SHORT bias (direction="SHORT") → look for a BULLISH sweep:
+      - Find swing HIGH in last `lookback` candles
+      - Candle HIGH broke above swing high AND CLOSE came back below it
+
+    Checks the last 3 candles (most recent) for the sweep candle.
+    Returns the sweep candle dict with added "sweep_level" key, or None.
+    """
+    if len(candles) < 2:
+        return None
+
+    # Split into reference window (older, for swing level) and search window (recent).
+    # Use the last 2*lookback candles; first half is reference, second half is searched.
+    # ref_end is the split point (at least 1 candle on each side).
+    pool    = candles[-(2 * lookback):] if len(candles) >= 2 * lookback else candles
+    ref_end = max(1, len(pool) - lookback)
+    ref_w   = pool[:ref_end]    # reference candles for swing level
+    srch_w  = pool[ref_end:]    # candidate sweep candles (searched newest-first)
+
+    if not ref_w or not srch_w:
+        return None
+
+    if direction == "LONG":
+        swing_low = min(c["low"] for c in ref_w)
+        for candle in reversed(srch_w):
+            if candle["low"] < swing_low and candle["close"] > swing_low:
+                return {**candle, "sweep_level": swing_low}
+    else:  # SHORT
+        swing_high = max(c["high"] for c in ref_w)
+        for candle in reversed(srch_w):
+            if candle["high"] > swing_high and candle["close"] < swing_high:
+                return {**candle, "sweep_level": swing_high}
+
+    return None
 
 
-# ── Signal Engine ──────────────────────────────────────────────────────────────
+# ── Phase 3: Fair Value Gap detection ─────────────────────────────────────────
 
-def check_pullback(
-    symbol: str,
-    klines_15m: list[dict],
-    klines_5m: list[dict],
+def _find_fvg(
+    candles: list[dict],
+    direction: str,
+    sweep_time: int,
+    atr: float,
 ) -> Optional[dict]:
     """
-    Run the full pullback scoring model.
+    Look for an FVG in the candles AFTER the sweep candle.
 
-    Parameters
-    ----------
-    symbol       : e.g. "BTCUSDT"
-    klines_15m   : list of candle dicts (at least 210 candles)
-    klines_5m    : list of candle dicts (at least 50 candles)
+    Bullish FVG (for LONG):  candle[i+2].low > candle[i].high
+    Bearish FVG (for SHORT): candle[i+2].high < candle[i].low
 
-    Returns None if no valid signal, else a signal dict.
+    Checks the 3 candles immediately after the sweep.
+    FVG size must be >= ATR * FVG_MIN_ATR_MULT.
+
+    Returns {"fvg_high", "fvg_low", "fvg_mid"} or None.
     """
-    if len(klines_15m) < 210 or len(klines_5m) < 50:
+    min_size = atr * config.FVG_MIN_ATR_MULT
+
+    # Find index of sweep candle in the list
+    sweep_idx = None
+    for i, c in enumerate(candles):
+        if c.get("time") == sweep_time:
+            sweep_idx = i
+            break
+
+    if sweep_idx is None or sweep_idx + 2 >= len(candles):
+        # Sweep is too recent — not enough candles after it yet
         return None
 
-    df15 = pd.DataFrame(klines_15m).astype(float)
-    df5 = pd.DataFrame(klines_5m).astype(float)
+    # Look at 3 consecutive candle triplets starting right after the sweep
+    for i in range(sweep_idx + 1, min(sweep_idx + 4, len(candles) - 2)):
+        c0 = candles[i]
+        c2 = candles[i + 2]
+        if direction == "LONG":
+            fvg_low  = c0["high"]
+            fvg_high = c2["low"]
+            if fvg_high > fvg_low and (fvg_high - fvg_low) >= min_size:
+                return {
+                    "fvg_low":  fvg_low,
+                    "fvg_high": fvg_high,
+                    "fvg_mid":  (fvg_low + fvg_high) / 2,
+                }
+        else:  # SHORT
+            fvg_high = c0["low"]
+            fvg_low  = c2["high"]
+            if fvg_high > fvg_low and (fvg_high - fvg_low) >= min_size:
+                return {
+                    "fvg_low":  fvg_low,
+                    "fvg_high": fvg_high,
+                    "fvg_mid":  (fvg_low + fvg_high) / 2,
+                }
 
-    score = 0
-    reasons: list[str] = []
+    return None
 
-    # ── 1. Trend direction (15m) ──────────────────────────────────────────────
-    close15 = df15["close"]
-    ema50 = _ema(close15, 50)
-    ema200 = _ema(close15, 200)
 
-    last_close = close15.iloc[-1]
-    last_ema50 = ema50.iloc[-1]
-    last_ema200 = ema200.iloc[-1]
+# ── Main signal function ───────────────────────────────────────────────────────
 
-    if last_close > last_ema50 and last_ema50 > last_ema200:
-        direction = "LONG"
-        score += 25
-        reasons.append("trend:LONG")
-    elif last_close < last_ema50 and last_ema50 < last_ema200:
-        direction = "SHORT"
-        score += 25
-        reasons.append("trend:SHORT")
-    else:
-        # Ranging — skip
+def check_daily_sweep(
+    symbol: str,
+    klines_1h: list[dict],
+    daily_bias: dict,
+    current_price: float,
+    utc_now: datetime,
+    atr_mult: float = None,
+) -> Optional[dict]:
+    """
+    Run all 3 phases of the Daily Sweep strategy.
+
+    Returns a signal dict if all phases pass, else None.
+    """
+    if atr_mult is None:
+        atr_mult = config.FVG_MIN_ATR_MULT
+
+    # ── Gate: NY open window ─────────────────────────────────────────────────
+    if not _in_ny_window(utc_now):
         return None
 
-    # ── 2. Pullback zone (15m) ────────────────────────────────────────────────
-    atr15 = _atr(df15, 14).iloc[-1]
-    ema50_zone_pct = abs(last_close - last_ema50) / last_ema50
-
-    in_ema50_zone = ema50_zone_pct <= 0.005  # within 0.5% of EMA50
-
-    # Swing high/low zones (last 20 candles)
-    recent = df15.tail(21)
-    if direction == "LONG":
-        swing_level = recent["low"].min()
-        in_swing_zone = abs(last_close - swing_level) <= atr15 * 1.5
-    else:
-        swing_level = recent["high"].max()
-        in_swing_zone = abs(last_close - swing_level) <= atr15 * 1.5
-
-    if in_ema50_zone or in_swing_zone:
-        score += 25
-        reasons.append("pullback_zone")
-
-    # ── 3. Momentum reversal (5m) ─────────────────────────────────────────────
-    close5 = df5["close"]
-    k, d = _stoch_rsi(close5)
-    _, _, macd_hist = _macd(close5)
-
-    # Use last 2 values for crossover detection
-    k_prev, k_last = k.iloc[-2], k.iloc[-1]
-    d_prev, d_last = d.iloc[-2], d.iloc[-1]
-    hist_prev = macd_hist.iloc[-2]
-    hist_last = macd_hist.iloc[-1]
-
-    stoch_signal = False
-    macd_signal = False
-
-    if direction == "LONG":
-        # K crosses above D from oversold
-        if k_prev < d_prev and k_last > d_last and k_prev < 20:
-            stoch_signal = True
-        # MACD hist turning positive
-        if hist_prev < 0 and hist_last > hist_prev:
-            macd_signal = True
-    else:
-        # K crosses below D from overbought
-        if k_prev > d_prev and k_last < d_last and k_prev > 80:
-            stoch_signal = True
-        # MACD hist turning negative
-        if hist_prev > 0 and hist_last < hist_prev:
-            macd_signal = True
-
-    if stoch_signal:
-        score += 20
-        reasons.append("stochrsi")
-    if macd_signal:
-        score += 15
-        reasons.append("macd")
-
-    # ── 4. Volume spike ───────────────────────────────────────────────────────
-    vol15 = df15["volume"]
-    avg_vol = vol15.iloc[-21:-1].mean()
-    last_vol = vol15.iloc[-1]
-    if avg_vol > 0 and last_vol > avg_vol * 1.5:
-        score += 15
-        reasons.append("volume_spike")
-
-    # ── Score gate ────────────────────────────────────────────────────────────
-    if score < config.SIGNAL_SCORE_THRESHOLD:
+    # ── Gate: daily bias must be directional ────────────────────────────────
+    bias = daily_bias.get("bias", "NEUTRAL")
+    if bias == "NEUTRAL":
         return None
 
-    # ── Compute entry / SL / TP ───────────────────────────────────────────────
-    entry_price = last_close
+    pdh = float(daily_bias.get("pdh", 0))
+    pdl = float(daily_bias.get("pdl", 0))
 
-    if direction == "LONG":
-        sl_price = min(
-            recent["low"].min(),
-            entry_price - atr15 * 1.5,
+    if len(klines_1h) < config.SWEEP_LOOKBACK + 3:
+        return None
+
+    direction = bias  # "LONG" or "SHORT"
+
+    # ── Phase 2: Sweep ───────────────────────────────────────────────────────
+    sweep = _find_sweep(klines_1h, direction, config.SWEEP_LOOKBACK)
+    if sweep is None:
+        logger.debug("%s: no sweep detected", symbol)
+        return None
+
+    # ── ATR on 1h candles ────────────────────────────────────────────────────
+    atr = _atr(klines_1h, period=14)
+    if atr <= 0:
+        return None
+
+    # ── Phase 3: FVG ─────────────────────────────────────────────────────────
+    fvg = _find_fvg(klines_1h, direction, sweep.get("time", 0), atr)
+    if fvg is None:
+        logger.debug("%s: sweep found but no FVG yet", symbol)
+        return None
+
+    # ── Entry trigger: price inside FVG zone ─────────────────────────────────
+    fvg_low  = fvg["fvg_low"]
+    fvg_high = fvg["fvg_high"]
+    if not (fvg_low <= current_price <= fvg_high):
+        logger.debug(
+            "%s: FVG [%.6f-%.6f] found but price %.6f not inside yet",
+            symbol, fvg_low, fvg_high, current_price,
         )
-        sl_price = round(sl_price, 8)
-    else:
-        sl_price = max(
-            recent["high"].max(),
-            entry_price + atr15 * 1.5,
-        )
-        sl_price = round(sl_price, 8)
-
-    risk = abs(entry_price - sl_price)
-    if risk <= 0:
         return None
 
+    # ── SL / TP calculation ──────────────────────────────────────────────────
+    sl_buffer = atr * 0.1
     if direction == "LONG":
-        tp1_price = round(entry_price + risk, 8)       # 1:1 RR
-        tp2_price = round(entry_price + risk * 2, 8)   # 1:2 RR
+        sl_price  = round(sweep["low"] - sl_buffer, 8)
+        tp1_price = round(pdh, 8)                           # Previous Day High
+        tp2_price = round(pdh + (pdh - current_price) * 0.5, 8)
     else:
-        tp1_price = round(entry_price - risk, 8)
-        tp2_price = round(entry_price - risk * 2, 8)
+        sl_price  = round(sweep["high"] + sl_buffer, 8)
+        tp1_price = round(pdl, 8)                           # Previous Day Low
+        tp2_price = round(pdl - (current_price - pdl) * 0.5, 8)
 
-    signal: dict = {
-        "symbol": symbol,
-        "direction": direction,
-        "score": score,
-        "entry_price": round(entry_price, 8),
-        "sl_price": sl_price,
-        "tp1_price": tp1_price,
-        "tp2_price": tp2_price,
-        "timeframe": "15m",
-        "timestamp": int(time.time()),
-        "reasons": reasons,
+    if sl_price <= 0 or tp1_price <= 0:
+        return None
+
+    signal = {
+        "symbol":      symbol,
+        "direction":   direction,
+        "entry_price": round(current_price, 8),
+        "sl_price":    sl_price,
+        "tp1_price":   tp1_price,
+        "tp2_price":   tp2_price,
+        "fvg_high":    round(fvg_high, 8),
+        "fvg_low":     round(fvg_low,  8),
+        "sweep_price": round(sweep.get("low" if direction == "LONG" else "high", 0), 8),
+        "sweep_time":  sweep.get("time", 0),
+        "daily_bias":  bias,
+        "pdh":         round(pdh, 8),
+        "pdl":         round(pdl, 8),
+        "timestamp":   int(time.time()),
+        "score":       100,   # all 3 phases passed
     }
     logger.info(
-        "Signal: %s %s score=%d reasons=%s",
-        symbol, direction, score, reasons,
+        "Daily Sweep signal: %s %s entry=%.6f sl=%.6f tp1=%.6f fvg=[%.6f-%.6f]",
+        symbol, direction, current_price, sl_price, tp1_price, fvg_low, fvg_high,
     )
     return signal
+
+
+# ── Inline unit test ──────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import sys
+
+    def _c(t, o, h, l, c, v=1000):
+        return {"time": t, "open": o, "high": h, "low": l, "close": c, "volume": v}
+
+    print("=== Test 1: compute_daily_bias ===")
+    daily = [
+        _c(0, 100, 105, 98,  103),   # candle -3
+        _c(1, 103, 108, 101, 106),   # candle -2 → pdh=108, pdl=101
+        _c(2, 106, 110, 103, 109),   # candle -1 → hh (110>108) AND hl (103>101) → LONG
+    ]
+    bias = compute_daily_bias(daily)
+    assert bias["bias"] == "LONG",  f"Expected LONG got {bias['bias']}"
+    assert bias["pdh"] == 108.0
+    assert bias["pdl"] == 101.0
+    print("  LONG bias: OK")
+
+    daily_bear = [
+        _c(0, 110, 115, 108, 112),
+        _c(1, 112, 114, 107, 109),   # pdh=114, pdl=107
+        _c(2, 109, 113, 105, 107),   # lh (113<114) AND ll (105<107) → SHORT
+    ]
+    bias_bear = compute_daily_bias(daily_bear)
+    assert bias_bear["bias"] == "SHORT", f"Expected SHORT got {bias_bear['bias']}"
+    print("  SHORT bias: OK")
+
+    print("\n=== Test 2: _find_sweep (LONG / bearish sweep) ===")
+    # 6 candles, swing low at 98. Candle -2: wick below 98, closes above → sweep
+    candles_1h = [
+        _c(10, 100, 104, 98,  102),   # -6  swing low @ 98
+        _c(11, 102, 106, 99,  105),   # -5
+        _c(12, 105, 108, 100, 107),   # -4
+        _c(13, 107, 109, 99,  108),   # -3
+        _c(14, 108, 110, 95,  103),   # -2  low=95 < 98, close=103 > 98 → SWEEP
+        _c(15, 103, 107, 101, 106),   # -1  post-sweep
+    ]
+    sweep = _find_sweep(candles_1h, "LONG", 6)
+    assert sweep is not None, "Sweep not found"
+    assert sweep["time"] == 14, f"Wrong sweep candle time: {sweep['time']}"
+    print(f"  Sweep found at time={sweep['time']} low={sweep['low']} level={sweep['sweep_level']}: OK")
+
+    print("\n=== Test 3: _find_fvg (bullish FVG after sweep) ===")
+    # After sweep at t=14, next 3 candles form a bullish FVG
+    # c0.high=107, c2.low=109 → gap [107, 109] > min_size
+    candles_with_fvg = candles_1h + [
+        _c(16, 106, 107, 104, 106),   # c0 high=107
+        _c(17, 107, 108, 105, 108),   # c1 (middle)
+        _c(18, 109, 112, 109, 111),   # c2 low=109 > c0 high=107 → FVG [107, 109]
+    ]
+    atr_val = _atr(candles_with_fvg, 14)
+    fvg = _find_fvg(candles_with_fvg, "LONG", sweep_time=14, atr=atr_val)
+    assert fvg is not None, "FVG not found"
+    assert fvg["fvg_low"] == 107.0 and fvg["fvg_high"] == 109.0, f"Wrong FVG: {fvg}"
+    print(f"  FVG found: [{fvg['fvg_low']}, {fvg['fvg_high']}]: OK")
+
+    print("\n=== Test 4: check_daily_sweep full pipeline (inside FVG) ===")
+    utc_in_window = datetime(2024, 1, 15, 14, 0)  # 14:00 UTC = inside 13:30-15:00
+    signal = check_daily_sweep(
+        symbol="BTCUSDT",
+        klines_1h=candles_with_fvg,
+        daily_bias={"bias": "LONG", "pdh": 115.0, "pdl": 95.0},
+        current_price=108.0,   # inside FVG [107, 109]
+        utc_now=utc_in_window,
+    )
+    assert signal is not None, "Signal should fire"
+    assert signal["direction"] == "LONG"
+    assert signal["fvg_low"]  == 107.0
+    assert signal["fvg_high"] == 109.0
+    assert signal["tp1_price"] == 115.0
+    assert signal["score"] == 100
+    print(f"  Signal: {signal['direction']} entry={signal['entry_price']} sl={signal['sl_price']} tp1={signal['tp1_price']}: OK")
+
+    print("\n=== Test 5: check_daily_sweep outside NY window → None ===")
+    utc_out = datetime(2024, 1, 15, 10, 0)   # 10:00 UTC, before window
+    sig_out = check_daily_sweep("BTCUSDT", candles_with_fvg,
+                                 {"bias": "LONG", "pdh": 115.0, "pdl": 95.0},
+                                 108.0, utc_out)
+    assert sig_out is None, "Should not fire outside window"
+    print("  Outside window → None: OK")
+
+    print("\n=== Test 6: price outside FVG → None ===")
+    sig_out2 = check_daily_sweep("BTCUSDT", candles_with_fvg,
+                                  {"bias": "LONG", "pdh": 115.0, "pdl": 95.0},
+                                  current_price=112.0,  # above FVG
+                                  utc_now=utc_in_window)
+    assert sig_out2 is None, "Should not fire when price outside FVG"
+    print("  Price above FVG → None: OK")
+
+    print("\nAll tests passed ✓")

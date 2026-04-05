@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "pullback-bot",
+      name: "daily-sweep-bot",
       script: "main.py",
       interpreter: "python3",
       watch: false,
