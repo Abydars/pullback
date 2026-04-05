@@ -46,7 +46,7 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
-app = FastAPI(title="Pullback Bot", version="1.0.0")
+app = FastAPI(title="Daily Sweep Bot", version="2.0.0")
 
 _FRONTEND = Path(__file__).parent / "frontend" / "index.html"
 
@@ -55,7 +55,7 @@ _FRONTEND = Path(__file__).parent / "frontend" / "index.html"
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    logger.info("=== Pullback Bot starting (MODE=%s) ===", config.MODE)
+    logger.info("=== Daily Sweep Bot starting (MODE=%s) ===", config.MODE)
 
     # 1. Database
     await db.init_db()
@@ -119,6 +119,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             "recent_trades": recent_trades,
             "stats": stats,
             "watchlist": scanner.active_watchlist,
+            "daily_bias": scanner.daily_bias_cache,
         })
 
         # Listen for client messages (e.g. subscribe_chart)
@@ -212,6 +213,11 @@ async def api_klines(symbol: str = "BTCUSDT", interval: str = "15m", limit: int 
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+@app.get("/api/daily-bias")
+async def api_daily_bias() -> JSONResponse:
+    return JSONResponse(scanner.daily_bias_cache)
+
+
 @app.get("/api/watchlist")
 async def api_watchlist() -> JSONResponse:
     return JSONResponse({"symbols": scanner.active_watchlist, "count": len(scanner.active_watchlist)})
@@ -225,7 +231,6 @@ async def api_status() -> JSONResponse:
         "watchlist_count": len(scanner.active_watchlist),
         "open_positions": await db.count_open_trades(),
         "ws_clients": wsb.broadcaster.client_count,
-        "signal_threshold": config.SIGNAL_SCORE_THRESHOLD,
         "risk_per_trade": config.RISK_PER_TRADE_USDT,
         "max_open_trades": config.MAX_OPEN_TRADES,
         "leverage": config.LEVERAGE,

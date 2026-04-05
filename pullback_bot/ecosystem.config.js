@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "pullback-bot",
+      name: "daily-sweep-bot",
       script: "main.py",
       interpreter: "./venv/bin/python",
       watch: false,
