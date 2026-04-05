@@ -66,7 +66,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 /* ── Scanner panel ────────────────────────────────────────────────────────── */
 #scanner-panel { background: var(--bg2); }
 .sym-row {
-  display: grid; grid-template-columns: 1fr 80px 28px;
+  display: grid; grid-template-columns: 1fr 72px 28px;
   align-items: center; gap: 6px;
   padding: 6px 10px; border-bottom: 1px solid #0e0e0e;
   cursor: pointer; transition: background .15s;
@@ -81,8 +81,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .sym-dir { font-size: 10px; text-align: right; }
 .dir-long  { color: var(--green); }
 .dir-short { color: var(--red); }
-.sparkline-wrap { padding: 2px 10px 4px; }
-canvas.sparkline { display: block; }
+.sparkline-wrap { display: flex; align-items: center; justify-content: center; }
+canvas.sparkline { display: block; border-radius: 2px; }
 
 /* ── Chart panel ──────────────────────────────────────────────────────────── */
 #chart-panel {
@@ -247,7 +247,6 @@ const state = {
   selectedSymbol: null,
   selectedInterval: '15m',
   sparklineData: {},     // symbol -> last 50 close prices (5m)
-  sparklineCharts: {},   // symbol -> LWC chart instance
   prevPnl: {},           // trade_id -> prev pnl for blink
 };
 
@@ -437,43 +436,30 @@ function computeEMA(closes, period) {
 }
 
 // ============================================================
-// SPARKLINES
+// SPARKLINES (canvas-based — lightweight, no sizing issues)
 // ============================================================
-function getOrCreateSparkline(symbol) {
-  if (state.sparklineCharts[symbol]) return state.sparklineCharts[symbol];
-  const container = document.getElementById('spark-' + symbol);
-  if (!container) return null;
-  const chart = LightweightCharts.createChart(container, {
-    layout: { background: { color: 'transparent' }, textColor: 'transparent' },
-    grid: { vertLines: { visible: false }, horzLines: { visible: false } },
-    rightPriceScale: { visible: false },
-    leftPriceScale: { visible: false },
-    timeScale: { visible: false },
-    crosshair: { vertLine: { visible: false }, horzLine: { visible: false } },
-    handleScroll: false,
-    handleScale: false,
-    width: 80,
-    height: 32,
-  });
-  const lineSeries = chart.addLineSeries({
-    color: '#f59e0b',
-    lineWidth: 1,
-    priceLineVisible: false,
-    lastValueVisible: false,
-    crosshairMarkerVisible: false,
-  });
-  state.sparklineCharts[symbol] = { chart, lineSeries };
-  return state.sparklineCharts[symbol];
-}
-
 function updateSparkline(symbol, closes) {
   if (!closes || closes.length < 2) return;
-  const sc = getOrCreateSparkline(symbol);
-  if (!sc) return;
+  const canvas = document.getElementById('spark-' + symbol);
+  if (!canvas) return;
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const range = max - min || 1;
   const color = closes[closes.length - 1] >= closes[0] ? '#22c55e' : '#ef4444';
-  sc.lineSeries.applyOptions({ color });
-  const data = closes.map((v, i) => ({ time: i + 1, value: v }));
-  sc.lineSeries.setData(data);
+
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  closes.forEach((v, i) => {
+    const x = (i / (closes.length - 1)) * W;
+    const y = H - ((v - min) / range) * (H - 2) - 1;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
 }
 
 // ============================================================
@@ -598,10 +584,20 @@ function onScannerAlert(sig) {
 }
 
 function onPositionUpdate(positions) {
+  const prevIds = new Set(Object.keys(state.openTrades).map(Number));
   state.openTrades = {};
   positions.forEach(t => { state.openTrades[t.id] = t; });
   renderPositions();
-  // Redraw trade lines if relevant
+
+  // Auto-switch chart to newly opened trade's symbol
+  positions.forEach(t => {
+    if (!prevIds.has(t.id)) {
+      // This is a new trade — switch chart to its symbol
+      selectSymbol(t.symbol);
+    }
+  });
+
+  // Redraw trade lines for selected symbol (handles both new and existing)
   if (state.selectedSymbol) drawTradeLines(state.selectedSymbol);
 }
 
@@ -668,6 +664,9 @@ function renderScanner() {
   const list = document.getElementById('scanner-list');
   if (!state.watchlist.length) { list.innerHTML = '<div class="empty">No symbols</div>'; return; }
 
+  // Remove any placeholder (.empty) nodes on first real render
+  list.querySelectorAll('.empty').forEach(el => el.remove());
+
   // Build rows (only add new ones)
   state.watchlist.forEach(sym => {
     if (!document.getElementById('symrow-' + sym)) {
@@ -691,14 +690,12 @@ function buildScannerRow(sym) {
       <div class="sym-name">${sym.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span></div>
       <div class="sym-score-bar"><div class="sym-score-fill" id="fill-${sym}" style="width:0%"></div></div>
     </div>
-    <div id="spark-wrap-${sym}" class="sparkline-wrap">
-      <div id="spark-${sym}" style="width:80px;height:32px;"></div>
+    <div class="sparkline-wrap">
+      <canvas id="spark-${sym}" class="sparkline" width="72" height="28"></canvas>
     </div>
     <div class="sym-dir" id="dir-${sym}">—</div>
   `;
   row.onclick = () => selectSymbol(sym);
-  // Init sparkline
-  setTimeout(() => getOrCreateSparkline(sym), 0);
   return row;
 }
 
