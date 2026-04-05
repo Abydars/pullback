@@ -212,6 +212,99 @@ async def api_klines(symbol: str = "BTCUSDT", interval: str = "15m", limit: int 
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+@app.post("/api/positions/{trade_id}/close")
+async def close_position(trade_id: int) -> JSONResponse:
+    """Close a specific open position at current mark price."""
+    open_trades = await db.get_open_trades()
+    trade = next((t for t in open_trades if t["id"] == trade_id), None)
+    if not trade:
+        return JSONResponse({"error": "Trade not found or already closed"}, status_code=404)
+
+    symbol = trade["symbol"]
+    mark = scanner.mark_prices.get(symbol) or float(trade["entry_price"])
+
+    if config.MODE == "paper":
+        direction = trade["direction"]
+        entry = float(trade["entry_price"])
+        qty = float(trade["qty"])
+        pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
+        pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0.0
+        close_time = int(time.time() * 1000)
+        await db.update_trade_close(
+            trade_id=trade_id,
+            close_price=mark,
+            close_time=close_time,
+            pnl_usdt=round(pnl, 4),
+            pnl_pct=round(pnl_pct, 2),
+        )
+        await wsb.broadcaster.broadcast("trade_closed", {
+            **trade,
+            "close_price": mark,
+            "close_reason": "MANUAL",
+            "pnl_usdt": round(pnl, 4),
+            "pnl_pct": round(pnl_pct, 2),
+            "close_time": close_time,
+        })
+        return JSONResponse({"ok": True, "pnl_usdt": round(pnl, 4)})
+    else:
+        try:
+            side = "SELL" if trade["direction"] == "LONG" else "BUY"
+            await bc.cancel_all_orders(symbol)
+            await bc.place_market_order(symbol, side, float(trade["qty"]), reduce_only=True)
+            return JSONResponse({"ok": True})
+        except Exception as exc:
+            logger.error("close_position live error: %s", exc)
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.post("/api/positions/close-all")
+async def close_all_positions() -> JSONResponse:
+    """Close all open positions at current mark price."""
+    open_trades = await db.get_open_trades()
+    if not open_trades:
+        return JSONResponse({"ok": True, "closed": 0})
+
+    results = []
+    for trade in open_trades:
+        symbol = trade["symbol"]
+        mark = scanner.mark_prices.get(symbol) or float(trade["entry_price"])
+
+        if config.MODE == "paper":
+            direction = trade["direction"]
+            entry = float(trade["entry_price"])
+            qty = float(trade["qty"])
+            pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
+            pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0.0
+            close_time = int(time.time() * 1000)
+            await db.update_trade_close(
+                trade_id=trade["id"],
+                close_price=mark,
+                close_time=close_time,
+                pnl_usdt=round(pnl, 4),
+                pnl_pct=round(pnl_pct, 2),
+            )
+            await wsb.broadcaster.broadcast("trade_closed", {
+                **trade,
+                "close_price": mark,
+                "close_reason": "MANUAL",
+                "pnl_usdt": round(pnl, 4),
+                "pnl_pct": round(pnl_pct, 2),
+                "close_time": close_time,
+            })
+            results.append({"id": trade["id"], "ok": True})
+        else:
+            try:
+                side = "SELL" if trade["direction"] == "LONG" else "BUY"
+                await bc.cancel_all_orders(symbol)
+                await bc.place_market_order(symbol, side, float(trade["qty"]), reduce_only=True)
+                results.append({"id": trade["id"], "ok": True})
+            except Exception as exc:
+                logger.error("close_all_positions live error for %s: %s", symbol, exc)
+                results.append({"id": trade["id"], "error": str(exc)})
+
+    return JSONResponse({"ok": True, "closed": len(results), "results": results})
+
+
 @app.get("/api/watchlist")
 async def api_watchlist() -> JSONResponse:
     return JSONResponse({"symbols": scanner.active_watchlist, "count": len(scanner.active_watchlist)})

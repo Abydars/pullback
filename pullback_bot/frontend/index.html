@@ -202,6 +202,98 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
 /* ── Empty states ─────────────────────────────────────────────────────────── */
 .empty { padding: 20px; color: var(--muted); text-align: center; font-size: 11px; }
+
+/* ── Position stats summary ───────────────────────────────────────────────── */
+#pos-stats {
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  background: var(--bg3); flex-shrink: 0;
+}
+.pos-stats-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+}
+.pos-stat-item { display: flex; flex-direction: column; }
+.pos-stat-item .k { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.pos-stat-item .v { font-size: 12px; font-weight: 700; }
+
+/* ── Close buttons ────────────────────────────────────────────────────────── */
+.btn-close-pos {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 3px; font-family: var(--font); font-size: 9px;
+  font-weight: 700; letter-spacing: .06em; cursor: pointer; border: 1px solid;
+  transition: all .15s; text-transform: uppercase;
+  background: rgba(239,68,68,.1); border-color: var(--red); color: var(--red);
+}
+.btn-close-pos:hover { background: rgba(239,68,68,.3); }
+.btn-close-pos:disabled { opacity: .4; cursor: not-allowed; }
+
+.btn-close-all {
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 3px; font-family: var(--font); font-size: 9px;
+  font-weight: 700; letter-spacing: .06em; cursor: pointer; border: 1px solid;
+  transition: all .15s; text-transform: uppercase; margin-left: auto;
+  background: rgba(239,68,68,.1); border-color: var(--red); color: var(--red);
+  white-space: nowrap;
+}
+.btn-close-all:hover { background: rgba(239,68,68,.3); }
+.btn-close-all:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── Mobile tabs ──────────────────────────────────────────────────────────── */
+#mobile-tabs {
+  display: none;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.mob-tab {
+  flex: 1; padding: 8px 4px; text-align: center; font-size: 10px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  cursor: pointer; border: none; background: none; font-family: var(--font);
+  border-bottom: 2px solid transparent; transition: all .15s;
+}
+.mob-tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+/* ── Responsive layout ────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  html, body { overflow: auto; }
+  #app { grid-template-rows: 44px auto 1fr 36px; height: auto; min-height: 100vh; }
+  #mobile-tabs { display: flex; }
+  #main { grid-template-columns: 1fr; overflow: visible; }
+  #scanner-panel { display: none; height: 50vh; min-height: 280px; }
+  #chart-panel   { display: none; height: 70vh; min-height: 380px; }
+  #right-panel   { display: none; min-height: 50vh; }
+  #scanner-panel.mob-active,
+  #chart-panel.mob-active,
+  #right-panel.mob-active { display: flex; }
+
+  #chart-container { height: calc(70vh - 88px); }
+
+  /* Compact header on mobile */
+  #header { gap: 8px; padding: 0 10px; flex-wrap: wrap; height: auto; min-height: 44px; }
+  #server-time { display: none; }
+  .stat-pill { font-size: 10px; }
+
+  /* Stats bar wraps */
+  #stats-bar { flex-wrap: wrap; gap: 8px 14px; padding: 6px 12px; height: auto; }
+
+  /* Chart header wraps */
+  #chart-header { flex-wrap: wrap; gap: 6px; padding: 6px 10px; position: static; }
+  .tf-bar { margin-left: 0; }
+
+  /* Wider right panel */
+  #right-panel { width: 100%; border-right: none; }
+
+  /* Position stats grid more compact */
+  .pos-stats-row { grid-template-columns: 1fr 1fr 1fr 1fr; }
+}
+
+@media (max-width: 480px) {
+  html, body { font-size: 11px; }
+  .pos-card-grid { grid-template-columns: 1fr 1fr; }
+  .pos-stats-row { grid-template-columns: 1fr 1fr; }
+  #chart-header { gap: 4px; }
+  .tf-btn { padding: 3px 5px; font-size: 9px; }
+  .sym-search-wrap { width: 100%; }
+  #sym-search { width: 100%; flex: 1; }
+}
 </style>
 </head>
 <body>
@@ -216,6 +308,13 @@ canvas.sparkline { display: block; border-radius: 2px; }
     <span class="stat-pill">Watchlist: <span id="h-watch">0</span></span>
     <span class="stat-pill">Clients: <span id="h-clients">0</span></span>
     <span id="server-time">--:--:--</span>
+  </div>
+
+  <!-- ── Mobile Tabs ── -->
+  <div id="mobile-tabs">
+    <button class="mob-tab active" data-panel="scanner-panel">Scanner</button>
+    <button class="mob-tab" data-panel="chart-panel">Chart</button>
+    <button class="mob-tab" data-panel="right-panel">Positions</button>
   </div>
 
   <!-- ── Main ── -->
@@ -273,7 +372,19 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
     <!-- Right Panel — positions only -->
     <div class="panel" id="right-panel" style="display:flex;flex-direction:column;">
-      <div class="panel-title">Open Positions <span id="pos-count" style="color:var(--amber)"></span></div>
+      <div class="panel-title" style="display:flex;align-items:center;">
+        <span>Open Positions <span id="pos-count" style="color:var(--amber)"></span></span>
+        <button id="btn-close-all" class="btn-close-all" title="Close all positions">✕ Close All</button>
+      </div>
+      <!-- Position aggregate stats -->
+      <div id="pos-stats" style="display:none;">
+        <div class="pos-stats-row">
+          <div class="pos-stat-item"><span class="k">Unrealized PnL</span><span class="v" id="ps-upnl">—</span></div>
+          <div class="pos-stat-item"><span class="k">Total Margin</span><span class="v" id="ps-margin">—</span></div>
+          <div class="pos-stat-item"><span class="k">Avg ROE</span><span class="v" id="ps-roe">—</span></div>
+          <div class="pos-stat-item"><span class="k">Win / Loss</span><span class="v" id="ps-wl">—</span></div>
+        </div>
+      </div>
       <div class="scroll" id="pos-list">
         <div class="empty" id="pos-empty">No open positions</div>
       </div>
@@ -812,11 +923,35 @@ function renderPositions() {
     if (!trades.find(t => String(t.id) === el.dataset.id)) el.remove();
   });
 
+  // Update aggregate stats
+  const statsEl = document.getElementById('pos-stats');
+  const closeAllBtn = document.getElementById('btn-close-all');
   if (!trades.length) {
     empty.style.display = '';
+    statsEl.style.display = 'none';
+    closeAllBtn.disabled = true;
     return;
   }
   empty.style.display = 'none';
+  statsEl.style.display = '';
+  closeAllBtn.disabled = false;
+
+  // Compute aggregate stats
+  const totalPnl    = trades.reduce((s, t) => s + (t.unrealized_pnl ?? 0), 0);
+  const totalMargin = trades.reduce((s, t) => s + (t.margin_usdt ?? 0), 0);
+  const avgRoe      = trades.reduce((s, t) => s + (t.roe_pct ?? 0), 0) / trades.length;
+  const winners     = trades.filter(t => (t.unrealized_pnl ?? 0) >= 0).length;
+  const losers      = trades.length - winners;
+
+  const pnlEl = document.getElementById('ps-upnl');
+  pnlEl.textContent = fmtUsdt(totalPnl);
+  pnlEl.style.color = totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('ps-margin').textContent = '$' + totalMargin.toFixed(2);
+  const roeEl = document.getElementById('ps-roe');
+  roeEl.textContent = (avgRoe >= 0 ? '+' : '') + avgRoe.toFixed(2) + '%';
+  roeEl.style.color = avgRoe >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('ps-wl').innerHTML =
+    `<span style="color:var(--green)">${winners}W</span> / <span style="color:var(--red)">${losers}L</span>`;
 
   trades.forEach(t => {
     const pnl  = t.unrealized_pnl ?? 0;
@@ -836,13 +971,12 @@ function renderPositions() {
       card.className = 'pos-card';
       card.id = 'poscard-' + t.id;
       card.dataset.id = String(t.id);
-      card.onclick = () => selectSymbol(t.symbol);
       list.appendChild(card);
     }
 
     card.innerHTML = `
       <div class="pos-card-header">
-        <div>
+        <div style="cursor:pointer;" onclick="selectSymbol('${t.symbol}')">
           <span class="pos-card-sym">${t.symbol.replace('USDT','')}<span style="font-size:9px;color:var(--muted)">/USDT</span></span>
           &nbsp;<span class="pos-card-dir ${isLong ? 'pos-dir-long' : 'pos-dir-short'}">${isLong ? 'LONG' : 'SHORT'}</span>
         </div>
@@ -865,8 +999,51 @@ function renderPositions() {
         <div class="pos-kv"><span class="k">Score</span><span class="v">${t.signal_score ?? '—'}</span></div>
         <div class="pos-kv"><span class="k">Open</span><span class="v">${t.duration ?? '—'}</span></div>
       </div>
+      <div style="margin-top:8px;display:flex;justify-content:flex-end;">
+        <button class="btn-close-pos" onclick="closePosition(${t.id}, this)">✕ Close</button>
+      </div>
     `;
   });
+}
+
+async function closePosition(tradeId, btn) {
+  if (!confirm('Close this position at market price?')) return;
+  btn.disabled = true;
+  btn.textContent = 'Closing…';
+  try {
+    const resp = await fetch(`/api/positions/${tradeId}/close`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      alert('Close failed: ' + (data.error || resp.statusText));
+      btn.disabled = false;
+      btn.textContent = '✕ Close';
+    }
+  } catch (e) {
+    alert('Close failed: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '✕ Close';
+  }
+}
+
+async function closeAllPositions() {
+  const count = Object.keys(state.openTrades).length;
+  if (!count) return;
+  if (!confirm(`Close all ${count} position(s) at market price?`)) return;
+  const btn = document.getElementById('btn-close-all');
+  btn.disabled = true;
+  btn.textContent = 'Closing…';
+  try {
+    const resp = await fetch('/api/positions/close-all', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      alert('Close all failed: ' + (data.error || resp.statusText));
+    }
+  } catch (e) {
+    alert('Close all failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✕ Close All';
+  }
 }
 
 function renderHistory() {
@@ -1008,6 +1185,51 @@ setInterval(() => {
   const d = new Date();
   document.getElementById('server-time').textContent = d.toUTCString().slice(-12, -4) + ' UTC';
 }, 1000);
+
+// ============================================================
+// CLOSE ALL BUTTON
+// ============================================================
+document.getElementById('btn-close-all').addEventListener('click', closeAllPositions);
+document.getElementById('btn-close-all').disabled = true;
+
+// ============================================================
+// MOBILE TABS
+// ============================================================
+(function() {
+  const panels = ['scanner-panel', 'chart-panel', 'right-panel'];
+  const tabs = document.querySelectorAll('.mob-tab');
+  let activePanel = 'scanner-panel';
+
+  function activateTab(panelId) {
+    activePanel = panelId;
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.panel === panelId));
+    panels.forEach(id => {
+      const el = document.getElementById(id);
+      el.classList.toggle('mob-active', id === panelId);
+    });
+    // Resize chart when switching to chart tab
+    if (panelId === 'chart-panel' && mainChart) {
+      setTimeout(() => {
+        const container = document.getElementById('chart-container');
+        mainChart.resize(container.offsetWidth, container.offsetHeight);
+      }, 50);
+    }
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => activateTab(tab.dataset.panel));
+  });
+
+  // Initial state: scanner panel active on mobile
+  activateTab('scanner-panel');
+
+  // When a symbol is selected on mobile, switch to chart tab
+  const _origSelectSymbol = selectSymbol;
+  window.selectSymbol = function(sym) {
+    _origSelectSymbol(sym);
+    if (window.innerWidth <= 900) activateTab('chart-panel');
+  };
+})();
 
 // ============================================================
 // BOOT
