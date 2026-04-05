@@ -67,6 +67,8 @@ DAILY_BIAS_REFRESH_UTC: str = _get("DAILY_BIAS_REFRESH_UTC", "00:05")  # HH:MM
 RISK_PER_TRADE_USDT: float = _float("RISK_PER_TRADE_USDT", 10.0)
 MAX_OPEN_TRADES: int = _int("MAX_OPEN_TRADES", 5)
 LEVERAGE: int = _int("LEVERAGE", 10)
+MARGIN_TYPE: str = _get("MARGIN_TYPE", "ISOLATED").upper()   # "ISOLATED" | "CROSSED"
+assert MARGIN_TYPE in ("ISOLATED", "CROSSED"), f"MARGIN_TYPE must be ISOLATED or CROSSED, got '{MARGIN_TYPE}'"
 
 # ── Server ────────────────────────────────────────────────────────────────────
 PORT: int = _int("PORT", 8080)

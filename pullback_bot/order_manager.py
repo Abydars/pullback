@@ -28,11 +28,44 @@ logger = logging.getLogger(__name__)
 
 
 def _calc_qty(entry: float, sl: float) -> float:
-    """Calculate position size from risk USDT and entry/SL distance."""
-    risk = abs(entry - sl)
-    if risk <= 0:
+    """
+    Calculate position size based on RISK_PER_TRADE_USDT and the SL distance.
+
+    Risk-based formula (both modes):
+        qty = RISK_PER_TRADE_USDT / |entry - sl|
+    Guarantees: if SL is hit, loss == RISK_PER_TRADE_USDT exactly.
+
+    ISOLATED margin cap:
+        In isolated mode, the margin deposited is notional / leverage.
+        If the SL is tighter than entry / leverage, the liquidation price
+        would be *above* the SL (LONG) — the position gets liquidated before
+        SL fires.  To prevent this we cap qty so that:
+
+            margin = entry * qty / leverage  >=  RISK_PER_TRADE_USDT
+
+        i.e.  qty_max = RISK_PER_TRADE_USDT * leverage / entry
+
+        When the cap activates (very tight SL), the actual loss at SL is
+        less than RISK_PER_TRADE_USDT — conservative, not dangerous.
+    """
+    risk_distance = abs(entry - sl)
+    if risk_distance <= 0:
         return 0.0
-    return config.RISK_PER_TRADE_USDT / risk
+
+    qty = config.RISK_PER_TRADE_USDT / risk_distance
+
+    if config.MARGIN_TYPE == "ISOLATED":
+        # Cap so margin >= RISK_PER_TRADE_USDT (liq stays beyond SL)
+        qty_max = config.RISK_PER_TRADE_USDT * config.LEVERAGE / entry
+        if qty > qty_max:
+            logger.warning(
+                "Isolated margin cap: SL distance %.6f < entry/leverage %.6f — "
+                "reducing qty from %.6f to %.6f (liq would exceed SL otherwise)",
+                risk_distance, entry / config.LEVERAGE, qty, qty_max,
+            )
+            qty = qty_max
+
+    return qty
 
 
 class OrderManager:
@@ -126,7 +159,8 @@ class OrderManager:
         score: int,
     ) -> bool:
         try:
-            # 1. Set leverage
+            # 1. Set margin type then leverage
+            await bc.set_margin_type(symbol, config.MARGIN_TYPE)
             await bc.set_leverage(symbol, config.LEVERAGE)
 
             # 2. Market entry
