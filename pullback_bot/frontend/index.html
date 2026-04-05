@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pullback Bot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+/* ── Reset & Base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0d0d0d;
+  --bg2: #111111;
+  --bg3: #161616;
+  --border: #1f1f1f;
+  --text: #e0e0e0;
+  --muted: #666;
+  --green: #22c55e;
+  --red: #ef4444;
+  --amber: #f59e0b;
+  --indigo: #6366f1;
+  --blue: #3b82f6;
+  --font: 'JetBrains Mono', monospace;
+}
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 12px; overflow: hidden; }
+
+/* ── Layout ───────────────────────────────────────────────────────────────── */
+#app { display: grid; grid-template-rows: 44px 1fr 36px; height: 100vh; }
+#main { display: grid; grid-template-columns: 260px 1fr 300px; overflow: hidden; }
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+#header {
+  display: flex; align-items: center; gap: 16px; padding: 0 16px;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  position: relative;
+}
+#header .logo { font-weight: 700; font-size: 14px; letter-spacing: .05em; color: var(--amber); }
+.mode-badge {
+  padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 700; letter-spacing: .1em;
+}
+.mode-paper { background: rgba(99,102,241,.25); color: var(--indigo); border: 1px solid var(--indigo); }
+.mode-live  { background: rgba(239,68,68,.25);  color: var(--red);    border: 1px solid var(--red); }
+#conn-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+  transition: background .3s;
+}
+#conn-dot.ok { background: var(--green); }
+#server-time { margin-left: auto; color: var(--muted); font-size: 11px; }
+.stat-pill { color: var(--muted); font-size: 11px; }
+.stat-pill span { color: var(--text); }
+
+/* ── Panel common ─────────────────────────────────────────────────────────── */
+.panel { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+.panel-title {
+  padding: 8px 12px; font-size: 10px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.scroll { overflow-y: auto; flex: 1; }
+.scroll::-webkit-scrollbar { width: 4px; }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+.scroll::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+
+/* ── Scanner panel ────────────────────────────────────────────────────────── */
+#scanner-panel { background: var(--bg2); }
+.sym-row {
+  display: grid; grid-template-columns: 1fr 80px 28px;
+  align-items: center; gap: 6px;
+  padding: 6px 10px; border-bottom: 1px solid #0e0e0e;
+  cursor: pointer; transition: background .15s;
+  animation: slideIn .25s ease;
+}
+.sym-row:hover { background: #1a1a1a; }
+.sym-row.active { background: #1d1a0a; }
+.sym-row.signal { background: rgba(245,158,11,.07); border-left: 2px solid var(--amber); }
+.sym-name { font-size: 11px; font-weight: 600; }
+.sym-score-bar { position: relative; height: 4px; background: #1f1f1f; border-radius: 2px; }
+.sym-score-fill { height: 100%; border-radius: 2px; background: var(--amber); transition: width .3s; }
+.sym-dir { font-size: 10px; text-align: right; }
+.dir-long  { color: var(--green); }
+.dir-short { color: var(--red); }
+.sparkline-wrap { padding: 2px 10px 4px; }
+canvas.sparkline { display: block; }
+
+/* ── Chart panel ──────────────────────────────────────────────────────────── */
+#chart-panel {
+  background: var(--bg); display: flex; flex-direction: column; overflow: hidden;
+}
+#chart-header {
+  display: flex; align-items: center; gap: 12px; padding: 6px 12px;
+  border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg2);
+}
+#chart-symbol { font-size: 14px; font-weight: 700; }
+#chart-price  { font-size: 14px; font-weight: 700; color: var(--green); }
+#chart-change { font-size: 11px; }
+#chart-change.pos { color: var(--green); }
+#chart-change.neg { color: var(--red); }
+.tf-bar { margin-left: auto; display: flex; gap: 4px; }
+.tf-btn {
+  padding: 3px 8px; border-radius: 3px; font-family: var(--font); font-size: 10px;
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  cursor: pointer; transition: all .15s;
+}
+.tf-btn:hover { border-color: var(--amber); color: var(--amber); }
+.tf-btn.active { background: rgba(245,158,11,.15); border-color: var(--amber); color: var(--amber); }
+#chart-container { flex: 1; position: relative; min-height: 0; }
+
+/* ── Right panel ──────────────────────────────────────────────────────────── */
+#right-panel { background: var(--bg2); border-right: none; }
+
+/* Open Positions table */
+.pos-table { width: 100%; border-collapse: collapse; }
+.pos-table th {
+  padding: 5px 8px; text-align: right; font-size: 9px; font-weight: 600;
+  letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+}
+.pos-table th:first-child { text-align: left; }
+.pos-table td {
+  padding: 5px 8px; text-align: right; font-size: 10px; border-bottom: 1px solid #0e0e0e;
+}
+.pos-table td:first-child { text-align: left; }
+.pnl-pos { color: var(--green); }
+.pnl-neg { color: var(--red); }
+.pnl-blink { animation: blink .4s; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* Trade history */
+.hist-row {
+  display: grid; grid-template-columns: 80px 36px 1fr 60px;
+  gap: 4px; padding: 5px 10px; border-bottom: 1px solid #0e0e0e;
+  animation: slideIn .25s ease;
+}
+.hist-sym { font-size: 10px; font-weight: 600; }
+.hist-dir { font-size: 9px; padding: 1px 4px; border-radius: 2px; text-align: center; }
+.hist-dir.long  { background: rgba(34,197,94,.15); color: var(--green); }
+.hist-dir.short { background: rgba(239,68,68,.15);  color: var(--red); }
+.hist-pnl { font-size: 10px; text-align: right; }
+.hist-time { font-size: 9px; color: var(--muted); text-align: right; }
+
+/* ── Stats bar ────────────────────────────────────────────────────────────── */
+#stats-bar {
+  display: flex; align-items: center; gap: 20px; padding: 0 16px;
+  background: var(--bg2); border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--muted); flex-shrink: 0;
+}
+#stats-bar .s { color: var(--text); font-weight: 600; }
+
+/* ── Animations ───────────────────────────────────────────────────────────── */
+@keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+
+/* ── Empty states ─────────────────────────────────────────────────────────── */
+.empty { padding: 20px; color: var(--muted); text-align: center; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Header ── -->
+  <div id="header">
+    <span class="logo">⬡ PULLBACK BOT</span>
+    <span id="mode-badge" class="mode-badge mode-paper">PAPER</span>
+    <div id="conn-dot" title="WebSocket connection"></div>
+    <span class="stat-pill">Positions: <span id="h-open">0</span></span>
+    <span class="stat-pill">Watchlist: <span id="h-watch">0</span></span>
+    <span class="stat-pill">Clients: <span id="h-clients">0</span></span>
+    <span id="server-time">--:--:--</span>
+  </div>
+
+  <!-- ── Main ── -->
+  <div id="main">
+
+    <!-- Scanner Panel -->
+    <div class="panel" id="scanner-panel">
+      <div class="panel-title">Scanner <span id="scan-count" style="color:var(--amber)"></span></div>
+      <div class="scroll" id="scanner-list">
+        <div class="empty">Connecting…</div>
+      </div>
+    </div>
+
+    <!-- Chart Panel -->
+    <div id="chart-panel">
+      <div id="chart-header">
+        <span id="chart-symbol">—</span>
+        <span id="chart-price">—</span>
+        <span id="chart-change"></span>
+        <div class="tf-bar">
+          <button class="tf-btn" data-tf="1m">1m</button>
+          <button class="tf-btn" data-tf="5m">5m</button>
+          <button class="tf-btn active" data-tf="15m">15m</button>
+          <button class="tf-btn" data-tf="1h">1h</button>
+        </div>
+      </div>
+      <div id="chart-container"></div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="panel" id="right-panel" style="display:flex;flex-direction:column;">
+      <div class="panel-title">Open Positions</div>
+      <div style="flex-shrink:0;overflow-x:auto;">
+        <table class="pos-table" id="pos-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Dir</th>
+              <th>Entry</th>
+              <th>Mark</th>
+              <th>PnL</th>
+            </tr>
+          </thead>
+          <tbody id="pos-body">
+            <tr><td colspan="5" class="empty">No open positions</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="panel-title" style="margin-top:0;border-top:1px solid var(--border);">Trade History</div>
+      <div class="scroll" id="hist-list">
+        <div class="empty">No history yet</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Stats Bar ── -->
+  <div id="stats-bar">
+    <span>Trades today: <span class="s" id="st-total">0</span></span>
+    <span>Win rate: <span class="s" id="st-wr">0%</span></span>
+    <span>PnL today: <span class="s" id="st-pnl">$0.00</span></span>
+    <span>Open: <span class="s" id="st-open">0</span></span>
+    <span style="margin-left:auto;color:#2a2a2a;">MODE: <span id="st-mode">PAPER</span></span>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+const state = {
+  mode: 'paper',
+  watchlist: [],
+  scannerRows: {},       // symbol -> {score, direction, lastSignal}
+  openTrades: {},        // id -> trade object
+  histTrades: [],        // array of closed trades (last 50)
+  selectedSymbol: null,
+  selectedInterval: '15m',
+  sparklineData: {},     // symbol -> last 50 close prices (5m)
+  sparklineCharts: {},   // symbol -> LWC chart instance
+  prevPnl: {},           // trade_id -> prev pnl for blink
+};
+
+// ============================================================
+// CHART (TradingView Lightweight Charts)
+// ============================================================
+let mainChart = null;
+let candleSeries = null;
+let volSeries = null;
+let ema50Series = null;
+let ema200Series = null;
+let slLine = null, tp1Line = null, tp2Line = null, entryLine = null;
+
+function initMainChart() {
+  const container = document.getElementById('chart-container');
+  mainChart = LightweightCharts.createChart(container, {
+    layout: {
+      background: { color: '#0d0d0d' },
+      textColor: '#888',
+    },
+    grid: {
+      vertLines: { color: '#1a1a1a' },
+      horzLines: { color: '#1a1a1a' },
+    },
+    crosshair: {
+      vertLine: { color: '#444', width: 1, style: 1 },
+      horzLine: { color: '#444', width: 1, style: 1 },
+    },
+    rightPriceScale: { borderColor: '#1f1f1f' },
+    timeScale: {
+      borderColor: '#1f1f1f',
+      timeVisible: true,
+      secondsVisible: false,
+    },
+    width: container.offsetWidth,
+    height: container.offsetHeight,
+  });
+
+  // Volume (20% height at bottom)
+  volSeries = mainChart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'vol',
+    scaleMargins: { top: 0.8, bottom: 0 },
+  });
+
+  // Candlestick
+  candleSeries = mainChart.addCandlestickSeries({
+    upColor: '#22c55e',
+    downColor: '#ef4444',
+    borderUpColor: '#22c55e',
+    borderDownColor: '#ef4444',
+    wickUpColor: '#22c55e',
+    wickDownColor: '#ef4444',
+    scaleMargins: { top: 0.05, bottom: 0.2 },
+  });
+
+  // EMA 50
+  ema50Series = mainChart.addLineSeries({
+    color: '#f59e0b',
+    lineWidth: 1,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+
+  // EMA 200
+  ema200Series = mainChart.addLineSeries({
+    color: '#6366f1',
+    lineWidth: 1,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+
+  // Resize observer
+  new ResizeObserver(() => {
+    mainChart.resize(container.offsetWidth, container.offsetHeight);
+  }).observe(container);
+}
+
+async function loadChart(symbol, interval) {
+  if (!mainChart) initMainChart();
+  state.selectedSymbol = symbol;
+  state.selectedInterval = interval;
+
+  document.getElementById('chart-symbol').textContent = symbol;
+  document.getElementById('chart-price').textContent = '—';
+
+  // Update TF button active state
+  document.querySelectorAll('.tf-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tf === interval);
+  });
+
+  // Remove old trade lines
+  clearTradeLines();
+
+  // Fetch historical klines
+  try {
+    const resp = await fetch(`/api/klines?symbol=${symbol}&interval=${interval}&limit=200`);
+    const candles = await resp.json();
+    if (!Array.isArray(candles) || candles.length === 0) return;
+
+    candleSeries.setData(candles);
+    volSeries.setData(candles.map(c => ({
+      time: c.time,
+      value: c.volume,
+      color: c.close >= c.open ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)',
+    })));
+
+    // Compute EMAs from historical data
+    const closes = candles.map(c => c.close);
+    const ema50vals = computeEMA(closes, 50);
+    const ema200vals = computeEMA(closes, 200);
+
+    const ema50data = candles.map((c, i) => ema50vals[i] ? { time: c.time, value: ema50vals[i] } : null).filter(Boolean);
+    const ema200data = candles.map((c, i) => ema200vals[i] ? { time: c.time, value: ema200vals[i] } : null).filter(Boolean);
+
+    ema50Series.setData(ema50data);
+    ema200Series.setData(ema200data);
+
+    mainChart.timeScale().fitContent();
+
+    // Add signal markers from recent scanner log
+    addSignalMarkers(symbol, candles);
+  } catch(e) {
+    console.error('loadChart error', e);
+  }
+
+  // Subscribe to live kline_update
+  sendWS({ type: 'subscribe_chart', symbol, interval });
+
+  // Draw trade lines for open positions in this symbol
+  drawTradeLines(symbol);
+}
+
+function addSignalMarkers(symbol, candles) {
+  // Look for scanner_alerts stored in sessionStorage
+  const raw = sessionStorage.getItem('signals_' + symbol);
+  if (!raw) return;
+  const signals = JSON.parse(raw);
+  const markers = signals.map(sig => ({
+    time: sig.timestamp,
+    position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
+    color: sig.direction === 'LONG' ? '#22c55e' : '#ef4444',
+    shape: sig.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
+    text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.score}`,
+  }));
+  if (markers.length) candleSeries.setMarkers(markers);
+}
+
+function clearTradeLines() {
+  [slLine, tp1Line, tp2Line, entryLine].forEach(l => {
+    if (l) try { candleSeries.removePriceLine(l); } catch(e) {}
+  });
+  slLine = tp1Line = tp2Line = entryLine = null;
+}
+
+function drawTradeLines(symbol) {
+  clearTradeLines();
+  const trade = Object.values(state.openTrades).find(t => t.symbol === symbol);
+  if (!trade || !candleSeries) return;
+  entryLine = candleSeries.createPriceLine({ price: trade.entry_price, color: 'rgba(255,255,255,0.6)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
+  slLine    = candleSeries.createPriceLine({ price: trade.sl_price,    color: '#ef4444',              lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL' });
+  tp1Line   = candleSeries.createPriceLine({ price: trade.tp1_price,   color: '#22c55e',              lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP1' });
+  tp2Line   = candleSeries.createPriceLine({ price: trade.tp2_price,   color: '#22c55e',              lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP2' });
+}
+
+// ============================================================
+// EMA CALCULATION (client-side)
+// ============================================================
+function computeEMA(closes, period) {
+  const k = 2 / (period + 1);
+  const result = new Array(closes.length).fill(null);
+  let ema = null;
+  for (let i = 0; i < closes.length; i++) {
+    if (ema === null) {
+      if (i + 1 >= period) {
+        ema = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+        result[i] = ema;
+      }
+    } else {
+      ema = closes[i] * k + ema * (1 - k);
+      result[i] = ema;
+    }
+  }
+  return result;
+}
+
+// ============================================================
+// SPARKLINES
+// ============================================================
+function getOrCreateSparkline(symbol) {
+  if (state.sparklineCharts[symbol]) return state.sparklineCharts[symbol];
+  const container = document.getElementById('spark-' + symbol);
+  if (!container) return null;
+  const chart = LightweightCharts.createChart(container, {
+    layout: { background: { color: 'transparent' }, textColor: 'transparent' },
+    grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+    rightPriceScale: { visible: false },
+    leftPriceScale: { visible: false },
+    timeScale: { visible: false },
+    crosshair: { vertLine: { visible: false }, horzLine: { visible: false } },
+    handleScroll: false,
+    handleScale: false,
+    width: 80,
+    height: 32,
+  });
+  const lineSeries = chart.addLineSeries({
+    color: '#f59e0b',
+    lineWidth: 1,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  state.sparklineCharts[symbol] = { chart, lineSeries };
+  return state.sparklineCharts[symbol];
+}
+
+function updateSparkline(symbol, closes) {
+  if (!closes || closes.length < 2) return;
+  const sc = getOrCreateSparkline(symbol);
+  if (!sc) return;
+  const color = closes[closes.length - 1] >= closes[0] ? '#22c55e' : '#ef4444';
+  sc.lineSeries.applyOptions({ color });
+  const data = closes.map((v, i) => ({ time: i + 1, value: v }));
+  sc.lineSeries.setData(data);
+}
+
+// ============================================================
+// WEBSOCKET
+// ============================================================
+let ws = null;
+let wsReconnectDelay = 1000;
+let wsReconnectTimer = null;
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById('conn-dot').classList.add('ok');
+    wsReconnectDelay = 1000;
+    console.log('WS connected');
+  };
+
+  ws.onmessage = (evt) => {
+    const msg = JSON.parse(evt.data);
+    handleMessage(msg.type, msg.data);
+  };
+
+  ws.onclose = () => {
+    document.getElementById('conn-dot').classList.remove('ok');
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function scheduleReconnect() {
+  clearTimeout(wsReconnectTimer);
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectDelay = Math.min(wsReconnectDelay * 2, 30000);
+    connectWS();
+  }, wsReconnectDelay);
+}
+
+function sendWS(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  }
+}
+
+// ============================================================
+// MESSAGE HANDLERS
+// ============================================================
+function handleMessage(type, data) {
+  switch (type) {
+    case 'init':            onInit(data);           break;
+    case 'scanner_alert':   onScannerAlert(data);   break;
+    case 'scanner_watchlist': onWatchlist(data);    break;
+    case 'position_update': onPositionUpdate(data); break;
+    case 'trade_closed':    onTradeClosed(data);    break;
+    case 'kline_update':    onKlineUpdate(data);    break;
+    case 'kline_history':   onKlineHistory(data);   break;
+    case 'system_status':   onSystemStatus(data);   break;
+  }
+}
+
+function onInit(data) {
+  state.mode = data.mode;
+  updateModeBadge(data.mode);
+
+  // Watchlist
+  if (data.watchlist) onWatchlist({ symbols: data.watchlist });
+
+  // Open trades
+  state.openTrades = {};
+  (data.open_trades || []).forEach(t => { state.openTrades[t.id] = t; });
+  renderPositions();
+
+  // History
+  state.histTrades = (data.recent_trades || []).filter(t => t.status === 'CLOSED');
+  renderHistory();
+
+  // Stats
+  if (data.stats) updateStats(data.stats);
+
+  // Auto-load first symbol chart
+  if (!state.selectedSymbol && data.watchlist && data.watchlist.length) {
+    selectSymbol(data.watchlist[0]);
+  }
+}
+
+function onWatchlist(data) {
+  state.watchlist = data.symbols || [];
+  document.getElementById('scan-count').textContent = `(${state.watchlist.length})`;
+  document.getElementById('h-watch').textContent = state.watchlist.length;
+  renderScanner();
+}
+
+function onScannerAlert(sig) {
+  // Store signal for markers
+  const key = 'signals_' + sig.symbol;
+  const existing = JSON.parse(sessionStorage.getItem(key) || '[]');
+  existing.push(sig);
+  if (existing.length > 20) existing.shift();
+  sessionStorage.setItem(key, JSON.stringify(existing));
+
+  // Update scanner row
+  state.scannerRows[sig.symbol] = {
+    score: sig.score,
+    direction: sig.direction,
+    lastSignal: sig.timestamp,
+  };
+  renderScannerRow(sig.symbol, true);
+
+  // If chart is showing this symbol, add marker
+  if (state.selectedSymbol === sig.symbol && candleSeries) {
+    const existing = candleSeries.markers ? candleSeries.markers() : [];
+    candleSeries.setMarkers([...existing, {
+      time: sig.timestamp,
+      position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
+      color: sig.direction === 'LONG' ? '#22c55e' : '#ef4444',
+      shape: sig.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
+      text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.score}`,
+    }]);
+  }
+}
+
+function onPositionUpdate(positions) {
+  state.openTrades = {};
+  positions.forEach(t => { state.openTrades[t.id] = t; });
+  renderPositions();
+  // Redraw trade lines if relevant
+  if (state.selectedSymbol) drawTradeLines(state.selectedSymbol);
+}
+
+function onTradeClosed(trade) {
+  delete state.openTrades[trade.id];
+  state.histTrades.unshift(trade);
+  if (state.histTrades.length > 50) state.histTrades.pop();
+  renderPositions();
+  renderHistory();
+  // Remove trade lines if this was the selected symbol
+  if (state.selectedSymbol === trade.symbol) clearTradeLines();
+}
+
+function onKlineUpdate(data) {
+  if (!candleSeries) return;
+  if (data.symbol !== state.selectedSymbol || data.interval !== state.selectedInterval) {
+    // Still update sparkline data for 5m
+    if (data.interval === '5m') {
+      if (!state.sparklineData[data.symbol]) state.sparklineData[data.symbol] = [];
+      const arr = state.sparklineData[data.symbol];
+      arr.push(data.candle.close);
+      if (arr.length > 50) arr.shift();
+      updateSparkline(data.symbol, arr);
+    }
+    return;
+  }
+  // Update main chart
+  candleSeries.update(data.candle);
+  volSeries.update({
+    time: data.candle.time,
+    value: data.candle.volume,
+    color: data.candle.close >= data.candle.open ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)',
+  });
+  // Update EMA lines
+  if (data.ema50) ema50Series.update({ time: data.candle.time, value: data.ema50 });
+  if (data.ema200) ema200Series.update({ time: data.candle.time, value: data.ema200 });
+
+  // Update header price
+  const price = data.candle.close;
+  document.getElementById('chart-price').textContent = fmtPrice(price);
+}
+
+function onKlineHistory(data) {
+  if (data.symbol !== state.selectedSymbol || data.interval !== state.selectedInterval) return;
+  if (!data.candles || !data.candles.length) return;
+  // Candles from buffer may not have 'time' field if seeded from REST without it
+  // Re-use existing chart data which was fetched via REST on loadChart
+}
+
+function onSystemStatus(data) {
+  document.getElementById('h-open').textContent    = data.open_positions ?? 0;
+  document.getElementById('h-watch').textContent   = data.watchlist_count ?? 0;
+  document.getElementById('h-clients').textContent = data.ws_clients ?? 0;
+  document.getElementById('st-open').textContent   = data.open_positions ?? 0;
+  // Server time
+  const d = new Date(data.timestamp * 1000);
+  document.getElementById('server-time').textContent = d.toUTCString().slice(-12, -4) + ' UTC';
+}
+
+// ============================================================
+// RENDERERS
+// ============================================================
+function renderScanner() {
+  const list = document.getElementById('scanner-list');
+  if (!state.watchlist.length) { list.innerHTML = '<div class="empty">No symbols</div>'; return; }
+
+  // Build rows (only add new ones)
+  state.watchlist.forEach(sym => {
+    if (!document.getElementById('symrow-' + sym)) {
+      const row = buildScannerRow(sym);
+      list.appendChild(row);
+    }
+  });
+  // Remove rows no longer in watchlist
+  list.querySelectorAll('.sym-row').forEach(el => {
+    if (!state.watchlist.includes(el.dataset.sym)) el.remove();
+  });
+}
+
+function buildScannerRow(sym) {
+  const row = document.createElement('div');
+  row.className = 'sym-row';
+  row.id = 'symrow-' + sym;
+  row.dataset.sym = sym;
+  row.innerHTML = `
+    <div>
+      <div class="sym-name">${sym.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span></div>
+      <div class="sym-score-bar"><div class="sym-score-fill" id="fill-${sym}" style="width:0%"></div></div>
+    </div>
+    <div id="spark-wrap-${sym}" class="sparkline-wrap">
+      <div id="spark-${sym}" style="width:80px;height:32px;"></div>
+    </div>
+    <div class="sym-dir" id="dir-${sym}">—</div>
+  `;
+  row.onclick = () => selectSymbol(sym);
+  // Init sparkline
+  setTimeout(() => getOrCreateSparkline(sym), 0);
+  return row;
+}
+
+function renderScannerRow(sym, isSignal) {
+  const row = document.getElementById('symrow-' + sym);
+  if (!row) return;
+  const info = state.scannerRows[sym];
+  if (!info) return;
+  const fill = document.getElementById('fill-' + sym);
+  const dir  = document.getElementById('dir-' + sym);
+  if (fill) fill.style.width = info.score + '%';
+  if (dir) {
+    dir.textContent = info.direction === 'LONG' ? '▲' : '▼';
+    dir.className = 'sym-dir ' + (info.direction === 'LONG' ? 'dir-long' : 'dir-short');
+  }
+  if (isSignal) {
+    row.classList.add('signal');
+    setTimeout(() => row.classList.remove('signal'), 10000);
+  }
+  if (sym === state.selectedSymbol) row.classList.add('active');
+}
+
+function renderPositions() {
+  const tbody = document.getElementById('pos-body');
+  const trades = Object.values(state.openTrades);
+  if (!trades.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">No open positions</td></tr>';
+    document.getElementById('st-open').textContent = 0;
+    return;
+  }
+  document.getElementById('st-open').textContent = trades.length;
+  tbody.innerHTML = '';
+  trades.forEach(t => {
+    const pnl = t.unrealized_pnl ?? 0;
+    const prev = state.prevPnl[t.id];
+    const blink = prev !== undefined && prev !== pnl ? ' pnl-blink' : '';
+    state.prevPnl[t.id] = pnl;
+    const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const dirColor = t.direction === 'LONG' ? 'var(--green)' : 'var(--red)';
+    const mark = t.mark_price ?? 0;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${t.symbol.replace('USDT','')}</td>
+      <td style="color:${dirColor}">${t.direction === 'LONG' ? '▲' : '▼'}</td>
+      <td>${fmtPrice(t.entry_price)}</td>
+      <td>${mark ? fmtPrice(mark) : '—'}</td>
+      <td class="${pnlCls}${blink}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderHistory() {
+  const list = document.getElementById('hist-list');
+  const trades = state.histTrades.slice(0, 50);
+  if (!trades.length) { list.innerHTML = '<div class="empty">No history</div>'; return; }
+  list.innerHTML = '';
+  trades.forEach(t => {
+    const pnl = t.pnl_usdt ?? 0;
+    const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const row = document.createElement('div');
+    row.className = 'hist-row';
+    row.innerHTML = `
+      <span class="hist-sym">${t.symbol.replace('USDT','')}</span>
+      <span class="hist-dir ${t.direction === 'LONG' ? 'long' : 'short'}">${t.direction === 'LONG' ? 'LONG' : 'SHRT'}</span>
+      <span class="hist-pnl ${pnlCls}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</span>
+      <span class="hist-time">${fmtTime(t.close_time)}</span>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function updateStats(stats) {
+  document.getElementById('st-total').textContent = stats.total_today ?? 0;
+  document.getElementById('st-wr').textContent    = (stats.win_rate ?? 0) + '%';
+  const pnl = stats.total_pnl_today ?? 0;
+  const el = document.getElementById('st-pnl');
+  el.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+  el.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+}
+
+function updateModeBadge(mode) {
+  const b = document.getElementById('mode-badge');
+  b.textContent = mode.toUpperCase();
+  b.className = 'mode-badge mode-' + mode.toLowerCase();
+  document.getElementById('st-mode').textContent = mode.toUpperCase();
+}
+
+function selectSymbol(sym) {
+  state.selectedSymbol = sym;
+  document.querySelectorAll('.sym-row').forEach(r => r.classList.toggle('active', r.dataset.sym === sym));
+  loadChart(sym, state.selectedInterval);
+}
+
+// ============================================================
+// TIMEFRAME SWITCHER
+// ============================================================
+document.querySelectorAll('.tf-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tf = btn.dataset.tf;
+    if (tf === state.selectedInterval) return;
+    state.selectedInterval = tf;
+    document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
+    if (state.selectedSymbol) loadChart(state.selectedSymbol, tf);
+  });
+});
+
+// ============================================================
+// UTILS
+// ============================================================
+function fmtPrice(p) {
+  if (!p) return '—';
+  const n = Number(p);
+  if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (n >= 1)    return n.toFixed(4);
+  return n.toFixed(6);
+}
+
+function fmtTime(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+// Live clock
+setInterval(() => {
+  const d = new Date();
+  document.getElementById('server-time').textContent = d.toUTCString().slice(-12, -4) + ' UTC';
+}, 1000);
+
+// ============================================================
+// BOOT
+// ============================================================
+initMainChart();
+connectWS();
+</script>
+</body>
+</html>
