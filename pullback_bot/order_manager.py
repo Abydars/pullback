@@ -55,8 +55,13 @@ def _calc_qty_and_leverage(entry: float, sl: float) -> tuple[float, int]:
         return 0.0, config.MAX_LEVERAGE
 
     max_lev = max(1, config.MAX_LEVERAGE)
-    cap     = config.MAX_POSITION_USDT    # margin per trade (capital deployed)
     risk    = config.RISK_PER_TRADE_USDT  # target dollar loss at SL
+
+    # Per-trade margin cap: prefer explicit MAX_POSITION_USDT; fall back to
+    # ACCOUNT_BALANCE / MAX_OPEN_TRADES so leverage scales with SL distance.
+    cap = config.MAX_POSITION_USDT
+    if cap <= 0 and config.ACCOUNT_BALANCE > 0:
+        cap = config.ACCOUNT_BALANCE / max(1, config.MAX_OPEN_TRADES)
 
     if risk <= 0:
         return 0.0, max_lev

@@ -1866,9 +1866,10 @@ const CFG_FIELDS = [
   {
     section: 'Risk / Order',
     fields: [
-      { key: 'MAX_POSITION_USDT',  label: 'Capital Per Trade (USDT)', type: 'number', step: '10',  hint: 'Margin deployed per trade. Leverage = ceil(Risk / (Capital × SL%)). 0 = no margin constraint (leverage fixed at max).' },
+      { key: 'ACCOUNT_BALANCE',    label: 'Account Balance (USDT)',    type: 'number', step: '10', hint: 'Total account equity. Per-trade margin = Account Balance ÷ Max Open Positions. Must be set for leverage to scale with SL distance.' },
+      { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)', type: 'number', step: '1', hint: 'Dollar loss at SL. Keep this 1–5% of (Account Balance ÷ Max Open Positions) so leverage varies by SL width rather than always hitting the max.' },
+      { key: 'MAX_POSITION_USDT',  label: 'Capital Per Trade Override (USDT)', type: 'number', step: '10',  hint: 'Manual per-trade margin cap. Leave at 0 to auto-derive from Account Balance ÷ Max Open Positions (recommended).' },
       { key: 'MAX_LEVERAGE',       label: 'Max Leverage',              type: 'number', hint: 'Ceiling on dynamically calculated leverage. Bot calculates needed leverage from SL distance; this caps it.' },
-      { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)', type: 'number', step: '1', hint: 'Target dollar loss if SL is hit. SL is placed at the technical level; leverage is adjusted so loss = this value.' },
       { key: 'MAX_OPEN_TRADES',    label: 'Max Open Positions',        type: 'number',              hint: 'Hard cap on concurrent open trades' },
       { key: 'USE_TRAILING',  label: 'Trailing Stop',  type: 'select', options: ['true','false'],
         hint: 'true = trail arm activates a trailing stop that follows the peak. false = arm price is a fixed TP; trade closes immediately when hit.' },

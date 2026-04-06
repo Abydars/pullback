@@ -64,9 +64,13 @@ SIGNAL_MODE: str = _get("SIGNAL_MODE", "pullback")
 SIGNAL_SCORE_THRESHOLD: int = _int("SIGNAL_SCORE_THRESHOLD", 70)
 
 # ── Risk / Order Settings ─────────────────────────────────────────────────────
+# ACCOUNT_BALANCE: total account equity in USDT.
+# When set, per-trade margin cap is derived as ACCOUNT_BALANCE / MAX_OPEN_TRADES,
+# which lets leverage scale properly with SL distance.
+# Rule of thumb: RISK_PER_TRADE_USDT should be 1–5 % of (ACCOUNT_BALANCE / MAX_OPEN_TRADES).
+ACCOUNT_BALANCE: float = _float("ACCOUNT_BALANCE", 0.0)
 RISK_PER_TRADE_USDT: float = _float("RISK_PER_TRADE_USDT", 10.0)
-# Maximum notional (entry_price × qty) per trade. 0 = unlimited.
-# Prevents runaway size when stop is very tight relative to price.
+# MAX_POSITION_USDT: manual per-trade margin cap.  0 = derive from ACCOUNT_BALANCE.
 MAX_POSITION_USDT: float = _float("MAX_POSITION_USDT", 0.0)
 MAX_OPEN_TRADES: int = _int("MAX_OPEN_TRADES", 5)
 MAX_LEVERAGE: int = _int("MAX_LEVERAGE", 20)
@@ -106,6 +110,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "WATCHLIST_REFRESH_MINUTES":int,
     "SIGNAL_MODE":              str,
     "SIGNAL_SCORE_THRESHOLD":   int,
+    "ACCOUNT_BALANCE":          float,
     "RISK_PER_TRADE_USDT":      float,
     "MAX_POSITION_USDT":        float,
     "MAX_OPEN_TRADES":          int,
