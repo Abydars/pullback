@@ -1866,14 +1866,16 @@ const CFG_FIELDS = [
   {
     section: 'Risk / Order',
     fields: [
-      { key: 'ACCOUNT_BALANCE',    label: 'Account Balance (USDT)',    type: 'number', step: '10', hint: 'Total account equity. Per-trade margin = Account Balance ÷ Max Open Positions. Must be set for leverage to scale with SL distance.' },
-      { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)', type: 'number', step: '1', hint: 'Dollar loss at SL. Keep this 1–5% of (Account Balance ÷ Max Open Positions) so leverage varies by SL width rather than always hitting the max.' },
-      { key: 'MAX_POSITION_USDT',  label: 'Capital Per Trade Override (USDT)', type: 'number', step: '10',  hint: 'Manual per-trade margin cap. Leave at 0 to auto-derive from Account Balance ÷ Max Open Positions (recommended).' },
-      { key: 'MAX_LEVERAGE',       label: 'Max Leverage',              type: 'number', hint: 'Ceiling on dynamically calculated leverage. Bot calculates needed leverage from SL distance; this caps it.' },
-      { key: 'MAX_OPEN_TRADES',    label: 'Max Open Positions',        type: 'number',              hint: 'Hard cap on concurrent open trades' },
-      { key: 'USE_TRAILING',  label: 'Trailing Stop',  type: 'select', options: ['true','false'],
-        hint: 'true = trail arm activates a trailing stop that follows the peak. false = arm price is a fixed TP; trade closes immediately when hit.' },
-      { key: 'TRAIL_STEP_RATIO', label: 'Trail Step Ratio', type: 'number', step: '0.05', hint: 'Trailing stop follows the peak at this ratio × SL distance (0.5 = half the SL distance behind peak). Only used when Trailing Stop is enabled.' },
+      { key: 'CAPITAL',      label: 'Account Capital (USDT)',  type: 'number', step: '10',
+        hint: 'Total account equity. Per-trade margin = Capital ÷ Max Open Positions. Leverage is auto-selected by ATR volatility — no manual leverage input needed.' },
+      { key: 'RISK_PCT',     label: 'Risk Per Trade (%)',      type: 'number', step: '0.5',
+        hint: 'Percentage of Capital to risk per trade (default 2%). Dollar risk = Capital × Risk%. E.g. Capital=250, Risk=2% → $5 at risk per trade.' },
+      { key: 'MAX_OPEN_TRADES', label: 'Max Open Positions',  type: 'number',
+        hint: 'Hard cap on concurrent open trades' },
+      { key: 'MAX_LEVERAGE', label: 'Max Leverage (ceiling)',  type: 'number',
+        hint: 'Hard ceiling on leverage. ATR-based tiers: ATR>0.8% → 3x, ATR 0.4–0.8% → 7x, ATR<0.4% → this max.' },
+      { key: 'USE_TRAILING', label: 'Trailing Stop', type: 'select', options: ['true','false'],
+        hint: 'true = trail arm activates a trailing stop that follows the peak (trail distance = 1×ATR). false = arm price is a fixed TP.' },
     ],
   },
   {
@@ -2047,7 +2049,7 @@ function _updateTradePreview() {
     // Fallback: 1.5× RR if API hasn't populated it yet
     const tp2 = _manualDir === 'LONG' ? entry + risk * 1.5 : entry - risk * 1.5;
     tpField.value = tp2.toPrecision(6);
-    document.getElementById('trade-tp-hint').textContent = 'Trail arm (fallback — 1.5:1 RR)';
+    document.getElementById('trade-tp-hint').textContent = 'Trail arm (fallback — 1×ATR)';
   }
 
   // Estimate size (mirrors dynamic-leverage backend _calc_qty_and_leverage)
@@ -2107,14 +2109,14 @@ async function openManualTrade(dir) {
   try {
     const cfgRes = await fetch('/api/config');
     const cfg = await cfgRes.json();
-    entryEl.dataset.riskUsdt   = cfg.RISK_PER_TRADE_USDT || 0;
-    entryEl.dataset.marginCap  = cfg.MAX_POSITION_USDT   || 0;
-    entryEl.dataset.maxLev     = cfg.MAX_LEVERAGE         || 20;
+    entryEl.dataset.capital    = cfg.CAPITAL     || 0;
+    entryEl.dataset.riskPct    = cfg.RISK_PCT    || 2;
+    entryEl.dataset.maxLev     = cfg.MAX_LEVERAGE || 20;
     entryEl.dataset.useTrailing = cfg.USE_TRAILING === false ? 'false' : 'true';
     const tpLbl = document.getElementById('trade-tp-label');
     if (tpLbl) tpLbl.textContent = cfg.USE_TRAILING === false
-      ? 'TP Target (auto — nearest swing high/low)'
-      : 'Trail Arm (auto — nearest swing high/low)';
+      ? 'TP Target (auto — entry ± 1×ATR)'
+      : 'Trail Arm (auto — entry ± 1×ATR)';
   } catch(_) {}
 
   // Auto-calculate SL/TP from signal engine logic
@@ -2126,13 +2128,12 @@ async function openManualTrade(dir) {
       state.lastMarkPrice = data.entry;
       document.getElementById('trade-sl').value = data.sl_price;
       document.getElementById('trade-sl-hint').textContent =
-        `ATR-based · ${data.sl_pct}% from entry · edit to override`;
-      // Trail arm from nearest swing level (set by API, not RR multiplier)
+        `1.5×ATR · ${data.sl_pct}% from entry · edit to override`;
       if (data.tp1) {
         document.getElementById('trade-tp').value = parseFloat(data.tp1).toPrecision(6);
         const armPct = Math.abs(data.tp1 - data.entry) / data.entry * 100;
         document.getElementById('trade-tp-hint').textContent =
-          `Nearest swing level · ${armPct.toFixed(2)}% from entry`;
+          `1×ATR · ${armPct.toFixed(2)}% from entry · edit to override`;
       }
       _updateTradePreview();
     } else {

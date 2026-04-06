@@ -64,24 +64,18 @@ SIGNAL_MODE: str = _get("SIGNAL_MODE", "pullback")
 SIGNAL_SCORE_THRESHOLD: int = _int("SIGNAL_SCORE_THRESHOLD", 70)
 
 # ── Risk / Order Settings ─────────────────────────────────────────────────────
-# ACCOUNT_BALANCE: total account equity in USDT.
-# When set, per-trade margin cap is derived as ACCOUNT_BALANCE / MAX_OPEN_TRADES,
-# which lets leverage scale properly with SL distance.
-# Rule of thumb: RISK_PER_TRADE_USDT should be 1–5 % of (ACCOUNT_BALANCE / MAX_OPEN_TRADES).
-ACCOUNT_BALANCE: float = _float("ACCOUNT_BALANCE", 0.0)
-RISK_PER_TRADE_USDT: float = _float("RISK_PER_TRADE_USDT", 10.0)
-# MAX_POSITION_USDT: manual per-trade margin cap.  0 = derive from ACCOUNT_BALANCE.
-MAX_POSITION_USDT: float = _float("MAX_POSITION_USDT", 0.0)
+# CAPITAL: total account equity in USDT.
+# Per-trade margin = CAPITAL / MAX_OPEN_TRADES.
+# Leverage is determined by ATR volatility (not config-based).
+CAPITAL: float = _float("CAPITAL", 0.0)
+# RISK_PCT: percentage of CAPITAL to risk per trade (default 2 %).
+# Dollar risk = CAPITAL × RISK_PCT / 100.
+RISK_PCT: float = _float("RISK_PCT", 2.0)
 MAX_OPEN_TRADES: int = _int("MAX_OPEN_TRADES", 5)
+# MAX_LEVERAGE: absolute ceiling on leverage regardless of ATR tier.
 MAX_LEVERAGE: int = _int("MAX_LEVERAGE", 20)
-# TRAIL_ARM_RR: risk:reward multiple at which trailing activates.
-# 1.0 = trail starts when price is 1× risk away from entry (default).
-# 2.0 = trail starts only after 2:1 RR, giving the trade more room.
-TRAIL_ARM_RR: float   = _float("TRAIL_ARM_RR",   1.5)
-TRAIL_STEP_RATIO: float = _float("TRAIL_STEP_RATIO", 0.5)
-# USE_TRAILING: when True (default), trail arm activates a trailing stop.
-# When False, the arm price is treated as a fixed TP — trade closes immediately
-# when price reaches it, no trailing.
+# USE_TRAILING: True = trail arm activates a trailing stop.
+# False = arm price is a fixed TP; trade closes immediately when hit.
 USE_TRAILING: bool = _bool("USE_TRAILING", True)
 
 # ── Portfolio-level stops ─────────────────────────────────────────────────────
@@ -105,22 +99,20 @@ LOG_LEVEL: str = _get("LOG_LEVEL", "INFO")
 
 # Keys that can be changed at runtime via /api/config
 EDITABLE_KEYS: dict[str, type] = {
-    "MIN_VOLUME_24H":           float,
-    "MIN_PRICE_CHANGE_PCT":     float,
-    "WATCHLIST_REFRESH_MINUTES":int,
-    "SIGNAL_MODE":              str,
-    "SIGNAL_SCORE_THRESHOLD":   int,
-    "ACCOUNT_BALANCE":          float,
-    "RISK_PER_TRADE_USDT":      float,
-    "MAX_POSITION_USDT":        float,
-    "MAX_OPEN_TRADES":          int,
-    "MAX_LEVERAGE":             int,
-    "USE_TRAILING":             bool,
-    "TRAIL_STEP_RATIO":             float,
-    "PORTFOLIO_STOP_LOSS_USDT":    float,
-    "PORTFOLIO_TAKE_PROFIT_USDT":  float,
-    "LOG_LEVEL":                   str,
-    "MODE":                        str,
+    "MIN_VOLUME_24H":            float,
+    "MIN_PRICE_CHANGE_PCT":      float,
+    "WATCHLIST_REFRESH_MINUTES": int,
+    "SIGNAL_MODE":               str,
+    "SIGNAL_SCORE_THRESHOLD":    int,
+    "CAPITAL":                   float,
+    "RISK_PCT":                  float,
+    "MAX_OPEN_TRADES":           int,
+    "MAX_LEVERAGE":              int,
+    "USE_TRAILING":              bool,
+    "PORTFOLIO_STOP_LOSS_USDT":  float,
+    "PORTFOLIO_TAKE_PROFIT_USDT":float,
+    "LOG_LEVEL":                 str,
+    "MODE":                      str,
 }
 
 # Keys that require a bot restart to take full effect
@@ -158,8 +150,8 @@ def update(key: str, raw_value: str) -> None:
         raise ValueError("SIGNAL_SCORE_THRESHOLD must be 0–100")
     if key == "MAX_LEVERAGE" and not (1 <= value <= 125):
         raise ValueError("MAX_LEVERAGE must be 1–125")
-    if key == "TRAIL_STEP_RATIO" and not (0.1 <= value <= 3.0):
-        raise ValueError("TRAIL_STEP_RATIO must be 0.1–3.0")
+    if key == "RISK_PCT" and not (0.1 <= value <= 100.0):
+        raise ValueError("RISK_PCT must be 0.1–100")
 
     # Apply in-memory
     globals()[key] = value

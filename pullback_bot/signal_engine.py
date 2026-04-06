@@ -214,36 +214,20 @@ def check_pullback(
     if score < config.SIGNAL_SCORE_THRESHOLD:
         return None
 
-    # ── Compute entry / SL / TP ───────────────────────────────────────────────
+    # ── Compute entry / SL / Trail Arm ───────────────────────────────────────
     entry_price = last_close
 
-    # SL at the true technical level — swing low for LONG, swing high for SHORT.
-    # Enforce a floor of 0.5×ATR from entry so that tight-range markets can't
-    # place SL inside normal noise, which would cause immediate stop-outs and
-    # prevent meaningful leverage adjustment.
+    # SL: 1.5×ATR from entry — sits outside normal 15m noise.
+    # Trail arm: 1×ATR from entry — activates trailing once the trade confirms.
     if direction == "LONG":
-        swing_sl = float(recent["low"].min())
-        atr_floor = entry_price - atr15 * 0.5
-        sl_price = round(min(swing_sl, atr_floor), 8)   # take the further level
+        sl_price   = round(entry_price - atr15 * 1.5, 8)
+        trail_arm  = round(entry_price + atr15 * 1.0, 8)
     else:
-        swing_sl = float(recent["high"].max())
-        atr_floor = entry_price + atr15 * 0.5
-        sl_price = round(max(swing_sl, atr_floor), 8)   # take the further level
+        sl_price   = round(entry_price + atr15 * 1.5, 8)
+        trail_arm  = round(entry_price - atr15 * 1.0, 8)
 
-    risk = abs(entry_price - sl_price)
-    if risk <= 0:
+    if sl_price <= 0:
         return None
-
-    # Trail arm: recent swing resistance/support based on candle CLOSES (not wicks).
-    # Closes ignore spike wicks that would push the trail arm to an unreachable level.
-    # Fallback to 1×ATR if no close is on the correct side of entry.
-    if direction == "LONG":
-        swing_high = float(recent["close"].max())
-        trail_arm = swing_high if swing_high > entry_price else entry_price + atr15
-    else:
-        swing_low = float(recent["close"].min())
-        trail_arm = swing_low if swing_low < entry_price else entry_price - atr15
-    trail_arm = round(trail_arm, 8)
 
     signal: dict = {
         "symbol":      symbol,
@@ -252,15 +236,16 @@ def check_pullback(
         "entry_price": round(entry_price, 8),
         "sl_price":    sl_price,
         "tp1_price":   trail_arm,   # trail arm activation price
-        "tp2_price":   trail_arm,   # kept for DB schema compat (same value)
+        "tp2_price":   trail_arm,   # kept for DB schema compat
+        "atr":         round(atr15, 8),
         "timeframe":   "15m",
         "timestamp":   int(time.time()),
         "reasons":     reasons,
         "signal_type": "PULLBACK",
     }
     logger.info(
-        "Signal: %s %s score=%d reasons=%s",
-        symbol, direction, score, reasons,
+        "Signal: %s %s score=%d sl=%.6f arm=%.6f atr=%.6f reasons=%s",
+        symbol, direction, score, sl_price, trail_arm, atr15, reasons,
     )
     return signal
 
@@ -359,28 +344,20 @@ def check_breakout(
     if score < config.SIGNAL_SCORE_THRESHOLD:
         return None
 
-    # ── Entry / SL / TP ───────────────────────────────────────────────────────
+    # ── Entry / SL / Trail Arm ────────────────────────────────────────────────
     entry_price = last_close
 
+    # SL: 1.5×ATR from entry — consistent with pullback strategy.
+    # Trail arm: 1×ATR from entry.
     if direction == "LONG":
-        # SL: just below the broken resistance level, at least 0.5×ATR from entry.
-        # The ATR floor prevents a SL that sits inside normal noise when the breakout
-        # candle is large and resistance is already far below entry.
-        sl_price = round(min(resistance - atr15 * 0.3, entry_price - atr15 * 0.5), 8)
+        sl_price  = round(entry_price - atr15 * 1.5, 8)
+        trail_arm = round(entry_price + atr15 * 1.0, 8)
     else:
-        # SL: just above the broken support level, at least 0.5×ATR from entry.
-        sl_price = round(max(support + atr15 * 0.3, entry_price + atr15 * 0.5), 8)
+        sl_price  = round(entry_price + atr15 * 1.5, 8)
+        trail_arm = round(entry_price - atr15 * 1.0, 8)
 
-    risk = abs(entry_price - sl_price)
-    if risk <= 0:
+    if sl_price <= 0:
         return None
-
-    # Trail arm: 1×ATR above/below entry — confirms the breakout is holding
-    # before we start trailing.  ATR-based so it scales with volatility.
-    if direction == "LONG":
-        trail_arm = round(entry_price + atr15, 8)
-    else:
-        trail_arm = round(entry_price - atr15, 8)
 
     signal: dict = {
         "symbol":       symbol,
@@ -390,13 +367,14 @@ def check_breakout(
         "sl_price":     sl_price,
         "tp1_price":    trail_arm,
         "tp2_price":    trail_arm,
+        "atr":          round(atr15, 8),
         "timeframe":    "15m",
         "timestamp":    int(time.time()),
         "reasons":      reasons,
         "signal_type":  "BREAKOUT",
     }
     logger.info(
-        "Breakout signal: %s %s score=%d reasons=%s",
-        symbol, direction, score, reasons,
+        "Breakout signal: %s %s score=%d sl=%.6f arm=%.6f atr=%.6f reasons=%s",
+        symbol, direction, score, sl_price, trail_arm, atr15, reasons,
     )
     return signal

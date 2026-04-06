@@ -33,52 +33,52 @@ logger = logging.getLogger(__name__)
 _open_lock = asyncio.Lock()
 
 
-def _calc_qty_and_leverage(entry: float, sl: float) -> tuple[float, int]:
+def _calc_qty_and_leverage(entry: float, sl: float, atr: float) -> tuple[float, int]:
     """
-    Dynamic-leverage position sizing.
+    ATR-volatility-tiered leverage + risk-capped position sizing.
 
-    SL is placed at the technical level by the signal engine.
-    This function adjusts leverage so that hitting SL costs exactly
-    RISK_PER_TRADE_USDT, while keeping margin ≈ MAX_POSITION_USDT.
+    Leverage is chosen by ATR% (ATR as a percentage of price):
+      ATR% > 0.8%        → LOW  leverage (3x)
+      ATR% 0.4% – 0.8%  → MED  leverage (7x)
+      ATR% < 0.4%        → HIGH leverage (MAX_LEVERAGE)
 
-    Formula:
-      sl_pct    = |entry - sl| / entry
-      needed_lev = ceil(RISK / (MARGIN × sl_pct))
-      leverage  = clamp(needed_lev, 1, MAX_LEVERAGE)
-      qty       = RISK / sl_distance   (SL loss = RISK exactly)
-
-    If MAX_POSITION_USDT = 0, falls back to:
-      qty = RISK / sl_distance at MAX_LEVERAGE (no margin constraint).
+    Position sizing:
+      risk_amount  = CAPITAL × RISK_PCT / 100   (e.g. $250 × 2% = $5)
+      notional     = risk_amount / sl_distance_pct
+      notional_cap = (CAPITAL / MAX_OPEN_TRADES) × leverage
+      qty          = min(notional, notional_cap) / entry
     """
     sl_distance = abs(entry - sl)
-    if sl_distance <= 0 or entry <= 0:
+    if sl_distance <= 0 or entry <= 0 or atr <= 0:
         return 0.0, config.MAX_LEVERAGE
 
-    max_lev = max(1, config.MAX_LEVERAGE)
-    risk    = config.RISK_PER_TRADE_USDT  # target dollar loss at SL
+    max_lev  = max(1, config.MAX_LEVERAGE)
+    capital  = config.CAPITAL
+    risk_pct = config.RISK_PCT   # e.g. 2.0 → 2 %
 
-    # Per-trade margin cap: prefer explicit MAX_POSITION_USDT; fall back to
-    # ACCOUNT_BALANCE / MAX_OPEN_TRADES so leverage scales with SL distance.
-    cap = config.MAX_POSITION_USDT
-    if cap <= 0 and config.ACCOUNT_BALANCE > 0:
-        cap = config.ACCOUNT_BALANCE / max(1, config.MAX_OPEN_TRADES)
-
-    if risk <= 0:
+    if capital <= 0 or risk_pct <= 0:
         return 0.0, max_lev
 
-    # qty so that qty × sl_distance = risk (SL always costs exactly RISK)
-    qty = risk / sl_distance
-
-    if cap > 0:
-        sl_pct = sl_distance / entry
-        needed_lev = math.ceil(risk / (cap * sl_pct))
-        leverage = max(1, min(needed_lev, max_lev))
-        # If leverage was capped, the trade risks more than RISK at SL — reduce qty
-        max_qty_for_margin = (cap * leverage) / entry
-        qty = min(qty, max_qty_for_margin)
+    # ── Leverage tier ─────────────────────────────────────────────────────────
+    atr_pct = (atr / entry) * 100   # ATR as % of price
+    if atr_pct > 0.8:
+        target_lev = 3              # high-volatility: keep leverage low
+    elif atr_pct >= 0.4:
+        target_lev = 7              # medium-volatility
     else:
-        leverage = max_lev
+        target_lev = max_lev        # stable asset: use full allowed leverage
+    leverage = max(1, min(target_lev, max_lev))
 
+    # ── Position sizing ───────────────────────────────────────────────────────
+    risk_amount     = capital * risk_pct / 100
+    sl_distance_pct = sl_distance / entry
+    notional        = risk_amount / sl_distance_pct
+    # Cap: per-trade capital allocation × leverage
+    per_trade_cap   = capital / max(1, config.MAX_OPEN_TRADES)
+    notional_cap    = per_trade_cap * leverage
+    notional        = min(notional, notional_cap)
+
+    qty = notional / entry
     return qty, int(leverage)
 
 
@@ -122,7 +122,8 @@ class OrderManager:
 
         # Calculate qty and leverage
         step = bc.get_step_size(symbol)
-        raw_qty, leverage = _calc_qty_and_leverage(entry, sl)
+        atr  = signal.get("atr", abs(entry - sl) / 1.5)  # fallback: derive from SL
+        raw_qty, leverage = _calc_qty_and_leverage(entry, sl, atr)
         qty = bc.round_step(raw_qty, step)
         if qty <= 0:
             logger.warning("Calculated qty=0 for %s, skipping", symbol)

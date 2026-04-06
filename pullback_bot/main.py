@@ -335,10 +335,9 @@ async def close_all_positions() -> JSONResponse:
 @app.get("/api/sl-suggest")
 async def sl_suggest(symbol: str, direction: str) -> JSONResponse:
     """
-    Suggest SL/TP for a manual trade using the same logic as the signal engine:
-      SL = max(recent_swing_low, entry - 1×ATR14)  for LONG
-      SL = min(recent_swing_high, entry + 1×ATR14) for SHORT
-      TP1 = trail arm at 1:1 RR, TP2 = 2:1 RR
+    Suggest SL/TP for a manual trade — consistent with the signal engine:
+      SL  = entry ± 1.5×ATR14   (beyond normal 15m noise)
+      TP1 = entry ± 1.0×ATR14   (trail arm activation)
     """
     import pandas as pd
 
@@ -352,12 +351,9 @@ async def sl_suggest(symbol: str, direction: str) -> JSONResponse:
 
     buf = scanner._kline_buffers.get(symbol, {}).get("15m", [])
     if len(buf) < 20:
-        return JSONResponse({"error": "Insufficient candle history for SL calculation"}, status_code=400)
+        return JSONResponse({"error": "Insufficient candle history"}, status_code=400)
 
-    candles = buf[-50:]  # last 50 closed 15m candles
-    df = pd.DataFrame(candles)
-
-    # ATR(14)
+    df = pd.DataFrame(buf[-50:])
     prev_close = df["close"].shift(1)
     tr = pd.concat(
         [df["high"] - df["low"],
@@ -367,32 +363,22 @@ async def sl_suggest(symbol: str, direction: str) -> JSONResponse:
     atr = float(tr.ewm(span=14, adjust=False).mean().iloc[-1])
 
     entry = mark
-    recent = df.tail(21)
-
     if direction == "LONG":
-        sl = max(float(recent["low"].min()), entry - atr)
+        sl  = round(entry - atr * 1.5, 8)
+        tp1 = round(entry + atr * 1.0, 8)
     else:
-        sl = min(float(recent["high"].max()), entry + atr)
+        sl  = round(entry + atr * 1.5, 8)
+        tp1 = round(entry - atr * 1.0, 8)
 
-    sl = round(sl, 8)
     risk = abs(entry - sl)
     if risk == 0:
         return JSONResponse({"error": "Computed SL equals entry"}, status_code=400)
-
-    # Trail arm: candle closes only — avoids spike wicks making the level unreachable.
-    if direction == "LONG":
-        swing_high = float(recent["close"].max())
-        tp1 = round(swing_high if swing_high > entry else entry + atr, 8)
-    else:
-        swing_low = float(recent["close"].min())
-        tp1 = round(swing_low if swing_low < entry else entry - atr, 8)
-    tp2 = tp1  # DB compat; actual exit is trail-based
 
     return JSONResponse({
         "entry":    round(entry, 8),
         "sl_price": sl,
         "tp1":      tp1,
-        "tp2":      tp2,
+        "tp2":      tp1,
         "atr":      round(atr, 8),
         "sl_pct":   round(risk / entry * 100, 3),
     })
@@ -424,25 +410,23 @@ async def manual_trade(request: Request) -> JSONResponse:
     if direction == "SHORT" and sl <= entry:
         return JSONResponse({"error": "SL must be above entry for SHORT"}, status_code=400)
 
-    # Trail arm: swing high/low from recent 15m candles (same as signal engine).
+    # Trail arm and ATR: entry ± 1×ATR14 (consistent with signal engine).
     import pandas as pd
     buf15 = scanner._kline_buffers.get(symbol, {}).get("15m", [])
-    if len(buf15) >= 21:
-        _df = pd.DataFrame(buf15[-21:])
+    if len(buf15) >= 14:
+        _df = pd.DataFrame(buf15[-50:])
         _prev_close = _df["close"].shift(1)
         _tr = pd.concat([_df["high"] - _df["low"],
                          (_df["high"] - _prev_close).abs(),
                          (_df["low"]  - _prev_close).abs()], axis=1).max(axis=1)
         _atr = float(_tr.ewm(span=14, adjust=False).mean().iloc[-1])
-        if direction == "LONG":
-            _swing = float(_df["high"].max())
-            tp1 = _swing if _swing > entry else entry + _atr
-        else:
-            _swing = float(_df["low"].min())
-            tp1 = _swing if _swing < entry else entry - _atr
     else:
-        tp1 = entry + risk_dist * 1.5 if direction == "LONG" else entry - risk_dist * 1.5
-    tp1 = round(tp1, 8)
+        _atr = risk_dist / 1.5   # fallback: infer ATR from user-provided SL distance
+
+    if direction == "LONG":
+        tp1 = round(entry + _atr * 1.0, 8)
+    else:
+        tp1 = round(entry - _atr * 1.0, 8)
     tp2 = tp1  # DB compat
 
     signal = {
@@ -452,6 +436,7 @@ async def manual_trade(request: Request) -> JSONResponse:
         "sl_price":    sl,
         "tp1_price":   tp1,
         "tp2_price":   tp2,
+        "atr":         _atr,
         "score":       100,
         "signal_type": "MANUAL",
     }
@@ -509,9 +494,9 @@ async def api_status() -> JSONResponse:
         "open_positions": await db.count_open_trades(),
         "ws_clients": wsb.broadcaster.client_count,
         "signal_threshold": config.SIGNAL_SCORE_THRESHOLD,
-        "risk_per_trade": config.RISK_PER_TRADE_USDT,
+        "risk_pct": config.RISK_PCT,
         "max_open_trades": config.MAX_OPEN_TRADES,
-        "leverage": config.LEVERAGE,
+        "max_leverage": config.MAX_LEVERAGE,
         "timestamp": int(time.time()),
     })
 
