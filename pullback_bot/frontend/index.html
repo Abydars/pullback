@@ -800,18 +800,19 @@ async function loadChart(symbol, interval) {
 }
 
 function addSignalMarkers(symbol, candles) {
-  // Look for scanner_alerts stored in sessionStorage
+  // Show only the most recent signal for this symbol
   const raw = sessionStorage.getItem('signals_' + symbol);
   if (!raw) return;
   const signals = JSON.parse(raw);
-  const markers = signals.map(sig => ({
+  if (!signals.length) return;
+  const sig = signals[signals.length - 1];
+  candleSeries.setMarkers([{
     time: sig.timestamp,
     position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
     color: sig.direction === 'LONG' ? '#22c55e' : '#ef4444',
     shape: sig.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
     text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.score}`,
-  }));
-  if (markers.length) candleSeries.setMarkers(markers);
+  }]);
 }
 
 function clearTradeLines() {
@@ -1053,10 +1054,9 @@ function onScannerAlert(sig) {
   };
   renderScannerRow(sig.symbol, true);
 
-  // If chart is showing this symbol, add marker
+  // If chart is showing this symbol, replace marker with only this latest signal
   if (state.selectedSymbol === sig.symbol && candleSeries) {
-    const existing = candleSeries.markers ? candleSeries.markers() : [];
-    candleSeries.setMarkers([...existing, {
+    candleSeries.setMarkers([{
       time: sig.timestamp,
       position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
       color: sig.direction === 'LONG' ? '#22c55e' : '#ef4444',
