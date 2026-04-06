@@ -23,6 +23,7 @@ from typing import Optional
 import binance_client as bc
 import config
 import db
+from ws_order_api import ws_order_api
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,8 @@ class OrderManager:
             )
         else:
             return await self._live_open(
-                symbol, direction, entry, sl, tp1, tp2, qty, leverage, now_ms, score, signal_type
+                symbol, direction, entry, sl, tp1, tp2, qty, leverage, now_ms, score, signal_type,
+                atr=atr,
             )
 
     # ── Paper mode ─────────────────────────────────────────────────────────────
@@ -232,27 +234,48 @@ class OrderManager:
         now_ms: int,
         score: int,
         signal_type: str = "PULLBACK",
+        atr: float = 0.0,
     ) -> bool:
         try:
-            # 1. Set leverage
+            tick = bc.get_tick_size(symbol)
+            side = "BUY" if direction == "LONG" else "SELL"
+            sl_side = "SELL" if direction == "LONG" else "BUY"
+
+            # 1. Set leverage (REST only — WS API doesn't support this)
             await bc.set_leverage(symbol, leverage)
 
-            # 2. Market entry
-            side = "BUY" if direction == "LONG" else "SELL"
-            order = await bc.place_market_order(symbol, side, qty)
+            # 2. Market entry via WS API
+            order = await ws_order_api.place_order(
+                symbol=symbol, side=side, type="MARKET", quantity=qty,
+            )
             binance_order_id = str(order.get("orderId", ""))
             actual_entry = float(order.get("avgPrice") or entry)
 
-            # 3. SL order (opposite side, reduce-only)
-            sl_side = "SELL" if direction == "LONG" else "BUY"
-            tick = bc.get_tick_size(symbol)
-            sl_price_rounded = bc.round_step(sl, tick)
-            tp2_price_rounded = bc.round_step(tp2, tick)
+            # 3. Stop Loss via WS API
+            await ws_order_api.place_order(
+                symbol=symbol, side=sl_side, type="STOP_MARKET",
+                stopPrice=bc.round_step(sl, tick),
+                closePosition="true",
+            )
 
-            await bc.place_stop_market_order(symbol, sl_side, sl_price_rounded)
-            await bc.place_take_profit_market_order(symbol, sl_side, tp2_price_rounded)
+            # 4. Trail or fixed TP via WS API
+            if config.USE_TRAILING and atr > 0:
+                # Native trailing stop — activates at trail_arm, trails at 1×ATR distance
+                atr_pct = max(0.1, min(10.0, (atr / actual_entry) * 100))
+                await ws_order_api.place_order(
+                    symbol=symbol, side=sl_side, type="TRAILING_STOP_MARKET",
+                    activationPrice=bc.round_step(tp1, tick),
+                    callbackRate=round(atr_pct, 1),
+                    closePosition="true",
+                )
+            else:
+                await ws_order_api.place_order(
+                    symbol=symbol, side=sl_side, type="TAKE_PROFIT_MARKET",
+                    stopPrice=bc.round_step(tp1, tick),
+                    closePosition="true",
+                )
 
-            # 4. Record in DB
+            # 5. Record in DB
             trade_id = await db.insert_trade(
                 symbol=symbol,
                 direction=direction,

@@ -419,6 +419,23 @@ async def _paper_tick() -> None:
                     enriched["use_trailing"]  = config.USE_TRAILING
                     positions_payload.append(enriched)
 
+            # ── Live trades: compute unrealized PnL for display ───────────────
+            for trade in open_trades:
+                if trade.get("mode") != "live":
+                    continue
+                symbol = trade["symbol"]
+                mark = mark_prices.get(symbol)
+                if not mark:
+                    positions_payload.append(_enrich_position(trade, float(trade["entry_price"]), 0.0))
+                    continue
+                entry = float(trade["entry_price"])
+                qty = float(trade["qty"])
+                direction = trade["direction"]
+                raw_pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
+                unrealized = _net_pnl(raw_pnl, entry, mark, qty)
+                paper_unrealized[trade["id"]] = unrealized
+                positions_payload.append(_enrich_position(trade, mark, unrealized))
+
             if positions_payload:
                 await wsb.broadcaster.broadcast("position_update", positions_payload)
 

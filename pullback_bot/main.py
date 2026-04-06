@@ -37,6 +37,8 @@ import order_manager as om
 import position_tracker
 import scanner
 import ws_broadcaster as wsb
+from ws_order_api import ws_order_api
+from user_data_stream import user_data_stream
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -66,16 +68,30 @@ async def on_startup() -> None:
     except Exception as exc:
         logger.warning("Exchange info fetch failed: %s (non-fatal)", exc)
 
-    # 3. Scanner
+    # 3. WS order API and user data stream (live mode only)
+    if config.MODE == "live":
+        await ws_order_api.start()
+        await user_data_stream.start()
+        logger.info("Live mode: WS order API and user data stream started")
+
+    # 4. Scanner
     await scanner.start(order_manager=om.order_manager)
 
-    # 4. Position tracker
+    # 5. Position tracker
     await position_tracker.start()
 
-    # 5. Periodic system_status broadcast
+    # 6. Periodic system_status broadcast
     asyncio.create_task(_status_broadcast_loop(), name="status_broadcast")
 
     logger.info("=== Bot ready on port %d ===", config.PORT)
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    logger.info("=== Pullback Bot shutting down ===")
+    if config.MODE == "live":
+        await ws_order_api.stop()
+        await user_data_stream.stop()
 
 
 async def _status_broadcast_loop() -> None:
