@@ -292,6 +292,53 @@ canvas.sparkline { display: block; border-radius: 2px; }
 .tf-btn:hover { border-color: var(--amber); color: var(--amber); }
 .tf-btn.active { background: rgba(245,158,11,.15); border-color: var(--amber); color: var(--amber); }
 
+/* ── Manual trade buttons ─────────────────────────────────────────────────── */
+.btn-manual {
+  padding: 3px 10px; border-radius: 3px; font-family: var(--font); font-size: 10px;
+  font-weight: 700; letter-spacing: .06em; cursor: pointer; border: 1px solid;
+  transition: all .15s; text-transform: uppercase;
+}
+.btn-long  { background: rgba(34,197,94,.12);  border-color: var(--green); color: var(--green); }
+.btn-long:hover  { background: rgba(34,197,94,.28); }
+.btn-short { background: rgba(239,68,68,.12);  border-color: var(--red);   color: var(--red); }
+.btn-short:hover { background: rgba(239,68,68,.28); }
+.btn-manual:disabled { opacity: .35; cursor: not-allowed; }
+
+/* ── Manual trade modal ───────────────────────────────────────────────────── */
+#trade-modal .modal { width: 340px; }
+.trade-field { margin-bottom: 14px; }
+.trade-field label {
+  display: block; font-size: 9px; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 5px;
+}
+.trade-field input {
+  width: 100%; background: #1a1a1a; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text); font-family: var(--font); font-size: 12px;
+  padding: 6px 9px; outline: none; box-sizing: border-box; transition: border-color .15s;
+}
+.trade-field input:focus { border-color: var(--amber); }
+.trade-field input[readonly] { color: var(--muted); }
+.trade-field .field-hint { font-size: 9px; color: var(--muted); margin-top: 3px; }
+.trade-dir-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 2px;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+}
+.trade-dir-long  { background: rgba(34,197,94,.15);  color: var(--green); }
+.trade-dir-short { background: rgba(239,68,68,.15);   color: var(--red); }
+#trade-submit {
+  padding: 5px 18px; border-radius: 3px; font-family: var(--font); font-size: 10px;
+  font-weight: 700; letter-spacing: .06em; cursor: pointer; text-transform: uppercase;
+  transition: all .15s; border: 1px solid;
+}
+#trade-submit.long-submit  { background: rgba(34,197,94,.15);  border-color: var(--green); color: var(--green); }
+#trade-submit.long-submit:hover  { background: rgba(34,197,94,.35); }
+#trade-submit.short-submit { background: rgba(239,68,68,.15);  border-color: var(--red);   color: var(--red); }
+#trade-submit.short-submit:hover { background: rgba(239,68,68,.35); }
+#trade-submit:disabled { opacity: .4; cursor: not-allowed; }
+#trade-msg { font-size: 10px; flex: 1; }
+#trade-msg.ok  { color: var(--green); }
+#trade-msg.err { color: var(--red); }
+
 /* ── Right panel ──────────────────────────────────────────────────────────── */
 #right-panel { background: var(--bg2); border-right: none; }
 
@@ -486,6 +533,40 @@ canvas.sparkline { display: block; border-radius: 2px; }
     </div>
   </div>
 
+  <!-- ── Manual Trade Modal ── -->
+  <div id="trade-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-hdr">
+        <span>Manual Trade — <span id="trade-modal-sym">—</span> <span id="trade-modal-dir-badge" class="trade-dir-badge"></span></span>
+        <button id="trade-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="trade-field">
+          <label>Entry (Mark Price)</label>
+          <input id="trade-entry" type="text" readonly />
+        </div>
+        <div class="trade-field">
+          <label>Stop Loss Price</label>
+          <input id="trade-sl" type="number" step="any" placeholder="Enter SL price…" />
+          <div class="field-hint" id="trade-sl-hint"></div>
+        </div>
+        <div class="trade-field">
+          <label>Take Profit (2:1 RR — auto)</label>
+          <input id="trade-tp" type="text" readonly placeholder="Auto-calculated" />
+          <div class="field-hint">TP1 at 1:1 (trail arm), TP2 at 2:1 shown above</div>
+        </div>
+        <div class="trade-field">
+          <label>Est. Size (bot-calculated)</label>
+          <input id="trade-size-preview" type="text" readonly placeholder="Set SL to preview" />
+        </div>
+      </div>
+      <div class="modal-ftr">
+        <button id="trade-submit">Open</button>
+        <span id="trade-msg"></span>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Mobile Tabs ── -->
   <div id="mobile-tabs">
     <button class="mob-tab active" data-panel="scanner-panel">Scanner</button>
@@ -530,6 +611,10 @@ canvas.sparkline { display: block; border-radius: 2px; }
             <button class="tf-btn" data-tf="5m">5m</button>
             <button class="tf-btn active" data-tf="15m">15m</button>
             <button class="tf-btn" data-tf="1h">1h</button>
+          </div>
+          <div style="display:flex;gap:6px;margin-left:8px;">
+            <button class="btn-manual btn-long"  id="btn-manual-long"  onclick="openManualTrade('LONG')">▲ Long</button>
+            <button class="btn-manual btn-short" id="btn-manual-short" onclick="openManualTrade('SHORT')">▼ Short</button>
           </div>
         </div>
         <div id="chart-container"></div>
@@ -623,6 +708,7 @@ const state = {
   histTrades: [],        // array of closed trades (last 50)
   selectedSymbol: null,
   selectedInterval: '15m',
+  lastMarkPrice: null,    // latest mark price for selected symbol
   sparklineData: {},     // symbol -> last 50 close prices (5m)
   prevPnl: {},           // trade_id -> prev pnl for blink
 };
@@ -787,7 +873,9 @@ async function loadChart(symbol, interval) {
     mainChart.timeScale().fitContent();
 
     // Update header price from last candle
-    document.getElementById('chart-price').textContent = fmtPrice(candles[candles.length - 1].close);
+    const _lastClose = candles[candles.length - 1].close;
+    document.getElementById('chart-price').textContent = fmtPrice(_lastClose);
+    state.lastMarkPrice = _lastClose;
 
     // Add signal markers from recent scanner log
     addSignalMarkers(symbol, candles);
@@ -1173,6 +1261,12 @@ function onKlineUpdate(data) {
   // Update header price
   const price = data.candle.close;
   document.getElementById('chart-price').textContent = fmtPrice(price);
+  state.lastMarkPrice = price;
+  // Keep modal entry in sync if open
+  const tradeModal = document.getElementById('trade-modal');
+  if (!tradeModal.classList.contains('hidden') && state.selectedSymbol === data.symbol) {
+    document.getElementById('trade-entry').value = price.toPrecision(6);
+  }
 }
 
 function onKlineHistory(data) {
@@ -1919,7 +2013,102 @@ document.getElementById('config-modal').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeConfigModal(); // click outside closes
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeConfigModal();
+  if (e.key === 'Escape') { closeConfigModal(); closeTradeModal(); }
+});
+
+// ============================================================
+// MANUAL TRADE MODAL
+// ============================================================
+let _manualDir = 'LONG';
+
+function openManualTrade(dir) {
+  const sym = state.selectedSymbol;
+  if (!sym) return;
+  _manualDir = dir;
+  const mark = state.lastMarkPrice || null;
+
+  document.getElementById('trade-modal-sym').textContent = sym;
+  const dirBadge = document.getElementById('trade-modal-dir-badge');
+  dirBadge.textContent = dir;
+  dirBadge.className = 'trade-dir-badge ' + (dir === 'LONG' ? 'trade-dir-long' : 'trade-dir-short');
+
+  const entryEl = document.getElementById('trade-entry');
+  entryEl.value = mark ? mark.toPrecision(6) : '(loading…)';
+
+  document.getElementById('trade-sl').value = '';
+  document.getElementById('trade-tp').value = '';
+  document.getElementById('trade-size-preview').value = '';
+  document.getElementById('trade-sl-hint').textContent =
+    dir === 'LONG' ? 'Must be below entry' : 'Must be above entry';
+
+  const btn = document.getElementById('trade-submit');
+  btn.textContent = dir === 'LONG' ? '▲ Open Long' : '▼ Open Short';
+  btn.className = dir === 'LONG' ? 'long-submit' : 'short-submit';
+
+  document.getElementById('trade-msg').textContent = '';
+  document.getElementById('trade-msg').className = '';
+  document.getElementById('trade-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('trade-sl').focus(), 50);
+}
+
+function closeTradeModal() {
+  document.getElementById('trade-modal').classList.add('hidden');
+}
+
+// Live SL → TP + size preview
+document.getElementById('trade-sl').addEventListener('input', function() {
+  const entry = parseFloat(document.getElementById('trade-entry').value);
+  const sl    = parseFloat(this.value);
+  if (!isNaN(entry) && !isNaN(sl) && sl !== entry) {
+    const risk = Math.abs(entry - sl);
+    const tp2  = _manualDir === 'LONG' ? entry + risk * 2 : entry - risk * 2;
+    document.getElementById('trade-tp').value = tp2.toPrecision(6);
+
+    // Size preview uses same formula as backend
+    const riskUsdt = parseFloat(document.getElementById('trade-entry').getAttribute('data-risk') || '0');
+    document.getElementById('trade-size-preview').value = 'Bot-calculated on submit';
+  } else {
+    document.getElementById('trade-tp').value = '';
+    document.getElementById('trade-size-preview').value = '';
+  }
+});
+
+document.getElementById('trade-submit').addEventListener('click', async function() {
+  const sym   = state.selectedSymbol;
+  const entry = parseFloat(document.getElementById('trade-entry').value);
+  const sl    = parseFloat(document.getElementById('trade-sl').value);
+  const msg   = document.getElementById('trade-msg');
+
+  if (!sym) { msg.textContent = 'No symbol selected'; msg.className = 'err'; return; }
+  if (isNaN(sl) || sl <= 0) { msg.textContent = 'Enter a valid SL price'; msg.className = 'err'; return; }
+  if (_manualDir === 'LONG'  && sl >= entry) { msg.textContent = 'SL must be below entry'; msg.className = 'err'; return; }
+  if (_manualDir === 'SHORT' && sl <= entry) { msg.textContent = 'SL must be above entry'; msg.className = 'err'; return; }
+
+  this.disabled = true;
+  msg.textContent = 'Opening…'; msg.className = '';
+
+  try {
+    const res = await fetch('/api/positions/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: sym, direction: _manualDir, sl_price: sl }),
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      msg.textContent = `Opened at ${data.entry}`; msg.className = 'ok';
+      setTimeout(closeTradeModal, 1200);
+    } else {
+      msg.textContent = data.error || 'Failed'; msg.className = 'err';
+    }
+  } catch (e) {
+    msg.textContent = 'Network error'; msg.className = 'err';
+  }
+  this.disabled = false;
+});
+
+document.getElementById('trade-close').addEventListener('click', closeTradeModal);
+document.getElementById('trade-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeTradeModal();
 });
 
 // ============================================================

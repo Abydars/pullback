@@ -332,6 +332,56 @@ async def close_all_positions() -> JSONResponse:
     return JSONResponse({"ok": True, "closed": len(results), "results": results})
 
 
+@app.post("/api/positions/manual")
+async def manual_trade(request: Request) -> JSONResponse:
+    """Open a manual paper/live trade for a symbol at current mark price."""
+    body = await request.json()
+    symbol    = body.get("symbol", "").upper()
+    direction = body.get("direction", "").upper()
+    sl_price  = body.get("sl_price")
+
+    if not symbol or direction not in ("LONG", "SHORT") or sl_price is None:
+        return JSONResponse({"error": "symbol, direction (LONG|SHORT), sl_price required"}, status_code=400)
+
+    mark = scanner.mark_prices.get(symbol)
+    if not mark:
+        return JSONResponse({"error": f"No mark price for {symbol} — is it on the watchlist?"}, status_code=400)
+
+    sl = float(sl_price)
+    entry = mark
+    risk_dist = abs(entry - sl)
+
+    if risk_dist == 0:
+        return JSONResponse({"error": "SL price equals entry price"}, status_code=400)
+    if direction == "LONG" and sl >= entry:
+        return JSONResponse({"error": "SL must be below entry for LONG"}, status_code=400)
+    if direction == "SHORT" and sl <= entry:
+        return JSONResponse({"error": "SL must be above entry for SHORT"}, status_code=400)
+
+    # TP at 1:1 (trail arm) and 2:1 RR
+    if direction == "LONG":
+        tp1 = entry + risk_dist
+        tp2 = entry + risk_dist * 2
+    else:
+        tp1 = entry - risk_dist
+        tp2 = entry - risk_dist * 2
+
+    signal = {
+        "symbol":      symbol,
+        "direction":   direction,
+        "entry_price": entry,
+        "sl_price":    sl,
+        "tp1_price":   tp1,
+        "tp2_price":   tp2,
+        "score":       100,
+    }
+
+    ok = await om.order_manager.handle_signal(signal)
+    if ok:
+        return JSONResponse({"ok": True, "entry": entry})
+    return JSONResponse({"error": "Trade rejected — check MAX_OPEN_TRADES or position size"}, status_code=400)
+
+
 @app.get("/api/watchlist")
 async def api_watchlist() -> JSONResponse:
     return JSONResponse({"symbols": scanner.active_watchlist, "count": len(scanner.active_watchlist)})
