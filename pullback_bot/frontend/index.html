@@ -1160,9 +1160,7 @@ function onSystemStatus(data) {
   document.getElementById('h-watch').textContent   = data.watchlist_count ?? 0;
   document.getElementById('h-clients').textContent = data.ws_clients ?? 0;
   document.getElementById('st-open').textContent   = data.open_positions ?? 0;
-  // Server time
-  const d = new Date(data.timestamp * 1000);
-  document.getElementById('server-time').textContent = d.toUTCString().slice(-12, -4) + ' UTC';
+  // Server time — overwritten by the live clock interval immediately after
 }
 
 // ============================================================
@@ -1595,9 +1593,10 @@ function _fmtDurS(s) {
 
 function _fmtTs(ms) {
   if (!ms) return '—';
-  const d = new Date(ms);
-  const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return new Date(ms).toLocaleString(undefined, {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  });
 }
 
 function updateStats(stats) {
@@ -1702,14 +1701,18 @@ function fmtUsdt(v) {
 
 function fmtTime(ms) {
   if (!ms) return '—';
-  const d = new Date(ms);
-  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-// Live clock
+// Live clock — local timezone
+const _tzLabel = (() => {
+  try {
+    return ' ' + Intl.DateTimeFormat().resolvedOptions().timeZone.replace(/_/g, ' ');
+  } catch { return ''; }
+})();
 setInterval(() => {
-  const d = new Date();
-  document.getElementById('server-time').textContent = d.toUTCString().slice(-12, -4) + ' UTC';
+  document.getElementById('server-time').textContent =
+    new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) + _tzLabel;
 }, 1000);
 
 // ============================================================
