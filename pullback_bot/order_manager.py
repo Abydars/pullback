@@ -109,6 +109,12 @@ class OrderManager:
             )
             return False
 
+        # Duplicate symbol guard — one open position per symbol at a time.
+        open_trades = await db.get_open_trades()
+        if any(t["symbol"] == symbol for t in open_trades):
+            logger.info("Signal %s %s skipped — position already open", symbol, direction)
+            return False
+
         # Calculate qty and leverage
         step = bc.get_step_size(symbol)
         raw_qty, leverage = _calc_qty_and_leverage(entry, sl)
