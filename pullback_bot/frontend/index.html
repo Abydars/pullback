@@ -303,6 +303,13 @@ canvas.sparkline { display: block; border-radius: 2px; }
 .hist-dir { font-size: 9px; padding: 1px 5px; border-radius: 2px; display: inline-block; }
 .hist-dir.long  { background: rgba(34,197,94,.15); color: var(--green); }
 .hist-dir.short { background: rgba(239,68,68,.15);  color: var(--red); }
+.hist-reason { font-size: 9px; padding: 1px 5px; border-radius: 2px; display: inline-block; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
+.hr-sl      { background: rgba(239,68,68,.18);  color: var(--red); }
+.hr-trail   { background: rgba(245,158,11,.18); color: var(--amber); }
+.hr-manual  { background: rgba(99,102,241,.18); color: var(--indigo); }
+.hr-pf-sl   { background: rgba(239,68,68,.25);  color: var(--red); border: 1px solid rgba(239,68,68,.4); }
+.hr-pf-tp   { background: rgba(34,197,94,.25);  color: var(--green); border: 1px solid rgba(34,197,94,.4); }
+.hr-other   { background: rgba(102,102,102,.18); color: var(--muted); }
 
 /* ── Stats bar ────────────────────────────────────────────────────────────── */
 #stats-bar {
@@ -506,11 +513,12 @@ canvas.sparkline { display: block; border-radius: 2px; }
               <th>Qty</th>
               <th>Score</th>
               <th>Duration</th>
+              <th>Reason</th>
               <th>PnL</th>
             </tr>
           </thead>
           <tbody id="hist-body">
-            <tr><td colspan="8" class="empty">No closed trades yet</td></tr>
+            <tr><td colspan="9" class="empty">No closed trades yet</td></tr>
           </tbody>
         </table>
       </div>
@@ -1393,7 +1401,7 @@ function renderHistory() {
   document.getElementById('hist-count').textContent = trades.length ? `(${trades.length})` : '';
 
   if (!trades.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">No closed trades yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">No closed trades yet</td></tr>';
     return;
   }
 
@@ -1409,6 +1417,18 @@ function renderHistory() {
       : null;
     const durStr = durS !== null ? _fmtDurS(durS) : '—';
 
+    // Reason badge
+    const reason = (t.close_reason || '').toUpperCase();
+    const reasonCfg = {
+      SL:            { cls: 'hr-sl',    label: 'SL' },
+      TRAIL:         { cls: 'hr-trail', label: 'TRAIL' },
+      MANUAL:        { cls: 'hr-manual',label: 'MANUAL' },
+      PORTFOLIO_SL:  { cls: 'hr-pf-sl', label: 'PORT SL' },
+      PORTFOLIO_TP:  { cls: 'hr-pf-tp', label: 'PORT TP' },
+      FILLED:        { cls: 'hr-other', label: 'FILLED' },
+      RECONCILED:    { cls: 'hr-other', label: 'RECONCILED' },
+    }[reason] ?? { cls: 'hr-other', label: reason || '—' };
+
     const tr = document.createElement('tr');
     tr.style.animation = 'slideIn .2s ease';
     tr.innerHTML = `
@@ -1419,6 +1439,7 @@ function renderHistory() {
       <td style="color:var(--muted)">${t.qty}</td>
       <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
       <td style="color:var(--muted)">${durStr}</td>
+      <td><span class="hist-reason ${reasonCfg.cls}">${reasonCfg.label}</span></td>
       <td class="${pnlCls}" style="font-weight:600">${fmtUsdt(pnl)}</td>
     `;
     tr.onclick = () => selectSymbol(t.symbol);

@@ -237,6 +237,7 @@ async def close_position(trade_id: int) -> JSONResponse:
             close_time=close_time,
             pnl_usdt=round(pnl, 4),
             pnl_pct=round(pnl_pct, 2),
+            close_reason="MANUAL",
         )
         await wsb.broadcaster.broadcast("trade_closed", {
             **trade,
@@ -283,6 +284,7 @@ async def close_all_positions() -> JSONResponse:
                 close_time=close_time,
                 pnl_usdt=round(pnl, 4),
                 pnl_pct=round(pnl_pct, 2),
+                close_reason="MANUAL",
             )
             await wsb.broadcaster.broadcast("trade_closed", {
                 **trade,

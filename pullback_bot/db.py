@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS trades (
     entry_time  INTEGER NOT NULL,          -- unix ms
     close_time  INTEGER,
     close_price REAL,
+    close_reason TEXT,                     -- SL | TRAIL | MANUAL | PORTFOLIO_SL | PORTFOLIO_TP | …
     pnl_usdt    REAL,
     pnl_pct     REAL,
     signal_score INTEGER,
@@ -51,12 +52,18 @@ CREATE_INDEXES = [
 
 
 async def init_db() -> None:
-    """Create tables and indexes if they don't exist."""
+    """Create tables, indexes, and run lightweight column migrations."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(CREATE_TRADES_TABLE)
         await db.execute(CREATE_SCANNER_LOG_TABLE)
         for idx in CREATE_INDEXES:
             await db.execute(idx)
+        # Migration: add close_reason if the column doesn't exist yet
+        try:
+            await db.execute("ALTER TABLE trades ADD COLUMN close_reason TEXT")
+            logger.info("Migration: added close_reason column to trades")
+        except Exception:
+            pass  # column already exists
         await db.commit()
     logger.info("Database initialised at %s", DB_PATH)
 
@@ -99,15 +106,16 @@ async def update_trade_close(
     pnl_usdt: float,
     pnl_pct: float,
     status: str = "CLOSED",
+    close_reason: Optional[str] = None,
 ) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
             UPDATE trades
-            SET close_price=?, close_time=?, pnl_usdt=?, pnl_pct=?, status=?
+            SET close_price=?, close_time=?, pnl_usdt=?, pnl_pct=?, status=?, close_reason=?
             WHERE id=?
             """,
-            (close_price, close_time, pnl_usdt, pnl_pct, status, trade_id),
+            (close_price, close_time, pnl_usdt, pnl_pct, status, close_reason, trade_id),
         )
         await db.commit()
 

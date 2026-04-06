@@ -143,6 +143,7 @@ async def _handle_order_update(event: dict) -> None:
                     close_time=close_time,
                     pnl_usdt=round(realized_pnl, 4),
                     pnl_pct=round(pnl_pct, 2),
+                    close_reason="FILLED",
                 )
                 await wsb.broadcaster.broadcast("trade_closed", {
                     **trade,
@@ -233,6 +234,7 @@ async def _close_all_paper(
             close_time=close_time,
             pnl_usdt=round(pnl, 4),
             pnl_pct=round(pnl_pct, 2),
+            close_reason=reason,
         )
         paper_unrealized.pop(tid, None)
         _trail_active.pop(tid, None)
@@ -368,6 +370,7 @@ async def _paper_pnl_loop() -> None:
                         close_time=close_time,
                         pnl_usdt=round(final_pnl, 4),
                         pnl_pct=round(final_pct, 2),
+                        close_reason=close_reason,
                     )
                     paper_unrealized.pop(tid, None)
                     _trail_active.pop(tid, None)
@@ -467,6 +470,7 @@ async def _reconcile_live() -> None:
                     pnl_usdt=round(pnl, 4),
                     pnl_pct=round(pnl_pct, 2),
                     status="CLOSED",
+                    close_reason="RECONCILED",
                 )
                 logger.warning(
                     "Reconciled ghost trade #%d %s %s — closed at %.4f pnl=%.4f",
@@ -541,6 +545,7 @@ async def _reconcile_paper() -> None:
                     close_time=int(time.time() * 1000),
                     pnl_usdt=round(pnl, 4),
                     pnl_pct=round(pnl_pct, 2),
+                    close_reason=close_reason,
                 )
                 logger.warning(
                     "Paper restart reconcile: #%d %s %s hit %s at %.4f pnl=%.4f",
