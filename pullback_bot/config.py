@@ -64,7 +64,7 @@ RISK_PER_TRADE_USDT: float = _float("RISK_PER_TRADE_USDT", 10.0)
 # Prevents runaway size when stop is very tight relative to price.
 MAX_POSITION_USDT: float = _float("MAX_POSITION_USDT", 0.0)
 MAX_OPEN_TRADES: int = _int("MAX_OPEN_TRADES", 5)
-LEVERAGE: int = _int("LEVERAGE", 10)
+MAX_LEVERAGE: int = _int("MAX_LEVERAGE", 20)
 TRAIL_STEP_RATIO: float = _float("TRAIL_STEP_RATIO", 0.5)
 
 # ── Portfolio-level stops ─────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "RISK_PER_TRADE_USDT":      float,
     "MAX_POSITION_USDT":        float,
     "MAX_OPEN_TRADES":          int,
-    "LEVERAGE":                 int,
+    "MAX_LEVERAGE":             int,
     "TRAIL_STEP_RATIO":             float,
     "PORTFOLIO_STOP_LOSS_USDT":    float,
     "PORTFOLIO_TAKE_PROFIT_USDT":  float,
@@ -131,8 +131,8 @@ def update(key: str, raw_value: str) -> None:
         raise ValueError("MODE must be 'live' or 'paper'")
     if key == "SIGNAL_SCORE_THRESHOLD" and not (0 <= value <= 100):
         raise ValueError("SIGNAL_SCORE_THRESHOLD must be 0–100")
-    if key == "LEVERAGE" and not (1 <= value <= 125):
-        raise ValueError("LEVERAGE must be 1–125")
+    if key == "MAX_LEVERAGE" and not (1 <= value <= 125):
+        raise ValueError("MAX_LEVERAGE must be 1–125")
     if key == "TRAIL_STEP_RATIO" and not (0.1 <= value <= 3.0):
         raise ValueError("TRAIL_STEP_RATIO must be 0.1–3.0")
 

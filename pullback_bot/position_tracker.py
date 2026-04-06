@@ -47,7 +47,7 @@ def _enrich_position(trade: dict, mark: float, raw_pnl: float) -> dict:
     """
     entry   = float(trade["entry_price"])
     qty     = float(trade["qty"])
-    lev     = int(trade.get("leverage") or config.LEVERAGE)
+    lev     = int(trade.get("leverage") or config.MAX_LEVERAGE)
     direction = trade["direction"]
     entry_time = int(trade.get("entry_time") or 0)
 

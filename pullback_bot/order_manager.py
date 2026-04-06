@@ -27,24 +27,43 @@ import db
 logger = logging.getLogger(__name__)
 
 
-def _calc_qty(entry: float, sl: float) -> float:
+def _calc_qty_and_leverage(entry: float, sl: float) -> tuple[float, int]:
     """
-    Calculate position size from risk USDT and entry/SL distance.
+    Compute position size and leverage from risk budget, margin budget, and SL distance.
 
-    qty = RISK / sl_distance  →  if SL hits, loss = qty × sl_distance = RISK exactly.
+    Logic:
+    - Risk constraint:   qty × sl_distance = RISK_PER_TRADE_USDT
+    - Margin constraint: notional / leverage = MAX_POSITION_USDT
+    - Solving for leverage: leverage = RISK / (MAX_POSITION_USDT × sl_pct)
+    - Capped at MAX_LEVERAGE.
 
-    An optional MAX_POSITION_USDT cap limits the notional (qty × entry) so
-    that very tight stops don't produce unexpectedly large positions.
+    If MAX_POSITION_USDT = 0, uses MAX_LEVERAGE with pure risk sizing.
+    Risk never exceeds RISK_PER_TRADE_USDT regardless of leverage cap.
     """
-    risk = abs(entry - sl)
-    if risk <= 0 or entry <= 0:
-        return 0.0
-    qty = config.RISK_PER_TRADE_USDT / risk
-    cap = config.MAX_POSITION_USDT
+    sl_distance = abs(entry - sl)
+    if sl_distance <= 0 or entry <= 0:
+        return 0.0, config.MAX_LEVERAGE
+
+    risk    = config.RISK_PER_TRADE_USDT
+    max_lev = max(1, config.MAX_LEVERAGE)
+    cap     = config.MAX_POSITION_USDT   # margin budget per trade
+    sl_pct  = sl_distance / entry
+
+    # Qty that keeps risk exactly at RISK_PER_TRADE_USDT
+    qty_risk = risk / sl_distance
+
     if cap > 0:
-        max_qty = cap / entry
-        qty = min(qty, max_qty)
-    return qty
+        # Minimum leverage so that notional / leverage == cap
+        # notional = risk / sl_pct  →  leverage = risk / (cap × sl_pct)
+        needed_lev = math.ceil(risk / (cap * sl_pct))
+        leverage   = max(1, min(needed_lev, max_lev))
+        # Cap qty so margin never exceeds cap
+        qty = min(qty_risk, cap * leverage / entry)
+    else:
+        leverage = max_lev
+        qty      = qty_risk
+
+    return qty, int(leverage)
 
 
 class OrderManager:
@@ -72,9 +91,9 @@ class OrderManager:
             )
             return False
 
-        # Calculate qty
+        # Calculate qty and leverage
         step = bc.get_step_size(symbol)
-        raw_qty = _calc_qty(entry, sl)
+        raw_qty, leverage = _calc_qty_and_leverage(entry, sl)
         qty = bc.round_step(raw_qty, step)
         if qty <= 0:
             logger.warning("Calculated qty=0 for %s, skipping", symbol)
@@ -84,11 +103,11 @@ class OrderManager:
 
         if config.MODE == "paper":
             return await self._paper_open(
-                symbol, direction, entry, sl, tp1, tp2, qty, now_ms, score
+                symbol, direction, entry, sl, tp1, tp2, qty, leverage, now_ms, score
             )
         else:
             return await self._live_open(
-                symbol, direction, entry, sl, tp1, tp2, qty, now_ms, score
+                symbol, direction, entry, sl, tp1, tp2, qty, leverage, now_ms, score
             )
 
     # ── Paper mode ─────────────────────────────────────────────────────────────
@@ -102,6 +121,7 @@ class OrderManager:
         tp1: float,
         tp2: float,
         qty: float,
+        leverage: int,
         now_ms: int,
         score: int,
     ) -> bool:
@@ -116,14 +136,14 @@ class OrderManager:
             mode="paper",
             entry_time=now_ms,
             signal_score=score,
-            leverage=config.LEVERAGE,
+            leverage=leverage,
         )
         notional = entry * qty
         logger.info(
             "Paper trade opened: #%d %s %s entry=%.6f sl=%.6f qty=%g "
-            "notional=%.2f margin=%.2f risk=%.2f score=%d",
+            "notional=%.2f margin=%.2f leverage=%dx risk=%.2f score=%d",
             trade_id, symbol, direction, entry, sl, qty,
-            notional, notional / config.LEVERAGE, abs(entry - sl) * qty, score,
+            notional, notional / leverage, leverage, abs(entry - sl) * qty, score,
         )
         return True
 
@@ -138,12 +158,13 @@ class OrderManager:
         tp1: float,
         tp2: float,
         qty: float,
+        leverage: int,
         now_ms: int,
         score: int,
     ) -> bool:
         try:
             # 1. Set leverage
-            await bc.set_leverage(symbol, config.LEVERAGE)
+            await bc.set_leverage(symbol, leverage)
 
             # 2. Market entry
             side = "BUY" if direction == "LONG" else "SELL"
@@ -172,12 +193,12 @@ class OrderManager:
                 mode="live",
                 entry_time=now_ms,
                 signal_score=score,
-                leverage=config.LEVERAGE,
+                leverage=leverage,
                 binance_order_id=binance_order_id,
             )
             logger.info(
-                "Live trade opened: #%d %s %s entry=%.6f order=%s",
-                trade_id, symbol, direction, actual_entry, binance_order_id,
+                "Live trade opened: #%d %s %s entry=%.6f leverage=%dx order=%s",
+                trade_id, symbol, direction, actual_entry, leverage, binance_order_id,
             )
             return True
 
