@@ -140,6 +140,42 @@ async def get_recent_trades(limit: int = 50) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+async def get_closed_trades(limit: int = 500) -> list[dict]:
+    """Return closed trades newest-first, for trade history display."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM trades WHERE status='CLOSED' ORDER BY close_time DESC LIMIT ?",
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_all_stats() -> dict:
+    """Return all-time closed-trade stats."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT
+                COUNT(*)                                             AS total,
+                SUM(CASE WHEN pnl_usdt > 0 THEN 1 ELSE 0 END)      AS wins,
+                SUM(COALESCE(pnl_usdt, 0))                          AS total_pnl
+            FROM trades
+            WHERE status = 'CLOSED'
+            """
+        )
+        row = await cursor.fetchone()
+        total    = row[0] or 0
+        wins     = row[1] or 0
+        total_pnl = row[2] or 0.0
+        return {
+            "total_all":     total,
+            "win_rate_all":  round(wins / total * 100, 1) if total > 0 else 0.0,
+            "total_pnl_all": round(total_pnl, 2),
+        }
+
+
 async def count_open_trades() -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(

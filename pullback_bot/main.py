@@ -111,13 +111,14 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             )
             for t in raw_open
         ]
-        recent_trades = await db.get_recent_trades(50)
-        stats = await db.get_today_stats()
+        closed_trades = await db.get_closed_trades(500)
+        today_stats   = await db.get_today_stats()
+        all_stats     = await db.get_all_stats()
         await wsb.broadcaster.send_to(ws, "init", {
             "mode": config.MODE,
             "open_trades": open_trades,
-            "recent_trades": recent_trades,
-            "stats": stats,
+            "recent_trades": closed_trades,
+            "stats": {**today_stats, **all_stats},
             "watchlist": scanner.active_watchlist,
         })
 

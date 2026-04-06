@@ -189,6 +189,18 @@ async def _keepalive_listen_key(listen_key: str) -> None:
             logger.warning("listenKey keepalive failed: %s", exc)
 
 
+# ── Stats broadcast helper ────────────────────────────────────────────────────
+
+async def _broadcast_stats() -> None:
+    """Push fresh today + all-time stats to all connected UI clients."""
+    try:
+        today = await db.get_today_stats()
+        alltime = await db.get_all_stats()
+        await wsb.broadcaster.broadcast("stats_update", {**today, **alltime})
+    except Exception as exc:
+        logger.warning("_broadcast_stats error: %s", exc)
+
+
 # ── PAPER mode: PnL simulation ────────────────────────────────────────────────
 
 async def _close_all_paper(
@@ -241,6 +253,7 @@ async def _close_all_paper(
         "total_pnl": round(total_pnl, 4),
         "count": len(trades),
     })
+    await _broadcast_stats()
     logger.warning(
         "Portfolio stop (%s): closed %d trades, total_pnl=%.4f",
         reason, len(trades), total_pnl,
@@ -366,6 +379,7 @@ async def _paper_pnl_loop() -> None:
                         "pnl_usdt": round(final_pnl, 4),
                         "pnl_pct": round(final_pct, 2),
                     })
+                    await _broadcast_stats()
                     logger.info(
                         "Paper trade closed (%s): %s %s pnl=%.4f",
                         close_reason, symbol, direction, final_pnl,

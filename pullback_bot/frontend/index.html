@@ -306,11 +306,13 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
 /* ── Stats bar ────────────────────────────────────────────────────────────── */
 #stats-bar {
-  display: flex; align-items: center; gap: 20px; padding: 0 16px;
+  display: flex; align-items: center; gap: 14px; padding: 0 16px;
   background: var(--bg2); border-top: 1px solid var(--border);
-  font-size: 11px; color: var(--muted); flex-shrink: 0;
+  font-size: 11px; color: var(--muted); flex-shrink: 0; overflow-x: auto;
+  white-space: nowrap;
 }
 #stats-bar .s { color: var(--text); font-weight: 600; }
+#stats-bar .sb-sep { color: var(--border); user-select: none; }
 
 /* ── Animations ───────────────────────────────────────────────────────────── */
 @keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
@@ -542,10 +544,16 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
   <!-- ── Stats Bar ── -->
   <div id="stats-bar">
-    <span>Trades today: <span class="s" id="st-total">0</span></span>
-    <span>Win rate: <span class="s" id="st-wr">0%</span></span>
-    <span>PnL today: <span class="s" id="st-pnl">$0.00</span></span>
-    <span>Open: <span class="s" id="st-open">0</span></span>
+    <span title="Closed trades entered today">Today: <span class="s" id="st-total">0</span></span>
+    <span title="Win rate for today's closed trades">Win%: <span class="s" id="st-wr">0%</span></span>
+    <span title="Realised PnL from today's closed trades">PnL today: <span class="s" id="st-pnl">$0.00</span></span>
+    <span class="sb-sep">|</span>
+    <span title="All-time closed trades">All trades: <span class="s" id="st-total-all">0</span></span>
+    <span title="All-time win rate">Win% all: <span class="s" id="st-wr-all">0%</span></span>
+    <span title="All-time realised PnL">PnL all: <span class="s" id="st-pnl-all">$0.00</span></span>
+    <span class="sb-sep">|</span>
+    <span title="Sum of unrealized PnL across all open positions">Unrealized: <span class="s" id="st-upnl">$0.00</span></span>
+    <span title="Open positions">Open: <span class="s" id="st-open">0</span></span>
     <span style="margin-left:auto;color:#2a2a2a;">MODE: <span id="st-mode">PAPER</span></span>
   </div>
 
@@ -916,6 +924,7 @@ function handleMessage(type, data) {
     case 'position_update': onPositionUpdate(data); break;
     case 'trade_closed':             onTradeClosed(data);          break;
     case 'portfolio_stop_triggered': onPortfolioStop(data);         break;
+    case 'stats_update':             updateStats(data);             break;
     case 'kline_update':             onKlineUpdate(data);           break;
     case 'kline_history':            onKlineHistory(data);          break;
     case 'system_status':            onSystemStatus(data);          break;
@@ -934,12 +943,13 @@ function onInit(data) {
   (data.open_trades || []).forEach(t => { state.openTrades[t.id] = t; });
   renderPositions();
 
-  // History
-  state.histTrades = (data.recent_trades || []).filter(t => t.status === 'CLOSED');
+  // History — server already returns only CLOSED trades
+  state.histTrades = data.recent_trades || [];
   renderHistory();
 
   // Stats
   if (data.stats) updateStats(data.stats);
+  updateUnrealizedStat();
 
   // Auto-load first symbol chart
   if (!state.selectedSymbol && data.watchlist && data.watchlist.length) {
@@ -1024,14 +1034,18 @@ function onPositionUpdate(positions) {
 
   // Redraw trade lines for selected symbol
   if (state.selectedSymbol) drawTradeLines(state.selectedSymbol);
+
+  // Update unrealized PnL total in stats bar
+  updateUnrealizedStat();
 }
 
 function onTradeClosed(trade) {
   delete state.openTrades[trade.id];
   state.histTrades.unshift(trade);
-  if (state.histTrades.length > 50) state.histTrades.pop();
+  // no artificial cap — server sends up to 500, keep them all
   renderPositions();
   renderHistory();
+  updateUnrealizedStat();   // refresh open count + unrealized total
   if (state.selectedSymbol === trade.symbol) clearTradeLines();
 
   // Toast
@@ -1374,7 +1388,7 @@ async function closeAllPositions() {
 
 function renderHistory() {
   const tbody  = document.getElementById('hist-body');
-  const trades = state.histTrades.slice(0, 50);
+  const trades = state.histTrades;
 
   document.getElementById('hist-count').textContent = trades.length ? `(${trades.length})` : '';
 
@@ -1419,12 +1433,30 @@ function _fmtDurS(s) {
 }
 
 function updateStats(stats) {
+  // Today
   document.getElementById('st-total').textContent = stats.total_today ?? 0;
   document.getElementById('st-wr').textContent    = (stats.win_rate ?? 0) + '%';
-  const pnl = stats.total_pnl_today ?? 0;
-  const el = document.getElementById('st-pnl');
-  el.textContent = fmtUsdt(pnl);
-  el.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  const pnlToday = stats.total_pnl_today ?? 0;
+  const elToday  = document.getElementById('st-pnl');
+  elToday.textContent = fmtUsdt(pnlToday);
+  elToday.style.color = pnlToday >= 0 ? 'var(--green)' : 'var(--red)';
+
+  // All-time
+  document.getElementById('st-total-all').textContent = stats.total_all ?? 0;
+  document.getElementById('st-wr-all').textContent    = (stats.win_rate_all ?? 0) + '%';
+  const pnlAll = stats.total_pnl_all ?? 0;
+  const elAll  = document.getElementById('st-pnl-all');
+  elAll.textContent = fmtUsdt(pnlAll);
+  elAll.style.color = pnlAll >= 0 ? 'var(--green)' : 'var(--red)';
+}
+
+function updateUnrealizedStat() {
+  const total = Object.values(state.openTrades)
+    .reduce((sum, t) => sum + (t.unrealized_pnl ?? 0), 0);
+  const el = document.getElementById('st-upnl');
+  el.textContent = fmtUsdt(total);
+  el.style.color = total >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('st-open').textContent = Object.keys(state.openTrades).length;
 }
 
 function updateModeBadge(mode) {
