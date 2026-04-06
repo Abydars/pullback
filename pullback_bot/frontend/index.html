@@ -639,6 +639,11 @@ function initMainChart() {
     },
     localization: {
       priceFormatter: fmtPrice,
+      // Show crosshair time label in local timezone
+      timeFormatter: ts => new Date(ts * 1000).toLocaleString(undefined, {
+        month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      }),
     },
     grid: {
       vertLines: { color: '#1a1a1a' },
@@ -653,6 +658,19 @@ function initMainChart() {
       borderColor: '#1f1f1f',
       timeVisible: true,
       secondsVisible: false,
+      // Tick labels on X-axis in local timezone
+      tickMarkFormatter: (ts, tickMarkType) => {
+        const d = new Date(ts * 1000);
+        const TM = LightweightCharts.TickMarkType;
+        if (tickMarkType === TM.Year)
+          return d.getFullYear().toString();
+        if (tickMarkType === TM.Month)
+          return d.toLocaleString(undefined, { month: 'short', year: '2-digit' });
+        if (tickMarkType === TM.DayOfMonth)
+          return d.toLocaleString(undefined, { month: 'short', day: 'numeric' });
+        // Time ticks
+        return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+      },
     },
   });
 
