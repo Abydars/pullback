@@ -106,7 +106,6 @@ EDITABLE_KEYS: dict[str, type] = {
     "MAX_POSITION_USDT":        float,
     "MAX_OPEN_TRADES":          int,
     "MAX_LEVERAGE":             int,
-    "TRAIL_ARM_RR":                 float,
     "TRAIL_STEP_RATIO":             float,
     "PORTFOLIO_STOP_LOSS_USDT":    float,
     "PORTFOLIO_TAKE_PROFIT_USDT":  float,

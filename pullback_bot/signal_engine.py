@@ -228,13 +228,17 @@ def check_pullback(
     if risk <= 0:
         return None
 
-    # Trail arm: price at which trailing activates.
-    # Distance = risk × TRAIL_ARM_RR (configurable; default 1.5 → 1.5:1 RR).
-    arm_rr = max(0.5, config.TRAIL_ARM_RR)
+    # Trail arm: nearest technical resistance/support — the natural first target.
+    # LONG: the swing high before the pullback (resistance price is trying to recover to).
+    # SHORT: the swing low before the pullback.
+    # If the swing level is somehow at or below entry (rare edge case), fall back to 1×ATR.
     if direction == "LONG":
-        trail_arm = round(entry_price + risk * arm_rr, 8)
+        swing_high = float(recent["high"].max())
+        trail_arm = swing_high if swing_high > entry_price else entry_price + atr15
     else:
-        trail_arm = round(entry_price - risk * arm_rr, 8)
+        swing_low = float(recent["low"].min())
+        trail_arm = swing_low if swing_low < entry_price else entry_price - atr15
+    trail_arm = round(trail_arm, 8)
 
     signal: dict = {
         "symbol":      symbol,
@@ -365,10 +369,12 @@ def check_breakout(
     if risk <= 0:
         return None
 
-    arm_rr = max(0.5, config.TRAIL_ARM_RR)
-    trail_arm = round(
-        entry_price + risk * arm_rr if direction == "LONG" else entry_price - risk * arm_rr, 8
-    )
+    # Trail arm: 1×ATR above/below entry — confirms the breakout is holding
+    # before we start trailing.  ATR-based so it scales with volatility.
+    if direction == "LONG":
+        trail_arm = round(entry_price + atr15, 8)
+    else:
+        trail_arm = round(entry_price - atr15, 8)
 
     signal: dict = {
         "symbol":       symbol,

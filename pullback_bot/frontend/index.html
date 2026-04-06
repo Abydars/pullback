@@ -551,7 +551,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
           <div class="field-hint" id="trade-sl-hint"></div>
         </div>
         <div class="trade-field">
-          <label>Trail Arm (auto — uses Trail Arm R:R config)</label>
+          <label>Trail Arm (auto — nearest swing high/low)</label>
           <input id="trade-tp" type="text" readonly placeholder="Auto-calculated" />
           <div class="field-hint" id="trade-tp-hint">Trail activates when price reaches this level</div>
         </div>
@@ -1868,8 +1868,7 @@ const CFG_FIELDS = [
       { key: 'MAX_LEVERAGE',       label: 'Max Leverage',              type: 'number', hint: 'Ceiling on dynamically calculated leverage. Bot calculates needed leverage from SL distance; this caps it.' },
       { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)', type: 'number', step: '1', hint: 'Target dollar loss if SL is hit. SL is placed at the technical level; leverage is adjusted so loss = this value.' },
       { key: 'MAX_OPEN_TRADES',    label: 'Max Open Positions',        type: 'number',              hint: 'Hard cap on concurrent open trades' },
-      { key: 'TRAIL_ARM_RR',    label: 'Trail Arm R:R',    type: 'number', step: '0.25', hint: 'Price must reach entry ± (SL distance × this) before trailing starts. 1.5 = 1.5:1 RR.' },
-      { key: 'TRAIL_STEP_RATIO', label: 'Trail Step Ratio', type: 'number', step: '0.05', hint: 'Trailing stop = ratio × SL distance behind the peak (0.5 = half the SL distance)' },
+      { key: 'TRAIL_STEP_RATIO', label: 'Trail Step Ratio', type: 'number', step: '0.05', hint: 'Trailing stop follows the peak at this ratio × SL distance (0.5 = half the SL distance behind peak). Trail arm is set automatically at the nearest swing level.' },
     ],
   },
   {
@@ -2036,12 +2035,15 @@ function _updateTradePreview() {
     document.getElementById('trade-size-preview').value = '';
     return;
   }
-  const risk   = Math.abs(entry - sl);
-  const armRR  = parseFloat(document.getElementById('trade-entry').dataset.armRr || '1.5');
-  const tp2    = _manualDir === 'LONG' ? entry + risk * armRR : entry - risk * armRR;
-  document.getElementById('trade-tp').value = tp2.toPrecision(6);
-  document.getElementById('trade-tp-hint').textContent =
-    `Trail activates at ${armRR}:1 R:R (${(risk * armRR / entry * 100).toFixed(2)}% from entry)`;
+  const risk = Math.abs(entry - sl);
+  // Trail arm is set by the API (swing-based); only recalculate if field is empty
+  const tpField = document.getElementById('trade-tp');
+  if (!tpField.value) {
+    // Fallback: 1.5× RR if API hasn't populated it yet
+    const tp2 = _manualDir === 'LONG' ? entry + risk * 1.5 : entry - risk * 1.5;
+    tpField.value = tp2.toPrecision(6);
+    document.getElementById('trade-tp-hint').textContent = 'Trail arm (fallback — 1.5:1 RR)';
+  }
 
   // Estimate size (mirrors dynamic-leverage backend _calc_qty_and_leverage)
   const riskUsdt = parseFloat(document.getElementById('trade-entry').dataset.riskUsdt || '0');
@@ -2103,7 +2105,6 @@ async function openManualTrade(dir) {
     entryEl.dataset.riskUsdt  = cfg.RISK_PER_TRADE_USDT || 0;
     entryEl.dataset.marginCap = cfg.MAX_POSITION_USDT   || 0;
     entryEl.dataset.maxLev    = cfg.MAX_LEVERAGE         || 20;
-    entryEl.dataset.armRr     = cfg.TRAIL_ARM_RR         || 1.5;
   } catch(_) {}
 
   // Auto-calculate SL/TP from signal engine logic
@@ -2116,6 +2117,13 @@ async function openManualTrade(dir) {
       document.getElementById('trade-sl').value = data.sl_price;
       document.getElementById('trade-sl-hint').textContent =
         `ATR-based · ${data.sl_pct}% from entry · edit to override`;
+      // Trail arm from nearest swing level (set by API, not RR multiplier)
+      if (data.tp1) {
+        document.getElementById('trade-tp').value = parseFloat(data.tp1).toPrecision(6);
+        const armPct = Math.abs(data.tp1 - data.entry) / data.entry * 100;
+        document.getElementById('trade-tp-hint').textContent =
+          `Nearest swing level · ${armPct.toFixed(2)}% from entry`;
+      }
       _updateTradePreview();
     } else {
       entryEl.value = (state.lastMarkPrice || 0).toPrecision(6);

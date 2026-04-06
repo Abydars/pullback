@@ -379,8 +379,13 @@ async def sl_suggest(symbol: str, direction: str) -> JSONResponse:
     if risk == 0:
         return JSONResponse({"error": "Computed SL equals entry"}, status_code=400)
 
-    arm_rr = max(0.5, config.TRAIL_ARM_RR)
-    tp1 = round(entry + risk * arm_rr if direction == "LONG" else entry - risk * arm_rr, 8)
+    # Trail arm: swing high/low (same logic as check_pullback in signal_engine).
+    if direction == "LONG":
+        swing_high = float(recent["high"].max())
+        tp1 = round(swing_high if swing_high > entry else entry + atr, 8)
+    else:
+        swing_low = float(recent["low"].min())
+        tp1 = round(swing_low if swing_low < entry else entry - atr, 8)
     tp2 = tp1  # DB compat; actual exit is trail-based
 
     return JSONResponse({
@@ -419,14 +424,26 @@ async def manual_trade(request: Request) -> JSONResponse:
     if direction == "SHORT" and sl <= entry:
         return JSONResponse({"error": "SL must be above entry for SHORT"}, status_code=400)
 
-    # Trail arm at TRAIL_ARM_RR × risk distance
-    arm_rr = max(0.5, config.TRAIL_ARM_RR)
-    if direction == "LONG":
-        tp1 = entry + risk_dist * arm_rr
-        tp2 = tp1  # DB compat
+    # Trail arm: swing high/low from recent 15m candles (same as signal engine).
+    import pandas as pd
+    buf15 = scanner._kline_buffers.get(symbol, {}).get("15m", [])
+    if len(buf15) >= 21:
+        _df = pd.DataFrame(buf15[-21:])
+        _prev_close = _df["close"].shift(1)
+        _tr = pd.concat([_df["high"] - _df["low"],
+                         (_df["high"] - _prev_close).abs(),
+                         (_df["low"]  - _prev_close).abs()], axis=1).max(axis=1)
+        _atr = float(_tr.ewm(span=14, adjust=False).mean().iloc[-1])
+        if direction == "LONG":
+            _swing = float(_df["high"].max())
+            tp1 = _swing if _swing > entry else entry + _atr
+        else:
+            _swing = float(_df["low"].min())
+            tp1 = _swing if _swing < entry else entry - _atr
     else:
-        tp1 = entry - risk_dist * arm_rr
-        tp2 = tp1
+        tp1 = entry + risk_dist * 1.5 if direction == "LONG" else entry - risk_dist * 1.5
+    tp1 = round(tp1, 8)
+    tp2 = tp1  # DB compat
 
     signal = {
         "symbol":      symbol,
