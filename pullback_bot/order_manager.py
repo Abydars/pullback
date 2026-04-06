@@ -75,10 +75,14 @@ async def _calc_qty_and_leverage(
     # volatility levels while still scaling smoothly.
     atr_pct  = (atr / entry) * 100          # e.g. 1.0 for 1 %
     raw_lev  = int(4.0 / atr_pct) if atr_pct > 0 else max_lev
-    leverage = max(1, min(raw_lev, max_lev))
+    raw_lev  = max(1, min(raw_lev, max_lev))
 
     # ── 2. Score scaling ──────────────────────────────────────────────────────
+    # Score scales both position size AND leverage — a low-confidence signal
+    # should not be allowed to use high leverage even on a calm instrument.
+    # score=100 → full raw_lev; score=65 → 65% of raw_lev; floor at 50%.
     score_scale = max(0.5, score / 100.0)   # floor at 50 % to avoid micro sizes
+    leverage = max(1, int(raw_lev * score_scale))
 
     # ── 3. ATR regime ─────────────────────────────────────────────────────────
     # atr_ratio > 1 means current ATR is elevated vs its 20-bar average.
