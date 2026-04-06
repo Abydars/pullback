@@ -218,11 +218,17 @@ def check_pullback(
     entry_price = last_close
 
     # SL at the true technical level — swing low for LONG, swing high for SHORT.
-    # Leverage is adjusted in order_manager to keep dollar risk = RISK_PER_TRADE_USDT.
+    # Enforce a floor of 0.5×ATR from entry so that tight-range markets can't
+    # place SL inside normal noise, which would cause immediate stop-outs and
+    # prevent meaningful leverage adjustment.
     if direction == "LONG":
-        sl_price = round(float(recent["low"].min()), 8)
+        swing_sl = float(recent["low"].min())
+        atr_floor = entry_price - atr15 * 0.5
+        sl_price = round(min(swing_sl, atr_floor), 8)   # take the further level
     else:
-        sl_price = round(float(recent["high"].max()), 8)
+        swing_sl = float(recent["high"].max())
+        atr_floor = entry_price + atr15 * 0.5
+        sl_price = round(max(swing_sl, atr_floor), 8)   # take the further level
 
     risk = abs(entry_price - sl_price)
     if risk <= 0:
@@ -357,12 +363,13 @@ def check_breakout(
     entry_price = last_close
 
     if direction == "LONG":
-        # SL: just below the broken resistance level
-        # Leverage is adjusted in order_manager to keep dollar risk = RISK_PER_TRADE_USDT.
-        sl_price = round(resistance - atr15 * 0.3, 8)
+        # SL: just below the broken resistance level, at least 0.5×ATR from entry.
+        # The ATR floor prevents a SL that sits inside normal noise when the breakout
+        # candle is large and resistance is already far below entry.
+        sl_price = round(min(resistance - atr15 * 0.3, entry_price - atr15 * 0.5), 8)
     else:
-        # SL: just above the broken support level
-        sl_price = round(support + atr15 * 0.3, 8)
+        # SL: just above the broken support level, at least 0.5×ATR from entry.
+        sl_price = round(max(support + atr15 * 0.3, entry_price + atr15 * 0.5), 8)
 
     risk = abs(entry_price - sl_price)
     if risk <= 0:
