@@ -379,12 +379,12 @@ async def sl_suggest(symbol: str, direction: str) -> JSONResponse:
     if risk == 0:
         return JSONResponse({"error": "Computed SL equals entry"}, status_code=400)
 
-    # Trail arm: swing high/low (same logic as check_pullback in signal_engine).
+    # Trail arm: candle closes only — avoids spike wicks making the level unreachable.
     if direction == "LONG":
-        swing_high = float(recent["high"].max())
+        swing_high = float(recent["close"].max())
         tp1 = round(swing_high if swing_high > entry else entry + atr, 8)
     else:
-        swing_low = float(recent["low"].min())
+        swing_low = float(recent["close"].min())
         tp1 = round(swing_low if swing_low < entry else entry - atr, 8)
     tp2 = tp1  # DB compat; actual exit is trail-based
 

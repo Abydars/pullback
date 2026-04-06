@@ -228,15 +228,14 @@ def check_pullback(
     if risk <= 0:
         return None
 
-    # Trail arm: nearest technical resistance/support — the natural first target.
-    # LONG: the swing high before the pullback (resistance price is trying to recover to).
-    # SHORT: the swing low before the pullback.
-    # If the swing level is somehow at or below entry (rare edge case), fall back to 1×ATR.
+    # Trail arm: recent swing resistance/support based on candle CLOSES (not wicks).
+    # Closes ignore spike wicks that would push the trail arm to an unreachable level.
+    # Fallback to 1×ATR if no close is on the correct side of entry.
     if direction == "LONG":
-        swing_high = float(recent["high"].max())
+        swing_high = float(recent["close"].max())
         trail_arm = swing_high if swing_high > entry_price else entry_price + atr15
     else:
-        swing_low = float(recent["low"].min())
+        swing_low = float(recent["close"].min())
         trail_arm = swing_low if swing_low < entry_price else entry_price - atr15
     trail_arm = round(trail_arm, 8)
 

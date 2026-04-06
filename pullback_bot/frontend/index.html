@@ -1929,7 +1929,7 @@ function renderConfigForm(values) {
       let input;
       if (f.type === 'select') {
         const opts = f.options.map(o =>
-          `<option value="${o}" ${o == val ? 'selected' : ''}>${o}</option>`
+          `<option value="${o}" ${String(o) === String(val) ? 'selected' : ''}>${o}</option>`
         ).join('');
         input = `<select class="cfg-select" data-key="${f.key}">${opts}</select>`;
       } else {
