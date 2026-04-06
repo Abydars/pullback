@@ -310,6 +310,15 @@ canvas.sparkline { display: block; border-radius: 2px; }
 }
 .pos-dir-long  { background: rgba(34,197,94,.15);  color: var(--green); }
 .pos-dir-short { background: rgba(239,68,68,.15);   color: var(--red); }
+.trail-badge {
+  font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 2px;
+  letter-spacing: .08em; background: rgba(245,158,11,.2); color: var(--amber);
+  border: 1px solid rgba(245,158,11,.4); animation: trailPulse 2s ease-in-out infinite;
+}
+@keyframes trailPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .45; }
+}
 .pos-card-pnl  { font-size: 13px; font-weight: 700; text-align: right; }
 .pos-card-roe  { font-size: 10px; text-align: right; }
 .pos-card-grid {
@@ -1332,9 +1341,7 @@ function renderPositions() {
     const trailExtremePct = (trailExtreme && entry) ? fromEntry(trailExtreme) : null;
 
     // Trail arm badge
-    const armBadge = trailActive
-      ? `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:2px;background:rgba(245,158,11,.2);color:var(--amber);margin-left:6px;">TRAILING</span>`
-      : '';
+    const armBadge = trailActive ? `<span class="trail-badge">⟳ TRAILING</span>` : '';
 
     card.innerHTML = `
       <div class="pos-card-header">
