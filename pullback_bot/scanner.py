@@ -279,7 +279,7 @@ mark_prices: dict[str, float] = {}
 
 async def _run_mark_price_ws(symbols: list[str]) -> None:
     """Subscribe to !markPrice@arr to get mark prices for all symbols."""
-    url = f"{config.BINANCE_WS_BASE}/ws/!markPrice@arr"
+    url = f"{config.BINANCE_WS_BASE}/ws/!markPrice@arr@1s"
     backoff = 1
     while True:
         logger.info("Connecting mark-price WS...")
