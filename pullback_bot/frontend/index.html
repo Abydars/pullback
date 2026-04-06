@@ -547,12 +547,13 @@ canvas.sparkline { display: block; border-radius: 2px; }
               <th data-col="signal_score">Score</th>
               <th data-col="duration">Duration</th>
               <th data-col="close_reason">Reason</th>
+              <th data-col="fee">Fee</th>
               <th data-col="pnl_usdt">PnL</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="hist-body">
-            <tr><td colspan="14" class="empty">No closed trades yet</td></tr>
+            <tr><td colspan="15" class="empty">No closed trades yet</td></tr>
           </tbody>
         </table>
       </div>
@@ -1442,7 +1443,7 @@ function renderHistory() {
       : '';
 
   if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="14" class="empty">No closed trades yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15" class="empty">No closed trades yet</td></tr>';
     return;
   }
 
@@ -1461,11 +1462,15 @@ function renderHistory() {
       ? Math.round((t.close_time - t.entry_time) / 1000) : null;
     const durStr = durS !== null ? _fmtDurS(durS) : '—';
 
-    // Leverage & margin
+    // Leverage, margin & fees
     const lev  = t.leverage ?? '—';
     const notional = t.entry_price && t.qty ? t.entry_price * t.qty : null;
     const margin   = notional && t.leverage ? (notional / t.leverage) : null;
     const marginStr = margin != null ? `$${margin.toFixed(2)}` : '—';
+    const TAKER = 0.0004;
+    const fee = (t.entry_price && t.close_price && t.qty)
+      ? (t.entry_price + t.close_price) * t.qty * TAKER : null;
+    const feeStr = fee != null ? `$${fee.toFixed(4)}` : '—';
 
     // Reason badge
     const reason = (t.close_reason || '').toUpperCase();
@@ -1494,6 +1499,7 @@ function renderHistory() {
       <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
       <td style="color:var(--muted)">${durStr}</td>
       <td><span class="hist-reason ${reasonCfg.cls}">${reasonCfg.label}</span></td>
+      <td style="color:var(--red);opacity:.7">${feeStr}</td>
       <td class="${pnlCls}" style="font-weight:600">${fmtUsdt(pnl)}</td>
       <td><button class="btn-del-row" title="Delete this trade">🗑</button></td>
     `;
@@ -1523,6 +1529,9 @@ function _sortTrades(trades) {
     if (col === 'margin') {
       va = a.entry_price && a.qty && a.leverage ? (a.entry_price * a.qty / a.leverage) : 0;
       vb = b.entry_price && b.qty && b.leverage ? (b.entry_price * b.qty / b.leverage) : 0;
+    } else if (col === 'fee') {
+      va = (a.entry_price && a.close_price && a.qty) ? (a.entry_price + a.close_price) * a.qty * 0.0004 : 0;
+      vb = (b.entry_price && b.close_price && b.qty) ? (b.entry_price + b.close_price) * b.qty * 0.0004 : 0;
     } else if (col === 'duration') {
       va = (a.close_time && a.entry_time) ? a.close_time - a.entry_time : 0;
       vb = (b.close_time && b.entry_time) ? b.close_time - b.entry_time : 0;
