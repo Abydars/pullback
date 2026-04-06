@@ -75,6 +75,10 @@ MAX_LEVERAGE: int = _int("MAX_LEVERAGE", 20)
 # 2.0 = trail starts only after 2:1 RR, giving the trade more room.
 TRAIL_ARM_RR: float   = _float("TRAIL_ARM_RR",   1.5)
 TRAIL_STEP_RATIO: float = _float("TRAIL_STEP_RATIO", 0.5)
+# USE_TRAILING: when True (default), trail arm activates a trailing stop.
+# When False, the arm price is treated as a fixed TP — trade closes immediately
+# when price reaches it, no trailing.
+USE_TRAILING: bool = _bool("USE_TRAILING", True)
 
 # ── Portfolio-level stops ─────────────────────────────────────────────────────
 # If total unrealized PnL across all open positions reaches either threshold,
@@ -106,6 +110,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "MAX_POSITION_USDT":        float,
     "MAX_OPEN_TRADES":          int,
     "MAX_LEVERAGE":             int,
+    "USE_TRAILING":             bool,
     "TRAIL_STEP_RATIO":             float,
     "PORTFOLIO_STOP_LOSS_USDT":    float,
     "PORTFOLIO_TAKE_PROFIT_USDT":  float,
@@ -132,7 +137,10 @@ def update(key: str, raw_value: str) -> None:
 
     cast = EDITABLE_KEYS[key]
     try:
-        value = cast(raw_value)
+        if cast is bool:
+            value = raw_value.strip().lower() in ("1", "true", "yes")
+        else:
+            value = cast(raw_value)
     except (ValueError, TypeError) as exc:
         raise ValueError(f"Invalid value for {key}: {raw_value!r} ({exc})")
 

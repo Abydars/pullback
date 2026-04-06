@@ -326,9 +326,9 @@ async def _paper_tick() -> None:
                 # Fee-adjusted unrealized PnL (entry fee already paid + exit fee at mark)
                 paper_unrealized[tid] = _net_pnl(raw_pnl, entry, mark, qty)
 
-                # ── Activate trailing when mark crosses trail arm ─────────────
+                # ── Activate trailing (only when USE_TRAILING is on) ──────────
                 trail_active = _trail_active.get(tid, False)
-                if not trail_active:
+                if not trail_active and config.USE_TRAILING:
                     armed = (direction == "LONG" and mark >= trail_arm) or \
                             (direction == "SHORT" and mark <= trail_arm)
                     if armed:
@@ -360,13 +360,21 @@ async def _paper_tick() -> None:
                             hit_price = trail_stop
                             close_reason = "TRAIL"
                 else:
-                    # Pre-trail: only original SL is active
+                    # SL check (always active)
                     if direction == "LONG" and mark <= sl:
                         hit_price = sl
                         close_reason = "SL"
                     elif direction == "SHORT" and mark >= sl:
                         hit_price = sl
                         close_reason = "SL"
+                    # Fixed-TP check (only when trailing is disabled)
+                    elif not config.USE_TRAILING:
+                        if direction == "LONG" and mark >= trail_arm:
+                            hit_price = trail_arm
+                            close_reason = "TP"
+                        elif direction == "SHORT" and mark <= trail_arm:
+                            hit_price = trail_arm
+                            close_reason = "TP"
 
                 if hit_price and close_reason:
                     # Close the paper trade
@@ -408,6 +416,7 @@ async def _paper_tick() -> None:
                     enriched["trail_active"]  = trail_active
                     enriched["trail_stop"]    = round(trail_stop, 8) if trail_stop is not None else None
                     enriched["trail_extreme"] = round(_trail_extreme[tid], 8) if tid in _trail_extreme else None
+                    enriched["use_trailing"]  = config.USE_TRAILING
                     positions_payload.append(enriched)
 
             if positions_payload:

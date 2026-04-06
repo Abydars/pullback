@@ -387,6 +387,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
 .hist-reason { font-size: 9px; padding: 1px 5px; border-radius: 2px; display: inline-block; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
 .hr-sl      { background: rgba(239,68,68,.18);  color: var(--red); }
 .hr-trail   { background: rgba(245,158,11,.18); color: var(--amber); }
+.hr-tp      { background: rgba(34,197,94,.18);  color: var(--green); }
 .hr-manual  { background: rgba(99,102,241,.18); color: var(--indigo); }
 .hr-pf-sl   { background: rgba(239,68,68,.25);  color: var(--red); border: 1px solid rgba(239,68,68,.4); }
 .hr-pf-tp   { background: rgba(34,197,94,.25);  color: var(--green); border: 1px solid rgba(34,197,94,.4); }
@@ -551,7 +552,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
           <div class="field-hint" id="trade-sl-hint"></div>
         </div>
         <div class="trade-field">
-          <label>Trail Arm (auto — nearest swing high/low)</label>
+          <label id="trade-tp-label">Trail Arm / TP (auto — nearest swing high/low)</label>
           <input id="trade-tp" type="text" readonly placeholder="Auto-calculated" />
           <div class="field-hint" id="trade-tp-hint">Trail activates when price reaches this level</div>
         </div>
@@ -1470,9 +1471,9 @@ function renderPositions() {
           ${slPct !== null ? fmtPct(slPct, 'var(--red)') : ''}
         </div>` : ''}
         <div class="pos-kv">
-          <span class="k">Trail Arm</span>
-          <span class="v" style="color:var(--amber)">${fmtPrice(trailArm)}</span>
-          ${armPct !== null ? fmtPct(armPct, 'var(--amber)') : ''}
+          <span class="k">${t.use_trailing === false ? 'TP Target' : 'Trail Arm'}</span>
+          <span class="v" style="color:${t.use_trailing === false ? 'var(--green)' : 'var(--amber)'}">${fmtPrice(trailArm)}</span>
+          ${armPct !== null ? fmtPct(armPct, t.use_trailing === false ? 'var(--green)' : 'var(--amber)') : ''}
         </div>
         ${trailActive && trailExtreme !== null ? `
         <div class="pos-kv">
@@ -1599,6 +1600,7 @@ function renderHistory() {
     const reasonCfg = {
       SL:            { cls: 'hr-sl',    label: 'SL' },
       TRAIL:         { cls: 'hr-trail', label: 'TRAIL' },
+      TP:            { cls: 'hr-tp',    label: 'TP' },
       MANUAL:        { cls: 'hr-manual',label: 'MANUAL' },
       PORTFOLIO_SL:  { cls: 'hr-pf-sl', label: 'PORT SL' },
       PORTFOLIO_TP:  { cls: 'hr-pf-tp', label: 'PORT TP' },
@@ -1868,7 +1870,9 @@ const CFG_FIELDS = [
       { key: 'MAX_LEVERAGE',       label: 'Max Leverage',              type: 'number', hint: 'Ceiling on dynamically calculated leverage. Bot calculates needed leverage from SL distance; this caps it.' },
       { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)', type: 'number', step: '1', hint: 'Target dollar loss if SL is hit. SL is placed at the technical level; leverage is adjusted so loss = this value.' },
       { key: 'MAX_OPEN_TRADES',    label: 'Max Open Positions',        type: 'number',              hint: 'Hard cap on concurrent open trades' },
-      { key: 'TRAIL_STEP_RATIO', label: 'Trail Step Ratio', type: 'number', step: '0.05', hint: 'Trailing stop follows the peak at this ratio × SL distance (0.5 = half the SL distance behind peak). Trail arm is set automatically at the nearest swing level.' },
+      { key: 'USE_TRAILING',  label: 'Trailing Stop',  type: 'select', options: ['true','false'],
+        hint: 'true = trail arm activates a trailing stop that follows the peak. false = arm price is a fixed TP; trade closes immediately when hit.' },
+      { key: 'TRAIL_STEP_RATIO', label: 'Trail Step Ratio', type: 'number', step: '0.05', hint: 'Trailing stop follows the peak at this ratio × SL distance (0.5 = half the SL distance behind peak). Only used when Trailing Stop is enabled.' },
     ],
   },
   {
@@ -2102,9 +2106,14 @@ async function openManualTrade(dir) {
   try {
     const cfgRes = await fetch('/api/config');
     const cfg = await cfgRes.json();
-    entryEl.dataset.riskUsdt  = cfg.RISK_PER_TRADE_USDT || 0;
-    entryEl.dataset.marginCap = cfg.MAX_POSITION_USDT   || 0;
-    entryEl.dataset.maxLev    = cfg.MAX_LEVERAGE         || 20;
+    entryEl.dataset.riskUsdt   = cfg.RISK_PER_TRADE_USDT || 0;
+    entryEl.dataset.marginCap  = cfg.MAX_POSITION_USDT   || 0;
+    entryEl.dataset.maxLev     = cfg.MAX_LEVERAGE         || 20;
+    entryEl.dataset.useTrailing = cfg.USE_TRAILING === false ? 'false' : 'true';
+    const tpLbl = document.getElementById('trade-tp-label');
+    if (tpLbl) tpLbl.textContent = cfg.USE_TRAILING === false
+      ? 'TP Target (auto — nearest swing high/low)'
+      : 'Trail Arm (auto — nearest swing high/low)';
   } catch(_) {}
 
   // Auto-calculate SL/TP from signal engine logic
