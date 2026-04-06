@@ -79,13 +79,14 @@ class OrderManager:
         Act on a validated signal dict.
         Returns True if a trade was opened, False otherwise.
         """
-        symbol = signal["symbol"]
-        direction = signal["direction"]
-        entry = signal["entry_price"]
-        sl = signal["sl_price"]
-        tp1 = signal["tp1_price"]
-        tp2 = signal["tp2_price"]
-        score = signal["score"]
+        symbol      = signal["symbol"]
+        direction   = signal["direction"]
+        entry       = signal["entry_price"]
+        sl          = signal["sl_price"]
+        tp1         = signal["tp1_price"]
+        tp2         = signal["tp2_price"]
+        score       = signal["score"]
+        signal_type = signal.get("signal_type", "PULLBACK")
 
         # Max open trades guard
         open_count = await db.count_open_trades()
@@ -108,11 +109,11 @@ class OrderManager:
 
         if config.MODE == "paper":
             return await self._paper_open(
-                symbol, direction, entry, sl, tp1, tp2, qty, leverage, now_ms, score
+                symbol, direction, entry, sl, tp1, tp2, qty, leverage, now_ms, score, signal_type
             )
         else:
             return await self._live_open(
-                symbol, direction, entry, sl, tp1, tp2, qty, leverage, now_ms, score
+                symbol, direction, entry, sl, tp1, tp2, qty, leverage, now_ms, score, signal_type
             )
 
     # ── Paper mode ─────────────────────────────────────────────────────────────
@@ -129,6 +130,7 @@ class OrderManager:
         leverage: int,
         now_ms: int,
         score: int,
+        signal_type: str = "PULLBACK",
     ) -> bool:
         trade_id = await db.insert_trade(
             symbol=symbol,
@@ -142,6 +144,7 @@ class OrderManager:
             entry_time=now_ms,
             signal_score=score,
             leverage=leverage,
+            signal_type=signal_type,
         )
         notional = entry * qty
         logger.info(
@@ -166,6 +169,7 @@ class OrderManager:
         leverage: int,
         now_ms: int,
         score: int,
+        signal_type: str = "PULLBACK",
     ) -> bool:
         try:
             # 1. Set leverage
@@ -200,6 +204,7 @@ class OrderManager:
                 signal_score=score,
                 leverage=leverage,
                 binance_order_id=binance_order_id,
+                signal_type=signal_type,
             )
             logger.info(
                 "Live trade opened: #%d %s %s entry=%.6f leverage=%dx order=%s",

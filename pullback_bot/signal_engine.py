@@ -237,16 +237,17 @@ def check_pullback(
         trail_arm = round(entry_price - risk * arm_rr, 8)
 
     signal: dict = {
-        "symbol": symbol,
-        "direction": direction,
-        "score": score,
+        "symbol":      symbol,
+        "direction":   direction,
+        "score":       score,
         "entry_price": round(entry_price, 8),
-        "sl_price": sl_price,
-        "tp1_price": trail_arm,   # trail arm activation price
-        "tp2_price": trail_arm,   # kept for DB schema compat (same value)
-        "timeframe": "15m",
-        "timestamp": int(time.time()),
-        "reasons": reasons,
+        "sl_price":    sl_price,
+        "tp1_price":   trail_arm,   # trail arm activation price
+        "tp2_price":   trail_arm,   # kept for DB schema compat (same value)
+        "timeframe":   "15m",
+        "timestamp":   int(time.time()),
+        "reasons":     reasons,
+        "signal_type": "PULLBACK",
     }
     logger.info(
         "Signal: %s %s score=%d reasons=%s",

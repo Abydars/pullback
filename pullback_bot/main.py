@@ -436,6 +436,7 @@ async def manual_trade(request: Request) -> JSONResponse:
         "tp1_price":   tp1,
         "tp2_price":   tp2,
         "score":       100,
+        "signal_type": "MANUAL",
     }
 
     ok = await om.order_manager.handle_signal(signal)

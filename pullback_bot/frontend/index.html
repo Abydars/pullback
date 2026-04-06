@@ -638,6 +638,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
               <th data-col="qty">Qty</th>
               <th data-col="leverage">Lev</th>
               <th data-col="margin">Margin</th>
+              <th data-col="signal_type">Strategy</th>
               <th data-col="signal_score">Score</th>
               <th data-col="duration">Duration</th>
               <th data-col="close_reason">Reason</th>
@@ -1495,6 +1496,7 @@ function renderPositions() {
         <div class="pos-kv"><span class="k">Fee</span><span class="v" style="color:var(--muted)">$${(t.fee_usdt ?? 0).toFixed(4)}</span></div>
         <div class="pos-kv"><span class="k">Qty</span><span class="v">${t.qty}</span></div>
         <div class="pos-kv"><span class="k">Lev</span><span class="v">${t.leverage ?? '—'}×</span></div>
+        <div class="pos-kv"><span class="k">Strategy</span><span class="v" style="font-size:10px;letter-spacing:.05em">${t.signal_type ?? 'PULLBACK'}</span></div>
         <div class="pos-kv"><span class="k">Score</span><span class="v">${t.signal_score ?? '—'}</span></div>
         <div class="pos-kv"><span class="k">Open</span><span class="v">${t.duration ?? '—'}</span></div>
       </div>
@@ -1616,6 +1618,7 @@ function renderHistory() {
       <td style="color:var(--muted)">${t.qty}</td>
       <td style="color:var(--muted)">${lev}×</td>
       <td style="color:var(--muted)">${marginStr}</td>
+      <td style="color:var(--muted);font-size:10px">${t.signal_type ?? 'PULLBACK'}</td>
       <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
       <td style="color:var(--muted)">${durStr}</td>
       <td><span class="hist-reason ${reasonCfg.cls}">${reasonCfg.label}</span></td>

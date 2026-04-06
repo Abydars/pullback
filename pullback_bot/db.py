@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS trades (
     pnl_usdt    REAL,
     pnl_pct     REAL,
     signal_score INTEGER,
+    signal_type  TEXT,                     -- PULLBACK | BREAKOUT | MANUAL
     binance_order_id TEXT                  -- NULL in paper mode
 );
 """
@@ -63,6 +64,7 @@ async def init_db() -> None:
         for col_sql in [
             "ALTER TABLE trades ADD COLUMN close_reason TEXT",
             "ALTER TABLE trades ADD COLUMN leverage INTEGER",
+            "ALTER TABLE trades ADD COLUMN signal_type TEXT",
         ]:
             try:
                 await db.execute(col_sql)
@@ -88,6 +90,7 @@ async def insert_trade(
     signal_score: int,
     leverage: Optional[int] = None,
     binance_order_id: Optional[str] = None,
+    signal_type: Optional[str] = None,
 ) -> int:
     """Insert a new trade and return its id."""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -95,11 +98,13 @@ async def insert_trade(
             """
             INSERT INTO trades
                 (symbol, direction, entry_price, sl_price, tp1_price, tp2_price,
-                 qty, mode, entry_time, signal_score, leverage, binance_order_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                 qty, mode, entry_time, signal_score, leverage, binance_order_id,
+                 signal_type)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (symbol, direction, entry_price, sl_price, tp1_price, tp2_price,
-             qty, mode, entry_time, signal_score, leverage, binance_order_id),
+             qty, mode, entry_time, signal_score, leverage, binance_order_id,
+             signal_type),
         )
         await db.commit()
         return cursor.lastrowid
