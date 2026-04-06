@@ -698,7 +698,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
               <th data-col="close_price">Close $</th>
               <th data-col="qty">Qty</th>
               <th data-col="leverage">Lev</th>
-              <th data-col="margin">Margin</th>
+              <th data-col="margin">Capital</th>
               <th data-col="signal_type">Strategy</th>
               <th data-col="signal_score">Score</th>
               <th data-col="duration">Duration</th>
@@ -726,7 +726,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
       <div id="pos-stats" style="display:none;">
         <div class="pos-stats-row">
           <div class="pos-stat-item"><span class="k">Unrealized PnL</span><span class="v" id="ps-upnl">—</span></div>
-          <div class="pos-stat-item"><span class="k">Total Margin</span><span class="v" id="ps-margin">—</span></div>
+          <div class="pos-stat-item"><span class="k">Capital Used</span><span class="v" id="ps-margin">—</span></div>
           <div class="pos-stat-item"><span class="k">Avg ROE</span><span class="v" id="ps-roe">—</span></div>
           <div class="pos-stat-item"><span class="k">Win / Loss</span><span class="v" id="ps-wl">—</span></div>
         </div>
@@ -1552,7 +1552,7 @@ function renderPositions() {
           <span class="v pos-liq">${fmtPrice(t.liq_price)}</span>
           ${liqPct !== null ? fmtPct(liqPct, 'var(--amber)') : ''}
         </div>
-        <div class="pos-kv"><span class="k">Margin</span><span class="v">$${(t.margin_usdt ?? 0).toFixed(2)}</span></div>
+        <div class="pos-kv"><span class="k">Capital</span><span class="v">$${(t.margin_usdt ?? 0).toFixed(2)}</span></div>
         <div class="pos-kv"><span class="k">Size</span><span class="v">$${(t.notional_usdt ?? 0).toFixed(2)}</span></div>
         <div class="pos-kv"><span class="k">Fee</span><span class="v" style="color:var(--muted)">$${(t.fee_usdt ?? 0).toFixed(4)}</span></div>
         <div class="pos-kv"><span class="k">Qty</span><span class="v">${t.qty}</span></div>
@@ -2270,7 +2270,7 @@ function _updateTradePreview() {
 
   // Estimate size (mirrors dynamic-leverage backend _calc_qty_and_leverage)
   const riskUsdt = parseFloat(document.getElementById('trade-entry').dataset.riskUsdt || '0');
-  const capital  = parseFloat(document.getElementById('trade-entry').dataset.marginCap || '0');
+  const capital  = parseFloat(document.getElementById('trade-entry').dataset.capital || '0');
   const maxLev   = parseInt(document.getElementById('trade-entry').dataset.maxLev || '20');
   const slDist   = Math.abs(entry - sl);
 
