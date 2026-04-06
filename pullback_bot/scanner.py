@@ -247,11 +247,28 @@ async def _evaluate_symbol(symbol: str) -> None:
 
         # k15[-1] is the candle that just closed; k5[-1] may still be forming.
         # Pass confirmed candles only: exclude the currently-forming 5m candle.
-        sig = await asyncio.to_thread(
-            signal_engine.check_pullback, symbol, k15[:], k5[:-1]
-        )
-        if sig is None:
+        mode = config.SIGNAL_MODE
+        candidates: list[dict] = []
+
+        if mode in ("pullback", "both"):
+            s = await asyncio.to_thread(
+                signal_engine.check_pullback, symbol, k15[:], k5[:-1]
+            )
+            if s:
+                candidates.append(s)
+
+        if mode in ("breakout", "both"):
+            s = await asyncio.to_thread(
+                signal_engine.check_breakout, symbol, k15[:], k5[:-1]
+            )
+            if s:
+                candidates.append(s)
+
+        if not candidates:
             return
+
+        # If both fired, take the higher-scoring signal
+        sig = max(candidates, key=lambda x: x["score"])
 
         _last_signal_ts[symbol] = now
 

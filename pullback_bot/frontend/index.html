@@ -1149,7 +1149,7 @@ function onScannerAlert(sig) {
       position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
       color: sig.direction === 'LONG' ? '#22c55e' : '#ef4444',
       shape: sig.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
-      text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.score}`,
+      text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.signal_type || 'PULLBACK'} ${sig.score}`,
     }]);
   }
 
@@ -1852,6 +1852,9 @@ const CFG_FIELDS = [
   {
     section: 'Signal',
     fields: [
+      { key: 'SIGNAL_MODE', label: 'Strategy', type: 'select',
+        options: ['pullback', 'breakout', 'both'],
+        hint: 'pullback = reversion to EMA50/swing · breakout = close outside 20-bar range · both = run all, trade highest score' },
       { key: 'SIGNAL_SCORE_THRESHOLD', label: 'Min Signal Score (0–100)', type: 'number', hint: 'Lower = more entries, higher = stricter' },
     ],
   },

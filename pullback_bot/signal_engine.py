@@ -1,5 +1,9 @@
 """
-signal_engine.py — Pullback detection logic with 0-100 scoring.
+signal_engine.py — Signal strategies with 0-100 scoring.
+
+Strategies:
+  - check_pullback : trend-following pullback to EMA50/swing zone
+  - check_breakout : price breaks above resistance (LONG) or below support (SHORT)
 
 Indicators implemented manually (no pandas-ta dependency):
   - EMA (exponential moving average)
@@ -254,6 +258,140 @@ def check_pullback(
     }
     logger.info(
         "Signal: %s %s score=%d reasons=%s",
+        symbol, direction, score, reasons,
+    )
+    return signal
+
+
+# ── Breakout / Breakdown ───────────────────────────────────────────────────────
+
+def check_breakout(
+    symbol: str,
+    klines_15m: list[dict],
+    klines_5m: list[dict],
+) -> Optional[dict]:
+    """
+    Breakout / Breakdown detector.
+
+    Looks for a 15m candle that closes outside the prior 20-candle range
+    (above resistance for LONG, below support for SHORT) with volume and
+    candle-strength confirmation.
+
+    Scoring (max 100):
+      +40  price breaks out of 20-candle consolidation range
+      +25  volume surge (last candle > 1.5 × 20-bar average)
+      +20  strong candle body (close within top/bottom 40 % of range)
+      +15  EMA200 alignment (above for LONG, below for SHORT)
+
+    SL placement:
+      LONG  : max(resistance - 0.3 × ATR,  entry - 1.5 × ATR)
+      SHORT : min(support   + 0.3 × ATR,   entry + 1.5 × ATR)
+      → SL sits just beyond the broken level, capped at 1.5 ATR.
+    """
+    if len(klines_15m) < 50:
+        return None
+
+    df15 = pd.DataFrame(klines_15m).astype(float)
+
+    last        = df15.iloc[-1]
+    last_close  = float(last["close"])
+    last_high   = float(last["high"])
+    last_low    = float(last["low"])
+    last_vol    = float(last["volume"])
+
+    # 20 confirmed candles before the breakout candle
+    lookback = df15.iloc[-21:-1]
+    resistance = float(lookback["high"].max())   # breakout level  (LONG)
+    support    = float(lookback["low"].min())    # breakdown level (SHORT)
+
+    atr15   = float(_atr(df15, 14).iloc[-1])
+    avg_vol = float(df15["volume"].iloc[-21:-1].mean())
+
+    ema200_val = float(_ema(df15["close"], 200).iloc[-1]) if len(df15) >= 200 else None
+
+    score: int = 0
+    reasons: list[str] = []
+    direction: Optional[str] = None
+
+    # ── Determine breakout direction ──────────────────────────────────────────
+    if last_close > resistance:
+        direction = "LONG"
+        score += 40
+        reasons.append("breakout")
+    elif last_close < support:
+        direction = "SHORT"
+        score += 40
+        reasons.append("breakdown")
+    else:
+        return None   # no breakout on this candle
+
+    # ── Volume surge ──────────────────────────────────────────────────────────
+    if avg_vol > 0 and last_vol > avg_vol * 1.5:
+        score += 25
+        reasons.append("volume_surge")
+
+    # ── Candle-body strength ──────────────────────────────────────────────────
+    candle_range = last_high - last_low
+    if candle_range > 0:
+        if direction == "LONG":
+            close_position = (last_close - last_low) / candle_range
+            if close_position >= 0.6:        # closes in upper 40 % of candle
+                score += 20
+                reasons.append("strong_close")
+        else:
+            close_position = (last_high - last_close) / candle_range
+            if close_position >= 0.6:        # closes in lower 40 % of candle
+                score += 20
+                reasons.append("strong_close")
+
+    # ── EMA200 alignment ──────────────────────────────────────────────────────
+    if ema200_val is not None:
+        if direction == "LONG" and last_close > ema200_val:
+            score += 15
+            reasons.append("above_ema200")
+        elif direction == "SHORT" and last_close < ema200_val:
+            score += 15
+            reasons.append("below_ema200")
+
+    # ── Score gate ────────────────────────────────────────────────────────────
+    if score < config.SIGNAL_SCORE_THRESHOLD:
+        return None
+
+    # ── Entry / SL / TP ───────────────────────────────────────────────────────
+    entry_price = last_close
+
+    if direction == "LONG":
+        # SL: just below the broken resistance, capped at 1.5 × ATR from entry
+        sl_price = round(max(resistance - atr15 * 0.3,
+                             entry_price - atr15 * 1.5), 8)
+    else:
+        # SL: just above the broken support, capped at 1.5 × ATR from entry
+        sl_price = round(min(support + atr15 * 0.3,
+                             entry_price + atr15 * 1.5), 8)
+
+    risk = abs(entry_price - sl_price)
+    if risk <= 0:
+        return None
+
+    trail_arm = round(
+        entry_price + risk if direction == "LONG" else entry_price - risk, 8
+    )
+
+    signal: dict = {
+        "symbol":       symbol,
+        "direction":    direction,
+        "score":        score,
+        "entry_price":  round(entry_price, 8),
+        "sl_price":     sl_price,
+        "tp1_price":    trail_arm,
+        "tp2_price":    trail_arm,
+        "timeframe":    "15m",
+        "timestamp":    int(time.time()),
+        "reasons":      reasons,
+        "signal_type":  "BREAKOUT",
+    }
+    logger.info(
+        "Breakout signal: %s %s score=%d reasons=%s",
         symbol, direction, score, reasons,
     )
     return signal

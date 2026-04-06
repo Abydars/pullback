@@ -56,6 +56,11 @@ MIN_PRICE_CHANGE_PCT: float = _float("MIN_PRICE_CHANGE_PCT", 0.5)
 WATCHLIST_REFRESH_MINUTES: int = _int("WATCHLIST_REFRESH_MINUTES", 15)
 
 # ── Signal Settings ───────────────────────────────────────────────────────────
+# SIGNAL_MODE controls which strategy the scanner runs on each 15m candle close:
+#   pullback  — trend-following reversion to EMA50/swing zone (default)
+#   breakout  — close outside 20-candle consolidation range with volume
+#   both      — run both; trade whichever fires first (cooldown applies per symbol)
+SIGNAL_MODE: str = _get("SIGNAL_MODE", "pullback")
 SIGNAL_SCORE_THRESHOLD: int = _int("SIGNAL_SCORE_THRESHOLD", 70)
 
 # ── Risk / Order Settings ─────────────────────────────────────────────────────
@@ -91,6 +96,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "MIN_VOLUME_24H":           float,
     "MIN_PRICE_CHANGE_PCT":     float,
     "WATCHLIST_REFRESH_MINUTES":int,
+    "SIGNAL_MODE":              str,
     "SIGNAL_SCORE_THRESHOLD":   int,
     "RISK_PER_TRADE_USDT":      float,
     "MAX_POSITION_USDT":        float,
@@ -129,6 +135,8 @@ def update(key: str, raw_value: str) -> None:
     # Extra validation
     if key == "MODE" and value not in ("live", "paper"):
         raise ValueError("MODE must be 'live' or 'paper'")
+    if key == "SIGNAL_MODE" and value not in ("pullback", "breakout", "both"):
+        raise ValueError("SIGNAL_MODE must be 'pullback', 'breakout', or 'both'")
     if key == "SIGNAL_SCORE_THRESHOLD" and not (0 <= value <= 100):
         raise ValueError("SIGNAL_SCORE_THRESHOLD must be 0–100")
     if key == "MAX_LEVERAGE" and not (1 <= value <= 125):
