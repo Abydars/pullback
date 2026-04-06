@@ -1858,10 +1858,10 @@ const CFG_FIELDS = [
   {
     section: 'Risk / Order',
     fields: [
-      { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)',    type: 'number', step: '1',   hint: 'Max loss if SL hits. Position is sized so SL loss = this value exactly.' },
-      { key: 'MAX_POSITION_USDT',  label: 'Margin Per Trade (USDT)',  type: 'number', step: '10',  hint: 'Capital committed per trade. Leverage is auto-calculated to keep risk = Risk Per Trade. 0 = no margin cap.' },
+      { key: 'MAX_POSITION_USDT',  label: 'Capital Per Trade (USDT)', type: 'number', step: '10',  hint: 'Margin committed per trade. Notional = Capital × Max Leverage. This is what you actually invest. 0 = risk-only sizing.' },
+      { key: 'MAX_LEVERAGE',       label: 'Max Leverage',              type: 'number', hint: 'Leverage applied to Capital Per Trade. Notional = Capital × Leverage.' },
+      { key: 'RISK_PER_TRADE_USDT', label: 'Max Loss Per Trade (USDT)', type: 'number', step: '1', hint: 'Safety cap: if the SL dollar loss would exceed this, qty is reduced. Set 0 to disable cap.' },
       { key: 'MAX_OPEN_TRADES',    label: 'Max Open Positions',        type: 'number',              hint: 'Hard cap on concurrent open trades' },
-      { key: 'MAX_LEVERAGE',       label: 'Max Leverage',              type: 'number', hint: 'Cap on auto-calculated leverage (1–125×). Leverage is computed per-trade from Risk ÷ (Margin × SL%).' },
       { key: 'TRAIL_STEP_RATIO',           label: 'Trail Step Ratio',               type: 'number', step: '0.05', hint: 'Trailing stop = ratio × initial risk (0.5 = half)' },
     ],
   },
@@ -2033,27 +2033,37 @@ function _updateTradePreview() {
   const tp2  = _manualDir === 'LONG' ? entry + risk * 2 : entry - risk * 2;
   document.getElementById('trade-tp').value = tp2.toPrecision(6);
 
-  // Estimate leverage & size (mirrors backend _calc_qty_and_leverage)
-  const riskUsdt  = parseFloat(document.getElementById('trade-entry').dataset.riskUsdt || '0');
-  const marginCap = parseFloat(document.getElementById('trade-entry').dataset.marginCap || '0');
-  const maxLev    = parseInt(document.getElementById('trade-entry').dataset.maxLev || '20');
-  if (riskUsdt > 0) {
-    const slPct   = risk / entry;
-    const qtyRisk = riskUsdt / risk;
-    let lev, qty;
-    if (marginCap > 0) {
-      lev = Math.max(1, Math.min(Math.ceil(riskUsdt / (marginCap * slPct)), maxLev));
-      qty = Math.min(qtyRisk, marginCap * lev / entry);
-    } else {
-      lev = maxLev;
-      qty = qtyRisk;
+  // Estimate size (mirrors new margin-first backend _calc_qty_and_leverage)
+  const maxLossUsdt = parseFloat(document.getElementById('trade-entry').dataset.riskUsdt || '0');
+  const capital     = parseFloat(document.getElementById('trade-entry').dataset.marginCap || '0');
+  const maxLev      = parseInt(document.getElementById('trade-entry').dataset.maxLev || '20');
+  const slDist      = Math.abs(entry - sl);
+
+  if (capital > 0) {
+    let qty = (capital * maxLev) / entry;
+    let lev = maxLev;
+    // Apply max-loss cap
+    if (maxLossUsdt > 0) {
+      const qtyRiskCap = maxLossUsdt / slDist;
+      if (qty > qtyRiskCap) {
+        qty = qtyRiskCap;
+        const notionalCapped = qty * entry;
+        lev = Math.max(1, Math.min(Math.ceil(notionalCapped / capital), maxLev));
+      }
     }
-    const notional = qty * entry;
-    const margin   = notional / lev;
+    const notional   = qty * entry;
+    const margin     = notional / lev;
+    const slLossUsdt = qty * slDist;
     document.getElementById('trade-size-preview').value =
-      `Qty ${qty.toPrecision(4)} · Margin $${margin.toFixed(2)} · ${lev}× lev`;
+      `Margin $${margin.toFixed(2)} · ${lev}× · Risk $${slLossUsdt.toFixed(2)}`;
+  } else if (maxLossUsdt > 0) {
+    const qty      = maxLossUsdt / slDist;
+    const notional = qty * entry;
+    const margin   = notional / maxLev;
+    document.getElementById('trade-size-preview').value =
+      `Margin $${margin.toFixed(2)} · ${maxLev}× · Risk $${maxLossUsdt.toFixed(2)}`;
   } else {
-    document.getElementById('trade-size-preview').value = 'Set Risk/Margin in config to preview';
+    document.getElementById('trade-size-preview').value = 'Set Capital Per Trade in config to preview';
   }
 }
 

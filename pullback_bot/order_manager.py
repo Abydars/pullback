@@ -29,39 +29,48 @@ logger = logging.getLogger(__name__)
 
 def _calc_qty_and_leverage(entry: float, sl: float) -> tuple[float, int]:
     """
-    Compute position size and leverage from risk budget, margin budget, and SL distance.
+    Margin-first position sizing.
 
-    Logic:
-    - Risk constraint:   qty × sl_distance = RISK_PER_TRADE_USDT
-    - Margin constraint: notional / leverage = MAX_POSITION_USDT
-    - Solving for leverage: leverage = RISK / (MAX_POSITION_USDT × sl_pct)
-    - Capped at MAX_LEVERAGE.
+    Primary path (MAX_POSITION_USDT > 0):
+      notional = MAX_POSITION_USDT × MAX_LEVERAGE
+      qty      = notional / entry
+      → You always invest MAX_POSITION_USDT of margin.
 
-    If MAX_POSITION_USDT = 0, uses MAX_LEVERAGE with pure risk sizing.
-    Risk never exceeds RISK_PER_TRADE_USDT regardless of leverage cap.
+    Safety cap (RISK_PER_TRADE_USDT > 0):
+      If qty × sl_distance > RISK_PER_TRADE_USDT, reduce qty so the
+      dollar loss at SL never exceeds RISK_PER_TRADE_USDT.
+      In this case the actual margin committed will be less than MAX_POSITION_USDT.
+
+    Fallback (MAX_POSITION_USDT = 0):
+      Pure risk sizing: qty = RISK_PER_TRADE_USDT / sl_distance at MAX_LEVERAGE.
     """
     sl_distance = abs(entry - sl)
     if sl_distance <= 0 or entry <= 0:
         return 0.0, config.MAX_LEVERAGE
 
-    risk    = config.RISK_PER_TRADE_USDT
     max_lev = max(1, config.MAX_LEVERAGE)
-    cap     = config.MAX_POSITION_USDT   # margin budget per trade
-    sl_pct  = sl_distance / entry
-
-    # Qty that keeps risk exactly at RISK_PER_TRADE_USDT
-    qty_risk = risk / sl_distance
+    cap     = config.MAX_POSITION_USDT    # margin per trade
+    risk    = config.RISK_PER_TRADE_USDT  # max loss at SL (safety cap)
 
     if cap > 0:
-        # Minimum leverage so that notional / leverage == cap
-        # notional = risk / sl_pct  →  leverage = risk / (cap × sl_pct)
-        needed_lev = math.ceil(risk / (cap * sl_pct))
-        leverage   = max(1, min(needed_lev, max_lev))
-        # Cap qty so margin never exceeds cap
-        qty = min(qty_risk, cap * leverage / entry)
-    else:
+        # Invest cap × max_lev as notional
+        qty = (cap * max_lev) / entry
         leverage = max_lev
-        qty      = qty_risk
+
+        # Apply risk cap: shrink qty if SL loss would exceed RISK_PER_TRADE_USDT
+        if risk > 0:
+            qty_risk_cap = risk / sl_distance
+            if qty > qty_risk_cap:
+                qty = qty_risk_cap
+                # Actual leverage based on capped qty
+                actual_notional = qty * entry
+                leverage = max(1, min(math.ceil(actual_notional / cap), max_lev))
+    else:
+        # No margin cap — pure risk sizing
+        if risk <= 0:
+            return 0.0, max_lev
+        qty      = risk / sl_distance
+        leverage = max_lev
 
     return qty, int(leverage)
 
