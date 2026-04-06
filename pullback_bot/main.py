@@ -332,6 +332,66 @@ async def close_all_positions() -> JSONResponse:
     return JSONResponse({"ok": True, "closed": len(results), "results": results})
 
 
+@app.get("/api/sl-suggest")
+async def sl_suggest(symbol: str, direction: str) -> JSONResponse:
+    """
+    Suggest SL/TP for a manual trade using the same logic as the signal engine:
+      SL = max(recent_swing_low, entry - 1×ATR14)  for LONG
+      SL = min(recent_swing_high, entry + 1×ATR14) for SHORT
+      TP1 = trail arm at 1:1 RR, TP2 = 2:1 RR
+    """
+    import pandas as pd
+
+    direction = direction.upper()
+    if direction not in ("LONG", "SHORT"):
+        return JSONResponse({"error": "direction must be LONG or SHORT"}, status_code=400)
+
+    mark = scanner.mark_prices.get(symbol)
+    if not mark:
+        return JSONResponse({"error": f"No mark price for {symbol}"}, status_code=400)
+
+    buf = scanner._kline_buffers.get(symbol, {}).get("15m", [])
+    if len(buf) < 20:
+        return JSONResponse({"error": "Insufficient candle history for SL calculation"}, status_code=400)
+
+    candles = buf[-50:]  # last 50 closed 15m candles
+    df = pd.DataFrame(candles)
+
+    # ATR(14)
+    prev_close = df["close"].shift(1)
+    tr = pd.concat(
+        [df["high"] - df["low"],
+         (df["high"] - prev_close).abs(),
+         (df["low"]  - prev_close).abs()], axis=1
+    ).max(axis=1)
+    atr = float(tr.ewm(span=14, adjust=False).mean().iloc[-1])
+
+    entry = mark
+    recent = df.tail(21)
+
+    if direction == "LONG":
+        sl = max(float(recent["low"].min()), entry - atr)
+    else:
+        sl = min(float(recent["high"].max()), entry + atr)
+
+    sl = round(sl, 8)
+    risk = abs(entry - sl)
+    if risk == 0:
+        return JSONResponse({"error": "Computed SL equals entry"}, status_code=400)
+
+    tp1 = round(entry + risk if direction == "LONG" else entry - risk, 8)
+    tp2 = round(entry + risk * 2 if direction == "LONG" else entry - risk * 2, 8)
+
+    return JSONResponse({
+        "entry":    round(entry, 8),
+        "sl_price": sl,
+        "tp1":      tp1,
+        "tp2":      tp2,
+        "atr":      round(atr, 8),
+        "sl_pct":   round(risk / entry * 100, 3),
+    })
+
+
 @app.post("/api/positions/manual")
 async def manual_trade(request: Request) -> JSONResponse:
     """Open a manual paper/live trade for a symbol at current mark price."""

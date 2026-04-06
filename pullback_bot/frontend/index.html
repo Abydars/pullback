@@ -546,8 +546,8 @@ canvas.sparkline { display: block; border-radius: 2px; }
           <input id="trade-entry" type="text" readonly />
         </div>
         <div class="trade-field">
-          <label>Stop Loss Price</label>
-          <input id="trade-sl" type="number" step="any" placeholder="Enter SL price…" />
+          <label>Stop Loss Price <span style="color:var(--amber);font-weight:400">(auto · editable)</span></label>
+          <input id="trade-sl" type="number" step="any" placeholder="Calculating…" />
           <div class="field-hint" id="trade-sl-hint"></div>
         </div>
         <div class="trade-field">
@@ -556,8 +556,8 @@ canvas.sparkline { display: block; border-radius: 2px; }
           <div class="field-hint">TP1 at 1:1 (trail arm), TP2 at 2:1 shown above</div>
         </div>
         <div class="trade-field">
-          <label>Est. Size (bot-calculated)</label>
-          <input id="trade-size-preview" type="text" readonly placeholder="Set SL to preview" />
+          <label>Est. Position Size</label>
+          <input id="trade-size-preview" type="text" readonly placeholder="Calculating…" />
         </div>
       </div>
       <div class="modal-ftr">
@@ -2021,11 +2021,46 @@ document.addEventListener('keydown', e => {
 // ============================================================
 let _manualDir = 'LONG';
 
-function openManualTrade(dir) {
+function _updateTradePreview() {
+  const entry = parseFloat(document.getElementById('trade-entry').value);
+  const sl    = parseFloat(document.getElementById('trade-sl').value);
+  if (isNaN(entry) || isNaN(sl) || sl === entry) {
+    document.getElementById('trade-tp').value = '';
+    document.getElementById('trade-size-preview').value = '';
+    return;
+  }
+  const risk = Math.abs(entry - sl);
+  const tp2  = _manualDir === 'LONG' ? entry + risk * 2 : entry - risk * 2;
+  document.getElementById('trade-tp').value = tp2.toPrecision(6);
+
+  // Estimate leverage & size (mirrors backend _calc_qty_and_leverage)
+  const riskUsdt  = parseFloat(document.getElementById('trade-entry').dataset.riskUsdt || '0');
+  const marginCap = parseFloat(document.getElementById('trade-entry').dataset.marginCap || '0');
+  const maxLev    = parseInt(document.getElementById('trade-entry').dataset.maxLev || '20');
+  if (riskUsdt > 0) {
+    const slPct   = risk / entry;
+    const qtyRisk = riskUsdt / risk;
+    let lev, qty;
+    if (marginCap > 0) {
+      lev = Math.max(1, Math.min(Math.ceil(riskUsdt / (marginCap * slPct)), maxLev));
+      qty = Math.min(qtyRisk, marginCap * lev / entry);
+    } else {
+      lev = maxLev;
+      qty = qtyRisk;
+    }
+    const notional = qty * entry;
+    const margin   = notional / lev;
+    document.getElementById('trade-size-preview').value =
+      `Qty ${qty.toPrecision(4)} · Margin $${margin.toFixed(2)} · ${lev}× lev`;
+  } else {
+    document.getElementById('trade-size-preview').value = 'Set Risk/Margin in config to preview';
+  }
+}
+
+async function openManualTrade(dir) {
   const sym = state.selectedSymbol;
   if (!sym) return;
   _manualDir = dir;
-  const mark = state.lastMarkPrice || null;
 
   document.getElementById('trade-modal-sym').textContent = sym;
   const dirBadge = document.getElementById('trade-modal-dir-badge');
@@ -2033,13 +2068,11 @@ function openManualTrade(dir) {
   dirBadge.className = 'trade-dir-badge ' + (dir === 'LONG' ? 'trade-dir-long' : 'trade-dir-short');
 
   const entryEl = document.getElementById('trade-entry');
-  entryEl.value = mark ? mark.toPrecision(6) : '(loading…)';
-
+  entryEl.value = '…';
   document.getElementById('trade-sl').value = '';
   document.getElementById('trade-tp').value = '';
   document.getElementById('trade-size-preview').value = '';
-  document.getElementById('trade-sl-hint').textContent =
-    dir === 'LONG' ? 'Must be below entry' : 'Must be above entry';
+  document.getElementById('trade-sl-hint').textContent = 'Auto-calculated · edit to override';
 
   const btn = document.getElementById('trade-submit');
   btn.textContent = dir === 'LONG' ? '▲ Open Long' : '▼ Open Short';
@@ -2048,30 +2081,45 @@ function openManualTrade(dir) {
   document.getElementById('trade-msg').textContent = '';
   document.getElementById('trade-msg').className = '';
   document.getElementById('trade-modal').classList.remove('hidden');
-  setTimeout(() => document.getElementById('trade-sl').focus(), 50);
+
+  // Fetch bot config for size preview
+  try {
+    const cfgRes = await fetch('/api/config');
+    const cfg = await cfgRes.json();
+    entryEl.dataset.riskUsdt  = cfg.RISK_PER_TRADE_USDT || 0;
+    entryEl.dataset.marginCap = cfg.MAX_POSITION_USDT   || 0;
+    entryEl.dataset.maxLev    = cfg.MAX_LEVERAGE         || 20;
+  } catch(_) {}
+
+  // Auto-calculate SL/TP from signal engine logic
+  try {
+    const res  = await fetch(`/api/sl-suggest?symbol=${sym}&direction=${dir}`);
+    const data = await res.json();
+    if (res.ok && data.sl_price) {
+      entryEl.value = data.entry.toPrecision(6);
+      state.lastMarkPrice = data.entry;
+      document.getElementById('trade-sl').value = data.sl_price;
+      document.getElementById('trade-sl-hint').textContent =
+        `ATR-based · ${data.sl_pct}% from entry · edit to override`;
+      _updateTradePreview();
+    } else {
+      entryEl.value = (state.lastMarkPrice || 0).toPrecision(6);
+      document.getElementById('trade-sl-hint').textContent =
+        dir === 'LONG' ? 'Must be below entry' : 'Must be above entry';
+      document.getElementById('trade-msg').textContent = data.error || 'Enter SL manually';
+      document.getElementById('trade-msg').className = 'err';
+    }
+  } catch(e) {
+    entryEl.value = (state.lastMarkPrice || 0).toPrecision(6);
+  }
 }
 
 function closeTradeModal() {
   document.getElementById('trade-modal').classList.add('hidden');
 }
 
-// Live SL → TP + size preview
-document.getElementById('trade-sl').addEventListener('input', function() {
-  const entry = parseFloat(document.getElementById('trade-entry').value);
-  const sl    = parseFloat(this.value);
-  if (!isNaN(entry) && !isNaN(sl) && sl !== entry) {
-    const risk = Math.abs(entry - sl);
-    const tp2  = _manualDir === 'LONG' ? entry + risk * 2 : entry - risk * 2;
-    document.getElementById('trade-tp').value = tp2.toPrecision(6);
-
-    // Size preview uses same formula as backend
-    const riskUsdt = parseFloat(document.getElementById('trade-entry').getAttribute('data-risk') || '0');
-    document.getElementById('trade-size-preview').value = 'Bot-calculated on submit';
-  } else {
-    document.getElementById('trade-tp').value = '';
-    document.getElementById('trade-size-preview').value = '';
-  }
-});
+// Live SL edit → recalculate TP + size preview
+document.getElementById('trade-sl').addEventListener('input', _updateTradePreview);
 
 document.getElementById('trade-submit').addEventListener('click', async function() {
   const sym   = state.selectedSymbol;
