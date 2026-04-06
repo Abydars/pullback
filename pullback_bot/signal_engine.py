@@ -217,20 +217,12 @@ def check_pullback(
     # ── Compute entry / SL / TP ───────────────────────────────────────────────
     entry_price = last_close
 
-    # Use the TIGHTER of (recent swing level, 1.0×ATR) to keep risk:reward sane.
-    # Wide SLs push TP1/TP2 far away, making them unlikely to be reached.
+    # SL at the true technical level — swing low for LONG, swing high for SHORT.
+    # Leverage is adjusted in order_manager to keep dollar risk = RISK_PER_TRADE_USDT.
     if direction == "LONG":
-        sl_price = max(
-            recent["low"].min(),
-            entry_price - atr15 * 1.0,
-        )
-        sl_price = round(sl_price, 8)
+        sl_price = round(float(recent["low"].min()), 8)
     else:
-        sl_price = min(
-            recent["high"].max(),
-            entry_price + atr15 * 1.0,
-        )
-        sl_price = round(sl_price, 8)
+        sl_price = round(float(recent["high"].max()), 8)
 
     risk = abs(entry_price - sl_price)
     if risk <= 0:
@@ -361,13 +353,12 @@ def check_breakout(
     entry_price = last_close
 
     if direction == "LONG":
-        # SL: just below the broken resistance, capped at 1.5 × ATR from entry
-        sl_price = round(max(resistance - atr15 * 0.3,
-                             entry_price - atr15 * 1.5), 8)
+        # SL: just below the broken resistance level
+        # Leverage is adjusted in order_manager to keep dollar risk = RISK_PER_TRADE_USDT.
+        sl_price = round(resistance - atr15 * 0.3, 8)
     else:
-        # SL: just above the broken support, capped at 1.5 × ATR from entry
-        sl_price = round(min(support + atr15 * 0.3,
-                             entry_price + atr15 * 1.5), 8)
+        # SL: just above the broken support level
+        sl_price = round(support + atr15 * 0.3, 8)
 
     risk = abs(entry_price - sl_price)
     if risk <= 0:

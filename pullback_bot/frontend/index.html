@@ -1861,9 +1861,9 @@ const CFG_FIELDS = [
   {
     section: 'Risk / Order',
     fields: [
-      { key: 'MAX_POSITION_USDT',  label: 'Capital Per Trade (USDT)', type: 'number', step: '10',  hint: 'Margin committed per trade. Notional = Capital × Max Leverage. This is what you actually invest. 0 = risk-only sizing.' },
-      { key: 'MAX_LEVERAGE',       label: 'Max Leverage',              type: 'number', hint: 'Leverage applied to Capital Per Trade. Notional = Capital × Leverage.' },
-      { key: 'RISK_PER_TRADE_USDT', label: 'Max Loss Per Trade (USDT)', type: 'number', step: '1', hint: 'Safety cap: if the SL dollar loss would exceed this, qty is reduced. Set 0 to disable cap.' },
+      { key: 'MAX_POSITION_USDT',  label: 'Capital Per Trade (USDT)', type: 'number', step: '10',  hint: 'Margin deployed per trade. Leverage = ceil(Risk / (Capital × SL%)). 0 = no margin constraint (leverage fixed at max).' },
+      { key: 'MAX_LEVERAGE',       label: 'Max Leverage',              type: 'number', hint: 'Ceiling on dynamically calculated leverage. Bot calculates needed leverage from SL distance; this caps it.' },
+      { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)', type: 'number', step: '1', hint: 'Target dollar loss if SL is hit. SL is placed at the technical level; leverage is adjusted so loss = this value.' },
       { key: 'MAX_OPEN_TRADES',    label: 'Max Open Positions',        type: 'number',              hint: 'Hard cap on concurrent open trades' },
       { key: 'TRAIL_ARM_RR',    label: 'Trail Arm R:R',    type: 'number', step: '0.25', hint: 'Price must reach entry ± (SL distance × this) before trailing starts. 1.5 = 1.5:1 RR.' },
       { key: 'TRAIL_STEP_RATIO', label: 'Trail Step Ratio', type: 'number', step: '0.05', hint: 'Trailing stop = ratio × SL distance behind the peak (0.5 = half the SL distance)' },
@@ -2040,37 +2040,31 @@ function _updateTradePreview() {
   document.getElementById('trade-tp-hint').textContent =
     `Trail activates at ${armRR}:1 R:R (${(risk * armRR / entry * 100).toFixed(2)}% from entry)`;
 
-  // Estimate size (mirrors new margin-first backend _calc_qty_and_leverage)
-  const maxLossUsdt = parseFloat(document.getElementById('trade-entry').dataset.riskUsdt || '0');
-  const capital     = parseFloat(document.getElementById('trade-entry').dataset.marginCap || '0');
-  const maxLev      = parseInt(document.getElementById('trade-entry').dataset.maxLev || '20');
-  const slDist      = Math.abs(entry - sl);
+  // Estimate size (mirrors dynamic-leverage backend _calc_qty_and_leverage)
+  const riskUsdt = parseFloat(document.getElementById('trade-entry').dataset.riskUsdt || '0');
+  const capital  = parseFloat(document.getElementById('trade-entry').dataset.marginCap || '0');
+  const maxLev   = parseInt(document.getElementById('trade-entry').dataset.maxLev || '20');
+  const slDist   = Math.abs(entry - sl);
 
-  if (capital > 0) {
-    let qty = (capital * maxLev) / entry;
+  if (riskUsdt > 0) {
+    // qty so that qty × slDist = riskUsdt (SL always costs exactly riskUsdt)
+    let qty = riskUsdt / slDist;
     let lev = maxLev;
-    // Apply max-loss cap
-    if (maxLossUsdt > 0) {
-      const qtyRiskCap = maxLossUsdt / slDist;
-      if (qty > qtyRiskCap) {
-        qty = qtyRiskCap;
-        const notionalCapped = qty * entry;
-        lev = Math.max(1, Math.min(Math.ceil(notionalCapped / capital), maxLev));
-      }
+    if (capital > 0) {
+      const slPct = slDist / entry;
+      const neededLev = Math.ceil(riskUsdt / (capital * slPct));
+      lev = Math.max(1, Math.min(neededLev, maxLev));
+      // If leverage was capped, reduce qty to fit within capital × lev
+      const maxQtyForMargin = (capital * lev) / entry;
+      qty = Math.min(qty, maxQtyForMargin);
     }
     const notional   = qty * entry;
-    const margin     = notional / lev;
+    const margin     = capital > 0 ? capital : notional / lev;
     const slLossUsdt = qty * slDist;
     document.getElementById('trade-size-preview').value =
       `Margin $${margin.toFixed(2)} · ${lev}× · Risk $${slLossUsdt.toFixed(2)}`;
-  } else if (maxLossUsdt > 0) {
-    const qty      = maxLossUsdt / slDist;
-    const notional = qty * entry;
-    const margin   = notional / maxLev;
-    document.getElementById('trade-size-preview').value =
-      `Margin $${margin.toFixed(2)} · ${maxLev}× · Risk $${maxLossUsdt.toFixed(2)}`;
   } else {
-    document.getElementById('trade-size-preview').value = 'Set Capital Per Trade in config to preview';
+    document.getElementById('trade-size-preview').value = 'Set Risk Per Trade in config to preview';
   }
 }
 
