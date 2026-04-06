@@ -50,13 +50,59 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 #server-time { margin-left: auto; color: var(--muted); font-size: 11px; }
 .stat-pill { color: var(--muted); font-size: 11px; }
 .stat-pill span { color: var(--text); }
-#btn-config {
+#btn-config, #btn-sizing {
   display: flex; align-items: center; gap: 5px;
   padding: 3px 10px; border-radius: 3px; font-family: var(--font); font-size: 10px;
   font-weight: 700; letter-spacing: .06em; cursor: pointer; border: 1px solid var(--border);
   background: transparent; color: var(--muted); transition: all .15s; white-space: nowrap;
 }
 #btn-config:hover { border-color: var(--amber); color: var(--amber); }
+#btn-sizing:hover { border-color: #4a9eff; color: #4a9eff; }
+
+/* ── Sizing modal ─────────────────────────────────────────────────────────── */
+.modal-wide { max-width: 680px; width: 95%; }
+.sz-summary {
+  display: flex; gap: 1.5rem; padding: .6rem 0 .75rem; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); margin-bottom: .75rem;
+}
+.sz-kv { display: flex; flex-direction: column; gap: 2px; }
+.sz-kv .k { font-size: .62rem; color: #555; text-transform: uppercase; letter-spacing: .05em; }
+.sz-kv .v { font-size: .95rem; font-weight: 600; color: var(--text); }
+.sz-table { width: 100%; border-collapse: collapse; font-size: .78rem; margin: .25rem 0 .9rem; }
+.sz-table th {
+  text-align: left; color: #555; font-weight: 500; font-size: .67rem;
+  padding: .3rem .5rem; border-bottom: 1px solid var(--border);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.sz-table td { padding: .42rem .5rem; border-bottom: 1px solid #111; vertical-align: middle; }
+.tier-badge {
+  display: inline-block; padding: .12rem .45rem; border-radius: 3px;
+  font-size: .67rem; font-weight: 700; letter-spacing: .04em;
+}
+.tier-H { background: #ff4d4d22; color: #ff6b6b; }
+.tier-M { background: #ffb94022; color: var(--amber); }
+.tier-L { background: #00c85222; color: var(--green); }
+.cov-bar { display: flex; align-items: center; gap: .5rem; }
+.cov-bg { flex: 1; height: 5px; background: #1e1e1e; border-radius: 3px; overflow: hidden; }
+.cov-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+.cov-ok   { background: var(--green); }
+.cov-warn { background: var(--amber); }
+.cov-bad  { background: var(--red); }
+.cov-lbl  { font-size: .72rem; font-weight: 700; min-width: 2.8rem; text-align: right; }
+.sz-recs { display: flex; flex-direction: column; gap: .4rem; margin-top: .25rem; }
+.rec-item {
+  display: flex; align-items: flex-start; gap: .6rem;
+  padding: .5rem .7rem; border-radius: 5px; font-size: .78rem; line-height: 1.45;
+}
+.rec-ok   { background: #00c85214; color: var(--green); }
+.rec-warn { background: #ffb94014; color: var(--amber); }
+.rec-info { background: #4a9eff14; color: #4a9eff; }
+.rec-err  { background: #ff4d4d14; color: var(--red); }
+.rec-icon { flex-shrink: 0; font-size: .85rem; margin-top: .1rem; }
+.sz-section-lbl {
+  font-size: .65rem; text-transform: uppercase; letter-spacing: .06em;
+  color: #444; margin: .5rem 0 .3rem;
+}
 
 /* ── Toast notifications ──────────────────────────────────────────────────── */
 #toast-stack {
@@ -514,7 +560,21 @@ canvas.sparkline { display: block; border-radius: 2px; }
     <span class="stat-pill">Watchlist: <span id="h-watch">0</span></span>
     <span class="stat-pill">Clients: <span id="h-clients">0</span></span>
     <span id="server-time">--:--:--</span>
+    <button id="btn-sizing" title="Position sizing guide">⊕ Sizing</button>
     <button id="btn-config" title="Bot configuration">⚙ Config</button>
+  </div>
+
+  <!-- ── Sizing Modal ── -->
+  <div id="sizing-modal" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <div class="modal-hdr">
+        <span>Position Sizing Guide</span>
+        <button id="sizing-close">✕</button>
+      </div>
+      <div class="modal-body" id="sizing-body">
+        <div class="empty">Loading…</div>
+      </div>
+    </div>
   </div>
 
   <!-- ── Config Modal ── -->
@@ -2023,11 +2083,167 @@ document.getElementById('btn-config').addEventListener('click', openConfigModal)
 document.getElementById('cfg-close').addEventListener('click', closeConfigModal);
 document.getElementById('cfg-save').addEventListener('click', saveConfig);
 document.getElementById('config-modal').addEventListener('click', e => {
-  if (e.target === e.currentTarget) closeConfigModal(); // click outside closes
+  if (e.target === e.currentTarget) closeConfigModal();
 });
+
+// ── Sizing Modal ────────────────────────────────────────────────────────────
+document.getElementById('btn-sizing').addEventListener('click', openSizingModal);
+document.getElementById('sizing-close').addEventListener('click', () => {
+  document.getElementById('sizing-modal').classList.add('hidden');
+});
+document.getElementById('sizing-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) document.getElementById('sizing-modal').classList.add('hidden');
+});
+
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeConfigModal(); closeTradeModal(); }
+  if (e.key === 'Escape') {
+    closeConfigModal(); closeTradeModal();
+    document.getElementById('sizing-modal').classList.add('hidden');
+  }
 });
+
+async function openSizingModal() {
+  document.getElementById('sizing-modal').classList.remove('hidden');
+  const body = document.getElementById('sizing-body');
+  body.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const cfg = await fetch('/api/config').then(r => r.json());
+    body.innerHTML = renderSizingContent(cfg);
+  } catch(e) {
+    body.innerHTML = '<div class="empty" style="color:var(--red)">Failed to load config</div>';
+  }
+}
+
+function renderSizingContent(cfg) {
+  const capital  = cfg.CAPITAL  || 0;
+  const riskPct  = cfg.RISK_PCT  || 2;
+  const maxOpen  = cfg.MAX_OPEN_TRADES || 5;
+  const maxLev   = cfg.MAX_LEVERAGE   || 20;
+
+  // ── Tier definitions (midpoint ATR% for each bucket) ──
+  // SL = 1.5×ATR, trail = 1.0×ATR
+  const TIERS = [
+    { label:'HIGH',  cls:'H', atrPct:1.0,  lev: Math.min(3,  maxLev), range:'ATR > 0.8%'      },
+    { label:'MED',   cls:'M', atrPct:0.6,  lev: Math.min(7,  maxLev), range:'ATR 0.4 – 0.8%'  },
+    { label:'LOW',   cls:'L', atrPct:0.25, lev: Math.min(maxLev, maxLev), range:'ATR < 0.4%'  },
+  ];
+
+  if (!capital) {
+    return `
+      <div class="sz-recs">
+        <div class="rec-item rec-err">
+          <span class="rec-icon">⚠</span>
+          <div><strong>CAPITAL not set.</strong> Open Config and enter your account balance to enable position sizing calculations.</div>
+        </div>
+      </div>`;
+  }
+
+  const riskTarget    = capital * riskPct / 100;
+  const perTradeMgn   = capital / maxOpen;
+
+  // ── Per-tier calculations ──
+  const tiers = TIERS.map(t => {
+    const slPct        = (t.atrPct * 1.5) / 100;           // decimal e.g. 0.015
+    const notionalRisk = riskTarget / slPct;                // to achieve exact risk target
+    const notionalCap  = perTradeMgn * t.lev;               // margin cap × leverage
+    const notional     = Math.min(notionalRisk, notionalCap);
+    const margin       = notional / t.lev;
+    const actualRisk   = notional * slPct;
+    const coverage     = Math.min(100, (actualRisk / riskTarget) * 100);
+    // Min leverage to hit risk target within the per-trade margin
+    const minLev       = Math.ceil(riskTarget / (perTradeMgn * slPct));
+    // Max open trades that would allow full risk target at this tier's leverage
+    const maxOpenFull  = Math.floor(capital / (riskTarget / (slPct * t.lev)));
+    return { ...t, slPct: t.atrPct * 1.5, notional, margin, actualRisk, coverage, minLev, maxOpenFull };
+  });
+
+  // ── Summary cards ──
+  const $fmt = v => v >= 1000 ? `$${(v/1000).toFixed(1)}k` : `$${v.toFixed(0)}`;
+  const summary = `
+    <div class="sz-summary">
+      <div class="sz-kv"><span class="k">Capital</span><span class="v">${$fmt(capital)}</span></div>
+      <div class="sz-kv"><span class="k">Risk / Trade</span><span class="v">${$fmt(riskTarget)} (${riskPct}%)</span></div>
+      <div class="sz-kv"><span class="k">Per-trade Margin</span><span class="v">${$fmt(perTradeMgn)} (÷${maxOpen})</span></div>
+      <div class="sz-kv"><span class="k">Max Leverage</span><span class="v">${maxLev}×</span></div>
+    </div>`;
+
+  // ── Tier table ──
+  const covClass = c => c >= 85 ? 'cov-ok' : c >= 55 ? 'cov-warn' : 'cov-bad';
+  const covLblStyle = c => c >= 85 ? 'color:var(--green)' : c >= 55 ? 'color:var(--amber)' : 'color:var(--red)';
+
+  const rows = tiers.map(t => `
+    <tr>
+      <td><span class="tier-badge tier-${t.cls}">${t.label}</span></td>
+      <td style="color:#666">${t.range}</td>
+      <td>${t.lev}×</td>
+      <td>${t.slPct.toFixed(2)}%</td>
+      <td>$${t.notional.toFixed(0)}</td>
+      <td>$${t.margin.toFixed(0)}</td>
+      <td>
+        <div class="cov-bar">
+          <div class="cov-bg"><div class="cov-fill ${covClass(t.coverage)}" style="width:${t.coverage.toFixed(0)}%"></div></div>
+          <span class="cov-lbl" style="${covLblStyle(t.coverage)}">$${t.actualRisk.toFixed(1)}</span>
+        </div>
+      </td>
+    </tr>`).join('');
+
+  const table = `
+    <div class="sz-section-lbl">Tier Analysis — typical trade at each volatility level</div>
+    <table class="sz-table">
+      <thead><tr>
+        <th>Tier</th><th>Condition</th><th>Lev</th><th>SL dist</th>
+        <th>Size</th><th>Margin</th><th>Actual Risk (target $${riskTarget.toFixed(0)})</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  // ── Recommendations ──
+  const recs = [];
+
+  const below = tiers.filter(t => t.coverage < 85);
+
+  if (below.length === 0) {
+    recs.push({ cls:'ok', icon:'✓',
+      text: `Risk target ($${riskTarget.toFixed(0)}/trade) is achievable across all volatility tiers. Configuration looks good.` });
+  } else {
+    // What MAX_OPEN would be needed for the strictest tier?
+    const strictest = tiers.reduce((a,b) => a.maxOpenFull < b.maxOpenFull ? a : b);
+
+    recs.push({ cls:'warn', icon:'⚠',
+      text: `<strong>${below.map(t=>t.label).join(', ')} tier${below.length>1?'s':''}</strong> can't reach the $${riskTarget.toFixed(0)} risk target. ` +
+            `Current per-trade margin ($${perTradeMgn.toFixed(0)}) is too small relative to the required position size.` });
+
+    if (strictest.maxOpenFull >= 1) {
+      recs.push({ cls:'info', icon:'→',
+        text: `Reduce <strong>MAX_OPEN_TRADES to ${strictest.maxOpenFull}</strong> — this gives $${(capital/strictest.maxOpenFull).toFixed(0)}/trade margin, enough to hit $${riskTarget.toFixed(0)} risk at all tiers with current MAX_LEVERAGE.` });
+    } else {
+      const capitalNeeded = Math.ceil(riskTarget / ((tiers[0].slPct/100) * tiers[0].lev));
+      recs.push({ cls:'info', icon:'→',
+        text: `Or increase <strong>CAPITAL to $${(capitalNeeded * maxOpen).toFixed(0)}+</strong> to fund $${riskTarget.toFixed(0)} risk per trade across ${maxOpen} simultaneous positions at the HIGH volatility tier.` });
+    }
+  }
+
+  // Check if LOW tier hits max leverage and still can't reach target
+  const lowTier = tiers.find(t => t.label === 'LOW');
+  if (lowTier && lowTier.minLev > maxLev && lowTier.coverage < 95) {
+    recs.push({ cls:'info', icon:'→',
+      text: `LOW-volatility tier needs <strong>${lowTier.minLev}× leverage</strong> to hit the risk target but MAX_LEVERAGE is capped at ${maxLev}×. Consider raising MAX_LEVERAGE to ${lowTier.minLev} for stable, low-ATR assets.` });
+  }
+
+  // Warn if risk target > 5% capital (aggressive)
+  if (riskPct > 5) {
+    recs.push({ cls:'warn', icon:'⚠',
+      text: `Risk per trade is <strong>${riskPct}%</strong> — considered aggressive. Industry standard is 1–2%. High risk % increases account drawdown speed on losing streaks.` });
+  }
+
+  const recsHtml = `
+    <div class="sz-section-lbl">Recommendations</div>
+    <div class="sz-recs">
+      ${recs.map(r => `<div class="rec-item rec-${r.cls}"><span class="rec-icon">${r.icon}</span><div>${r.text}</div></div>`).join('')}
+    </div>`;
+
+  return summary + table + recsHtml;
+}
 
 // ============================================================
 // MANUAL TRADE MODAL
