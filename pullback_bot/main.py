@@ -250,7 +250,8 @@ async def close_position(trade_id: int) -> JSONResponse:
         direction = trade["direction"]
         entry = float(trade["entry_price"])
         qty = float(trade["qty"])
-        pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
+        gross = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
+        pnl = position_tracker._net_pnl(gross, entry, mark, qty)
         pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0.0
         close_time = int(time.time() * 1000)
         await db.update_trade_close(
@@ -297,7 +298,8 @@ async def close_all_positions() -> JSONResponse:
             direction = trade["direction"]
             entry = float(trade["entry_price"])
             qty = float(trade["qty"])
-            pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
+            gross = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
+            pnl = position_tracker._net_pnl(gross, entry, mark, qty)
             pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0.0
             close_time = int(time.time() * 1000)
             await db.update_trade_close(

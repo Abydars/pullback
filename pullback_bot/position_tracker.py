@@ -33,6 +33,13 @@ TAKER_FEE_RATE = 0.0004          # 0.04% — Binance futures market order
 MAINTENANCE_MARGIN_RATE = 0.004  # 0.4% — conservative estimate
 
 
+def _net_pnl(gross: float, entry: float, close: float, qty: float) -> float:
+    """Subtract round-trip taker fees from a gross PnL figure."""
+    entry_fee = entry * qty * TAKER_FEE_RATE
+    exit_fee  = close * qty * TAKER_FEE_RATE
+    return gross - entry_fee - exit_fee
+
+
 def _enrich_position(trade: dict, mark: float, raw_pnl: float) -> dict:
     """
     Compute derived position fields from stored trade data.
@@ -46,7 +53,9 @@ def _enrich_position(trade: dict, mark: float, raw_pnl: float) -> dict:
 
     notional     = entry * qty                              # position size in USDT
     margin_usdt  = notional / lev                          # initial margin
-    fee_usdt     = notional * TAKER_FEE_RATE               # entry fee (taker)
+    entry_fee    = notional * TAKER_FEE_RATE               # entry taker fee
+    exit_fee     = mark * qty * TAKER_FEE_RATE             # hypothetical exit fee at mark
+    fee_usdt     = entry_fee + exit_fee                    # round-trip fee estimate
 
     # Estimated liquidation price (simplified — ignores funding, cross-margin buffer)
     if direction == "LONG":
@@ -54,17 +63,18 @@ def _enrich_position(trade: dict, mark: float, raw_pnl: float) -> dict:
     else:
         liq_price = entry * (1 + 1 / lev - MAINTENANCE_MARGIN_RATE)
 
-    roe_pct = (raw_pnl / margin_usdt * 100) if margin_usdt else 0.0
+    net_pnl = _net_pnl(raw_pnl, entry, mark, qty)
+    roe_pct = (net_pnl / margin_usdt * 100) if margin_usdt else 0.0
 
     duration_s = int(time.time()) - entry_time // 1000   # entry_time is ms
     duration_str = _fmt_duration(duration_s)
 
-    pnl_pct = (raw_pnl / notional * 100) if notional else 0.0
+    pnl_pct = (net_pnl / notional * 100) if notional else 0.0
 
     return {
         **trade,
         "mark_price":          round(mark, 8),
-        "unrealized_pnl":      round(raw_pnl, 4),
+        "unrealized_pnl":      round(net_pnl, 4),
         "unrealized_pnl_pct":  round(pnl_pct, 4),
         "roe_pct":             round(roe_pct, 2),
         "notional_usdt":       round(notional, 2),
@@ -222,9 +232,10 @@ async def _close_all_paper(
         qty   = float(trade["qty"])
 
         if direction == "LONG":
-            pnl = (mark - entry) * qty
+            gross = (mark - entry) * qty
         else:
-            pnl = (entry - mark) * qty
+            gross = (entry - mark) * qty
+        pnl = _net_pnl(gross, entry, mark, qty)
         pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0
         close_time = int(time.time() * 1000)
 
@@ -304,14 +315,14 @@ async def _paper_pnl_loop() -> None:
 
                 tid = trade["id"]
 
-                # PnL calculation
+                # PnL calculation (gross price difference)
                 if direction == "LONG":
                     raw_pnl = (mark - entry) * qty
                 else:
                     raw_pnl = (entry - mark) * qty
 
-                pnl_pct = raw_pnl / (entry * qty) * 100 if entry * qty else 0
-                paper_unrealized[tid] = raw_pnl
+                # Fee-adjusted unrealized PnL (entry fee already paid + exit fee at mark)
+                paper_unrealized[tid] = _net_pnl(raw_pnl, entry, mark, qty)
 
                 # ── Activate trailing when mark crosses trail arm ─────────────
                 trail_active = _trail_active.get(tid, False)
@@ -358,9 +369,10 @@ async def _paper_pnl_loop() -> None:
                 if hit_price and close_reason:
                     # Close the paper trade
                     if direction == "LONG":
-                        final_pnl = (hit_price - entry) * qty
+                        gross = (hit_price - entry) * qty
                     else:
-                        final_pnl = (entry - hit_price) * qty
+                        gross = (entry - hit_price) * qty
+                    final_pnl = _net_pnl(gross, entry, hit_price, qty)
                     final_pct = final_pnl / (entry * qty) * 100 if entry * qty else 0
                     close_time = int(time.time() * 1000)
 
@@ -458,9 +470,10 @@ async def _reconcile_live() -> None:
                 entry = float(trade["entry_price"])
                 qty = float(trade["qty"])
                 if direction == "LONG":
-                    pnl = (close_price - entry) * qty
+                    gross = (close_price - entry) * qty
                 else:
-                    pnl = (entry - close_price) * qty
+                    gross = (entry - close_price) * qty
+                pnl = _net_pnl(gross, entry, close_price, qty)
                 pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0
 
                 await db.update_trade_close(
@@ -534,9 +547,10 @@ async def _reconcile_paper() -> None:
 
             if hit_price and close_reason:
                 if direction == "LONG":
-                    pnl = (hit_price - entry) * qty
+                    gross = (hit_price - entry) * qty
                 else:
-                    pnl = (entry - hit_price) * qty
+                    gross = (entry - hit_price) * qty
+                pnl = _net_pnl(gross, entry, hit_price, qty)
                 pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0
 
                 await db.update_trade_close(
