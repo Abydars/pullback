@@ -221,11 +221,11 @@ canvas.sparkline { display: block; border-radius: 2px; }
 }
 
 /* History pane */
-#hist-pane { overflow-y: auto; }
-#hist-pane::-webkit-scrollbar { width: 4px; }
+#hist-pane { overflow: auto; }
+#hist-pane::-webkit-scrollbar { width: 4px; height: 4px; }
 #hist-pane::-webkit-scrollbar-track { background: transparent; }
 #hist-pane::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
-.hist-table { width: 100%; border-collapse: collapse; }
+.hist-table { width: max-content; min-width: 100%; border-collapse: collapse; }
 .hist-table th {
   padding: 5px 10px; text-align: left; font-size: 9px; font-weight: 600;
   letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--border);
@@ -508,9 +508,13 @@ canvas.sparkline { display: block; border-radius: 2px; }
             <tr>
               <th>Symbol</th>
               <th>Dir</th>
-              <th>Entry</th>
-              <th>Close</th>
+              <th>Entry Time</th>
+              <th>Exit Time</th>
+              <th>Entry $</th>
+              <th>Close $</th>
               <th>Qty</th>
+              <th>Lev</th>
+              <th>Margin</th>
               <th>Score</th>
               <th>Duration</th>
               <th>Reason</th>
@@ -518,7 +522,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
             </tr>
           </thead>
           <tbody id="hist-body">
-            <tr><td colspan="9" class="empty">No closed trades yet</td></tr>
+            <tr><td colspan="13" class="empty">No closed trades yet</td></tr>
           </tbody>
         </table>
       </div>
@@ -1401,7 +1405,7 @@ function renderHistory() {
   document.getElementById('hist-count').textContent = trades.length ? `(${trades.length})` : '';
 
   if (!trades.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty">No closed trades yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="13" class="empty">No closed trades yet</td></tr>';
     return;
   }
 
@@ -1411,11 +1415,20 @@ function renderHistory() {
     const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
     const isLong = t.direction === 'LONG';
 
-    // Duration from entry to close
+    // Timestamps
+    const entryDt = t.entry_time ? _fmtTs(t.entry_time) : '—';
+    const exitDt  = t.close_time ? _fmtTs(t.close_time) : '—';
+
+    // Duration
     const durS = t.close_time && t.entry_time
-      ? Math.round((t.close_time - t.entry_time) / 1000)
-      : null;
+      ? Math.round((t.close_time - t.entry_time) / 1000) : null;
     const durStr = durS !== null ? _fmtDurS(durS) : '—';
+
+    // Leverage & margin
+    const lev  = t.leverage ?? '—';
+    const notional = t.entry_price && t.qty ? t.entry_price * t.qty : null;
+    const margin   = notional && t.leverage ? (notional / t.leverage) : null;
+    const marginStr = margin != null ? `$${margin.toFixed(2)}` : '—';
 
     // Reason badge
     const reason = (t.close_reason || '').toUpperCase();
@@ -1434,9 +1447,13 @@ function renderHistory() {
     tr.innerHTML = `
       <td style="font-weight:600">${t.symbol.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span></td>
       <td><span class="hist-dir ${isLong ? 'long' : 'short'}">${isLong ? 'LONG' : 'SHORT'}</span></td>
+      <td style="color:var(--muted);white-space:nowrap">${entryDt}</td>
+      <td style="color:var(--muted);white-space:nowrap">${exitDt}</td>
       <td style="color:var(--muted)">${fmtPrice(t.entry_price)}</td>
       <td>${fmtPrice(t.close_price)}</td>
       <td style="color:var(--muted)">${t.qty}</td>
+      <td style="color:var(--muted)">${lev}×</td>
+      <td style="color:var(--muted)">${marginStr}</td>
       <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
       <td style="color:var(--muted)">${durStr}</td>
       <td><span class="hist-reason ${reasonCfg.cls}">${reasonCfg.label}</span></td>
@@ -1451,6 +1468,13 @@ function _fmtDurS(s) {
   if (s < 60)   return s + 's';
   if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
   return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+}
+
+function _fmtTs(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function updateStats(stats) {
@@ -1587,9 +1611,10 @@ const CFG_FIELDS = [
   {
     section: 'Risk / Order',
     fields: [
-      { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)', type: 'number', step: '1',   hint: 'Fixed dollar amount risked on each entry' },
-      { key: 'MAX_OPEN_TRADES',     label: 'Max Open Positions',    type: 'number',               hint: 'Hard cap on concurrent open trades' },
-      { key: 'LEVERAGE',            label: 'Leverage',              type: 'number', hint: '1–125×' },
+      { key: 'RISK_PER_TRADE_USDT', label: 'Risk Per Trade (USDT)',    type: 'number', step: '1',   hint: 'Max loss if SL hits. Position sized so loss = this value.' },
+      { key: 'MAX_POSITION_USDT',  label: 'Max Position Size (USDT)', type: 'number', step: '10',  hint: 'Cap on notional (entry × qty). 0 = unlimited. Prevents huge size on tight stops.' },
+      { key: 'MAX_OPEN_TRADES',    label: 'Max Open Positions',        type: 'number',              hint: 'Hard cap on concurrent open trades' },
+      { key: 'LEVERAGE',           label: 'Leverage',                  type: 'number', hint: '1–125×' },
       { key: 'TRAIL_STEP_RATIO',           label: 'Trail Step Ratio',               type: 'number', step: '0.05', hint: 'Trailing stop = ratio × initial risk (0.5 = half)' },
     ],
   },

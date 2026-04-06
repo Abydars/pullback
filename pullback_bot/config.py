@@ -61,6 +61,9 @@ SIGNAL_SCORE_THRESHOLD: int = _int("SIGNAL_SCORE_THRESHOLD", 70)
 
 # ── Risk / Order Settings ─────────────────────────────────────────────────────
 RISK_PER_TRADE_USDT: float = _float("RISK_PER_TRADE_USDT", 10.0)
+# Maximum notional (entry_price × qty) per trade. 0 = unlimited.
+# Prevents runaway size when stop is very tight relative to price.
+MAX_POSITION_USDT: float = _float("MAX_POSITION_USDT", 0.0)
 MAX_OPEN_TRADES: int = _int("MAX_OPEN_TRADES", 5)
 LEVERAGE: int = _int("LEVERAGE", 10)
 TRAIL_STEP_RATIO: float = _float("TRAIL_STEP_RATIO", 0.5)
@@ -92,6 +95,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "WATCHLIST_REFRESH_MINUTES":int,
     "SIGNAL_SCORE_THRESHOLD":   int,
     "RISK_PER_TRADE_USDT":      float,
+    "MAX_POSITION_USDT":        float,
     "MAX_OPEN_TRADES":          int,
     "LEVERAGE":                 int,
     "TRAIL_STEP_RATIO":             float,

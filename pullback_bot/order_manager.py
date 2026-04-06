@@ -28,11 +28,23 @@ logger = logging.getLogger(__name__)
 
 
 def _calc_qty(entry: float, sl: float) -> float:
-    """Calculate position size from risk USDT and entry/SL distance."""
+    """
+    Calculate position size from risk USDT and entry/SL distance.
+
+    qty = RISK / sl_distance  →  if SL hits, loss = qty × sl_distance = RISK exactly.
+
+    An optional MAX_POSITION_USDT cap limits the notional (qty × entry) so
+    that very tight stops don't produce unexpectedly large positions.
+    """
     risk = abs(entry - sl)
-    if risk <= 0:
+    if risk <= 0 or entry <= 0:
         return 0.0
-    return config.RISK_PER_TRADE_USDT / risk
+    qty = config.RISK_PER_TRADE_USDT / risk
+    cap = config.MAX_POSITION_USDT
+    if cap > 0:
+        max_qty = cap / entry
+        qty = min(qty, max_qty)
+    return qty
 
 
 class OrderManager:
@@ -104,10 +116,14 @@ class OrderManager:
             mode="paper",
             entry_time=now_ms,
             signal_score=score,
+            leverage=config.LEVERAGE,
         )
+        notional = entry * qty
         logger.info(
-            "Paper trade opened: #%d %s %s entry=%.6f sl=%.6f tp2=%.6f qty=%g score=%d",
-            trade_id, symbol, direction, entry, sl, tp2, qty, score,
+            "Paper trade opened: #%d %s %s entry=%.6f sl=%.6f qty=%g "
+            "notional=%.2f margin=%.2f risk=%.2f score=%d",
+            trade_id, symbol, direction, entry, sl, qty,
+            notional, notional / config.LEVERAGE, abs(entry - sl) * qty, score,
         )
         return True
 
@@ -156,6 +172,7 @@ class OrderManager:
                 mode="live",
                 entry_time=now_ms,
                 signal_score=score,
+                leverage=config.LEVERAGE,
                 binance_order_id=binance_order_id,
             )
             logger.info(

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS trades (
     qty         REAL    NOT NULL,
     status      TEXT    NOT NULL DEFAULT 'OPEN',  -- OPEN | CLOSED | CANCELLED
     mode        TEXT    NOT NULL,          -- live | paper
+    leverage    INTEGER,                   -- leverage at time of entry
     entry_time  INTEGER NOT NULL,          -- unix ms
     close_time  INTEGER,
     close_price REAL,
@@ -58,12 +59,16 @@ async def init_db() -> None:
         await db.execute(CREATE_SCANNER_LOG_TABLE)
         for idx in CREATE_INDEXES:
             await db.execute(idx)
-        # Migration: add close_reason if the column doesn't exist yet
-        try:
-            await db.execute("ALTER TABLE trades ADD COLUMN close_reason TEXT")
-            logger.info("Migration: added close_reason column to trades")
-        except Exception:
-            pass  # column already exists
+        # Migrations: add columns that didn't exist in earlier schema versions
+        for col_sql in [
+            "ALTER TABLE trades ADD COLUMN close_reason TEXT",
+            "ALTER TABLE trades ADD COLUMN leverage INTEGER",
+        ]:
+            try:
+                await db.execute(col_sql)
+                logger.info("Migration applied: %s", col_sql)
+            except Exception:
+                pass  # column already exists
         await db.commit()
     logger.info("Database initialised at %s", DB_PATH)
 
@@ -81,6 +86,7 @@ async def insert_trade(
     mode: str,
     entry_time: int,
     signal_score: int,
+    leverage: Optional[int] = None,
     binance_order_id: Optional[str] = None,
 ) -> int:
     """Insert a new trade and return its id."""
@@ -89,11 +95,11 @@ async def insert_trade(
             """
             INSERT INTO trades
                 (symbol, direction, entry_price, sl_price, tp1_price, tp2_price,
-                 qty, mode, entry_time, signal_score, binance_order_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                 qty, mode, entry_time, signal_score, leverage, binance_order_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (symbol, direction, entry_price, sl_price, tp1_price, tp2_price,
-             qty, mode, entry_time, signal_score, binance_order_id),
+             qty, mode, entry_time, signal_score, leverage, binance_order_id),
         )
         await db.commit()
         return cursor.lastrowid
