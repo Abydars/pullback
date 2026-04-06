@@ -1283,6 +1283,7 @@ function renderPositions() {
   const avgRoe      = trades.reduce((s, t) => s + (t.roe_pct ?? 0), 0) / trades.length;
   const winners     = trades.filter(t => (t.unrealized_pnl ?? 0) >= 0).length;
   const losers      = trades.length - winners;
+  const trailing    = trades.filter(t => t.trail_active).length;
 
   const pnlEl = document.getElementById('ps-upnl');
   pnlEl.textContent = fmtUsdt(totalPnl);
@@ -1292,7 +1293,9 @@ function renderPositions() {
   roeEl.textContent = (avgRoe >= 0 ? '+' : '') + avgRoe.toFixed(2) + '%';
   roeEl.style.color = avgRoe >= 0 ? 'var(--green)' : 'var(--red)';
   document.getElementById('ps-wl').innerHTML =
-    `<span style="color:var(--green)">${winners}W</span> / <span style="color:var(--red)">${losers}L</span>`;
+    `<span style="color:var(--green)">${winners}W</span>`
+    + ` / <span style="color:var(--red)">${losers}L</span>`
+    + (trailing ? ` / <span style="color:var(--amber)">${trailing}TR</span>` : '');
 
   trades.forEach(t => {
     const pnl  = t.unrealized_pnl ?? 0;
