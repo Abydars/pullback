@@ -236,13 +236,13 @@ def check_pullback(
     if risk <= 0:
         return None
 
-    # Trail arm: price level at which trailing take-profit activates (1:1 RR).
-    # Once mark crosses this level the position tracker starts trailing;
-    # there is no fixed TP2 — tp2_price reuses the same value for DB compat.
+    # Trail arm: price at which trailing activates.
+    # Distance = risk × TRAIL_ARM_RR (configurable; default 1.5 → 1.5:1 RR).
+    arm_rr = max(0.5, config.TRAIL_ARM_RR)
     if direction == "LONG":
-        trail_arm = round(entry_price + risk, 8)
+        trail_arm = round(entry_price + risk * arm_rr, 8)
     else:
-        trail_arm = round(entry_price - risk, 8)
+        trail_arm = round(entry_price - risk * arm_rr, 8)
 
     signal: dict = {
         "symbol": symbol,
@@ -373,8 +373,9 @@ def check_breakout(
     if risk <= 0:
         return None
 
+    arm_rr = max(0.5, config.TRAIL_ARM_RR)
     trail_arm = round(
-        entry_price + risk if direction == "LONG" else entry_price - risk, 8
+        entry_price + risk * arm_rr if direction == "LONG" else entry_price - risk * arm_rr, 8
     )
 
     signal: dict = {

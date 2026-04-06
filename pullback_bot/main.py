@@ -379,8 +379,9 @@ async def sl_suggest(symbol: str, direction: str) -> JSONResponse:
     if risk == 0:
         return JSONResponse({"error": "Computed SL equals entry"}, status_code=400)
 
-    tp1 = round(entry + risk if direction == "LONG" else entry - risk, 8)
-    tp2 = round(entry + risk * 2 if direction == "LONG" else entry - risk * 2, 8)
+    arm_rr = max(0.5, config.TRAIL_ARM_RR)
+    tp1 = round(entry + risk * arm_rr if direction == "LONG" else entry - risk * arm_rr, 8)
+    tp2 = tp1  # DB compat; actual exit is trail-based
 
     return JSONResponse({
         "entry":    round(entry, 8),
@@ -418,13 +419,14 @@ async def manual_trade(request: Request) -> JSONResponse:
     if direction == "SHORT" and sl <= entry:
         return JSONResponse({"error": "SL must be above entry for SHORT"}, status_code=400)
 
-    # TP at 1:1 (trail arm) and 2:1 RR
+    # Trail arm at TRAIL_ARM_RR × risk distance
+    arm_rr = max(0.5, config.TRAIL_ARM_RR)
     if direction == "LONG":
-        tp1 = entry + risk_dist
-        tp2 = entry + risk_dist * 2
+        tp1 = entry + risk_dist * arm_rr
+        tp2 = tp1  # DB compat
     else:
-        tp1 = entry - risk_dist
-        tp2 = entry - risk_dist * 2
+        tp1 = entry - risk_dist * arm_rr
+        tp2 = tp1
 
     signal = {
         "symbol":      symbol,

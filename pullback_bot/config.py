@@ -70,6 +70,10 @@ RISK_PER_TRADE_USDT: float = _float("RISK_PER_TRADE_USDT", 10.0)
 MAX_POSITION_USDT: float = _float("MAX_POSITION_USDT", 0.0)
 MAX_OPEN_TRADES: int = _int("MAX_OPEN_TRADES", 5)
 MAX_LEVERAGE: int = _int("MAX_LEVERAGE", 20)
+# TRAIL_ARM_RR: risk:reward multiple at which trailing activates.
+# 1.0 = trail starts when price is 1× risk away from entry (default).
+# 2.0 = trail starts only after 2:1 RR, giving the trade more room.
+TRAIL_ARM_RR: float   = _float("TRAIL_ARM_RR",   1.5)
 TRAIL_STEP_RATIO: float = _float("TRAIL_STEP_RATIO", 0.5)
 
 # ── Portfolio-level stops ─────────────────────────────────────────────────────
@@ -102,6 +106,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "MAX_POSITION_USDT":        float,
     "MAX_OPEN_TRADES":          int,
     "MAX_LEVERAGE":             int,
+    "TRAIL_ARM_RR":                 float,
     "TRAIL_STEP_RATIO":             float,
     "PORTFOLIO_STOP_LOSS_USDT":    float,
     "PORTFOLIO_TAKE_PROFIT_USDT":  float,
