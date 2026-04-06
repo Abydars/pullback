@@ -157,9 +157,11 @@ async def _handle_order_update(event: dict) -> None:
                 )
                 await wsb.broadcaster.broadcast("trade_closed", {
                     **trade,
-                    "close_price": close_price,
-                    "pnl_usdt": round(realized_pnl, 4),
-                    "pnl_pct": round(pnl_pct, 2),
+                    "close_price":  close_price,
+                    "close_time":   close_time,
+                    "close_reason": "FILLED",
+                    "pnl_usdt":     round(realized_pnl, 4),
+                    "pnl_pct":      round(pnl_pct, 2),
                 })
                 logger.info("Trade closed: %s pnl=%.4f", trade["symbol"], realized_pnl)
             elif status in ("CANCELED", "EXPIRED"):
@@ -389,10 +391,11 @@ async def _paper_pnl_loop() -> None:
                     _trail_extreme.pop(tid, None)
                     await wsb.broadcaster.broadcast("trade_closed", {
                         **trade,
-                        "close_price": hit_price,
+                        "close_price":  hit_price,
+                        "close_time":   close_time,
                         "close_reason": close_reason,
-                        "pnl_usdt": round(final_pnl, 4),
-                        "pnl_pct": round(final_pct, 2),
+                        "pnl_usdt":     round(final_pnl, 4),
+                        "pnl_pct":      round(final_pct, 2),
                     })
                     await _broadcast_stats()
                     logger.info(
