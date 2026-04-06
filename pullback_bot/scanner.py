@@ -7,7 +7,7 @@ Responsibilities:
   2. Kline WebSocket subscription: combined multi-stream for all watchlist symbols.
      Streams: <symbol>@kline_1m, <symbol>@kline_5m, <symbol>@kline_15m
   3. Scanner loop: for each symbol keeps a rolling kline buffer; calls
-     signal_engine.check_pullback every SCANNER_INTERVAL_SECONDS.
+     signal_engine.check_pullback on every confirmed 15m candle close.
   4. On valid signal: logs to DB, broadcasts via ws_broadcaster, calls
      order_manager.handle_signal.
 """

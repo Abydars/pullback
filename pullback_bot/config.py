@@ -53,7 +53,6 @@ else:
 # ── Scanner Settings ──────────────────────────────────────────────────────────
 MIN_VOLUME_24H: float = _float("MIN_VOLUME_24H", 20_000_000)   # USDT
 MIN_PRICE_CHANGE_PCT: float = _float("MIN_PRICE_CHANGE_PCT", 0.5)
-SCANNER_INTERVAL_SECONDS: int = _int("SCANNER_INTERVAL_SECONDS", 30)
 WATCHLIST_REFRESH_MINUTES: int = _int("WATCHLIST_REFRESH_MINUTES", 15)
 
 # ── Signal Settings ───────────────────────────────────────────────────────────
@@ -91,7 +90,6 @@ LOG_LEVEL: str = _get("LOG_LEVEL", "INFO")
 EDITABLE_KEYS: dict[str, type] = {
     "MIN_VOLUME_24H":           float,
     "MIN_PRICE_CHANGE_PCT":     float,
-    "SCANNER_INTERVAL_SECONDS": int,
     "WATCHLIST_REFRESH_MINUTES":int,
     "SIGNAL_SCORE_THRESHOLD":   int,
     "RISK_PER_TRADE_USDT":      float,
