@@ -1037,13 +1037,6 @@ function onScannerAlert(sig) {
     }]);
   }
 
-  // Toast — only show if score is worth noting
-  const icon = sig.direction === 'LONG' ? '▲' : '▼';
-  const sym  = sig.symbol.replace('USDT', '');
-  const reasons = sig.reasons ? sig.reasons.join(' · ') : '';
-  toast('t-amber', icon,
-    `Signal: ${sym} ${sig.direction}  (${sig.score}/100)`,
-    reasons, 6000);
 }
 
 function onPositionUpdate(positions) {
