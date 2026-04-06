@@ -440,6 +440,11 @@ async def _paper_tick() -> None:
                 await wsb.broadcaster.broadcast("position_update", positions_payload)
 
             # ── Portfolio-level stop check ────────────────────────────────────
+            # Prune stale entries — trades closed outside _paper_tick (e.g. manual
+            # close via API) would otherwise keep stale PnL that distorts the total.
+            open_ids = {t["id"] for t in open_trades}
+            for stale_tid in set(paper_unrealized) - open_ids:
+                paper_unrealized.pop(stale_tid, None)
             total_unrealized = sum(paper_unrealized.values())
             stop_loss_limit   = config.PORTFOLIO_STOP_LOSS_USDT
             take_profit_limit = config.PORTFOLIO_TAKE_PROFIT_USDT
