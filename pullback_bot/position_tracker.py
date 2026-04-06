@@ -103,15 +103,15 @@ logger = logging.getLogger(__name__)
 # trade_id -> current unrealized PnL (USDT)
 paper_unrealized: dict[int, float] = {}
 
-# Event set by scanner whenever a new batch of mark prices arrives (~1s cadence)
-_price_event: asyncio.Event = asyncio.Event()
-
-# ── Trailing take-profit state (paper mode) ───────────────────────────────────
+# ── Trailing stop state (paper mode) ─────────────────────────────────────────
 # Trailing activates when mark crosses tp1_price (the trail arm).
 # TRAIL_STEP_RATIO is read from config each tick so UI changes apply immediately.
 
 _trail_active: dict[int, bool] = {}    # trade_id -> trailing is armed
 _trail_extreme: dict[int, float] = {}  # trade_id -> best price reached (high for LONG, low for SHORT)
+
+# Lock prevents concurrent paper-tick processing when scanner fires rapidly.
+_paper_tick_lock: Optional[asyncio.Lock] = None
 
 
 # ── LIVE mode: User Data Stream ───────────────────────────────────────────────
@@ -275,25 +275,25 @@ async def _close_all_paper(
     )
 
 
-async def _paper_pnl_loop() -> None:
+async def _paper_tick() -> None:
     """
-    Poll open paper trades, calculate unrealized PnL from mark prices,
-    check for SL/TP hits, broadcast position_update.
-    """
-    from scanner import mark_prices  # avoid circular at module level
+    Process open paper trades against the latest mark prices:
+    calculate unrealized PnL, check SL/trail hits, broadcast position_update.
 
-    while True:
-        # Wake immediately when scanner fires a mark-price batch; fall through
-        # after 3 s even if the event never comes (safety net for live mode).
-        try:
-            await asyncio.wait_for(_price_event.wait(), timeout=3.0)
-        except asyncio.TimeoutError:
-            pass
-        _price_event.clear()
+    Called by the scanner immediately after each mark-price batch arrives
+    (~1 s cadence).  A lock prevents concurrent runs if scanner fires faster
+    than processing completes.
+    """
+    global _paper_tick_lock
+    if _paper_tick_lock is None or _paper_tick_lock.locked():
+        return  # already processing a previous tick — skip this one
+
+    async with _paper_tick_lock:
+        from scanner import mark_prices  # avoid circular at module level
         try:
             open_trades = await db.get_open_trades()
             if not open_trades:
-                continue
+                return
 
             positions_payload: list[dict] = []
 
@@ -432,7 +432,18 @@ async def _paper_pnl_loop() -> None:
                 await _close_all_paper(open_trades, mark_prices, triggered_reason)
 
         except Exception as exc:
-            logger.error("paper_pnl_loop error: %s", exc)
+            logger.error("paper_tick error: %s", exc)
+
+
+async def _paper_pnl_fallback() -> None:
+    """
+    Safety-net: run _paper_tick every 2 s even if the scanner never notifies us
+    (e.g. WS reconnecting).  Scanner-triggered ticks still take priority because
+    _paper_tick returns immediately if the lock is already held.
+    """
+    while True:
+        await asyncio.sleep(2.0)
+        await _paper_tick()
 
 
 # ── Startup reconciliation ────────────────────────────────────────────────────
@@ -590,7 +601,9 @@ async def start() -> None:
         except Exception as exc:
             logger.error("Failed to start live position tracker: %s", exc)
     else:
-        # Paper: start pnl loop, then reconcile in background after mark prices arrive
-        asyncio.create_task(_paper_pnl_loop(), name="paper_pnl_loop")
+        # Paper: initialise lock, start 2s fallback loop, reconcile open trades
+        global _paper_tick_lock
+        _paper_tick_lock = asyncio.Lock()
+        asyncio.create_task(_paper_pnl_fallback(), name="paper_pnl_fallback")
         asyncio.create_task(_reconcile_paper(), name="paper_reconcile")
         logger.info("Paper position tracker started")

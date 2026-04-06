@@ -310,11 +310,12 @@ async def _run_mark_price_ws(symbols: list[str]) -> None:
                             s = item.get("s", "")
                             if s in symbols:
                                 mark_prices[s] = float(item.get("p", 0))
-                        # Signal position_tracker to wake up and re-evaluate
+                        # Trigger position tracker immediately — no event indirection,
+                        # so trail/SL checks run within the same event-loop cycle.
                         import sys as _sys
                         _pt = _sys.modules.get("position_tracker")
-                        if _pt and hasattr(_pt, "_price_event"):
-                            _pt._price_event.set()
+                        if _pt and hasattr(_pt, "_paper_tick"):
+                            asyncio.ensure_future(_pt._paper_tick())
         except asyncio.CancelledError:
             break
         except Exception as exc:
