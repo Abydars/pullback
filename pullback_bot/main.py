@@ -161,6 +161,28 @@ async def api_trades() -> JSONResponse:
     return JSONResponse(trades)
 
 
+@app.delete("/api/trades/{trade_id}")
+async def delete_trade(trade_id: int) -> JSONResponse:
+    """Hard-delete a single closed trade record."""
+    deleted = await db.delete_trade(trade_id)
+    if not deleted:
+        return JSONResponse({"error": "Trade not found or still open"}, status_code=404)
+    await wsb.broadcaster.broadcast("trade_deleted", {"id": trade_id})
+    stats = {**(await db.get_today_stats()), **(await db.get_all_stats())}
+    await wsb.broadcaster.broadcast("stats_update", stats)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/trades")
+async def delete_all_trades() -> JSONResponse:
+    """Hard-delete all closed trade records."""
+    count = await db.delete_all_closed_trades()
+    await wsb.broadcaster.broadcast("trades_cleared", {"count": count})
+    stats = {**(await db.get_today_stats()), **(await db.get_all_stats())}
+    await wsb.broadcaster.broadcast("stats_update", stats)
+    return JSONResponse({"ok": True, "deleted": count})
+
+
 @app.get("/api/positions")
 async def api_positions() -> JSONResponse:
     open_trades = await db.get_open_trades()

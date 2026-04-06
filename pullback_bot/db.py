@@ -166,6 +166,24 @@ async def get_closed_trades(limit: int = 500) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+async def delete_trade(trade_id: int) -> bool:
+    """Hard-delete a single closed trade. Returns True if a row was deleted."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "DELETE FROM trades WHERE id=? AND status='CLOSED'", (trade_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def delete_all_closed_trades() -> int:
+    """Hard-delete all closed trades. Returns count deleted."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("DELETE FROM trades WHERE status='CLOSED'")
+        await db.commit()
+        return cursor.rowcount
+
+
 async def get_all_stats() -> dict:
     """Return all-time closed-trade stats."""
     async with aiosqlite.connect(DB_PATH) as db:

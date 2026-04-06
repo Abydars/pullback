@@ -221,23 +221,48 @@ canvas.sparkline { display: block; border-radius: 2px; }
 }
 
 /* History pane */
-#hist-pane { overflow: auto; }
+#hist-pane { overflow: auto; display: flex; flex-direction: column; }
 #hist-pane::-webkit-scrollbar { width: 4px; height: 4px; }
 #hist-pane::-webkit-scrollbar-track { background: transparent; }
 #hist-pane::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
-.hist-table { width: max-content; min-width: 100%; border-collapse: collapse; }
+#hist-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 10px; border-bottom: 1px solid var(--border);
+  background: var(--bg2); flex-shrink: 0; gap: 8px;
+}
+#hist-summary { font-size: 10px; color: var(--muted); }
+#btn-del-all {
+  font-family: var(--font); font-size: 10px; font-weight: 600; cursor: pointer;
+  padding: 2px 8px; border-radius: 3px; border: 1px solid var(--border);
+  background: transparent; color: var(--muted); transition: all .15s;
+}
+#btn-del-all:hover { border-color: var(--red); color: var(--red); }
+.hist-table { width: max-content; min-width: 100%; border-collapse: collapse; flex-shrink: 0; }
 .hist-table th {
   padding: 5px 10px; text-align: left; font-size: 9px; font-weight: 600;
   letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--border);
   text-transform: uppercase; background: var(--bg2); position: sticky; top: 0; z-index: 1;
+  white-space: nowrap; user-select: none;
 }
+.hist-table th[data-col] { cursor: pointer; }
+.hist-table th[data-col]:hover { color: var(--text); }
+.hist-table th.sort-asc::after  { content: ' ▲'; color: var(--amber); }
+.hist-table th.sort-desc::after { content: ' ▼'; color: var(--amber); }
 .hist-table th:last-child { text-align: right; }
 .hist-table td {
   padding: 6px 10px; font-size: 11px; border-bottom: 1px solid #0e0e0e;
 }
 .hist-table td:last-child { text-align: right; }
 .hist-table tbody tr { transition: background .1s; }
-.hist-table tbody tr:hover td { background: #181818; cursor: pointer; }
+.hist-table tbody tr:hover td { background: #181818; }
+.hist-table tbody tr td:not(:last-child) { cursor: pointer; }
+.btn-del-row {
+  font-family: var(--font); font-size: 11px; padding: 1px 5px; border-radius: 2px;
+  border: 1px solid transparent; background: transparent; color: #333; cursor: pointer;
+  transition: all .12s; line-height: 1.4;
+}
+.hist-table tbody tr:hover .btn-del-row { color: var(--muted); border-color: var(--border); }
+.btn-del-row:hover { color: var(--red) !important; border-color: var(--red) !important; }
 #chart-symbol { font-size: 14px; font-weight: 700; }
 #chart-price  { font-size: 14px; font-weight: 700; color: var(--green); }
 #chart-change { font-size: 11px; }
@@ -503,26 +528,31 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
       <!-- History pane -->
       <div id="hist-pane">
+        <div id="hist-toolbar">
+          <span id="hist-summary"></span>
+          <button id="btn-del-all" onclick="deleteAllTrades()" title="Delete all trade history">🗑 Delete All</button>
+        </div>
         <table class="hist-table">
           <thead>
             <tr>
-              <th>Symbol</th>
-              <th>Dir</th>
-              <th>Entry Time</th>
-              <th>Exit Time</th>
-              <th>Entry $</th>
-              <th>Close $</th>
-              <th>Qty</th>
-              <th>Lev</th>
-              <th>Margin</th>
-              <th>Score</th>
-              <th>Duration</th>
-              <th>Reason</th>
-              <th>PnL</th>
+              <th data-col="symbol">Symbol</th>
+              <th data-col="direction">Dir</th>
+              <th data-col="entry_time">Entry Time</th>
+              <th data-col="close_time">Exit Time</th>
+              <th data-col="entry_price">Entry $</th>
+              <th data-col="close_price">Close $</th>
+              <th data-col="qty">Qty</th>
+              <th data-col="leverage">Lev</th>
+              <th data-col="margin">Margin</th>
+              <th data-col="signal_score">Score</th>
+              <th data-col="duration">Duration</th>
+              <th data-col="close_reason">Reason</th>
+              <th data-col="pnl_usdt">PnL</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="hist-body">
-            <tr><td colspan="13" class="empty">No closed trades yet</td></tr>
+            <tr><td colspan="14" class="empty">No closed trades yet</td></tr>
           </tbody>
         </table>
       </div>
@@ -937,6 +967,8 @@ function handleMessage(type, data) {
     case 'trade_closed':             onTradeClosed(data);          break;
     case 'portfolio_stop_triggered': onPortfolioStop(data);         break;
     case 'stats_update':             updateStats(data);             break;
+    case 'trade_deleted':            onTradeDeleted(data);          break;
+    case 'trades_cleared':           onTradesCleared();             break;
     case 'kline_update':             onKlineUpdate(data);           break;
     case 'kline_history':            onKlineHistory(data);          break;
     case 'system_status':            onSystemStatus(data);          break;
@@ -957,6 +989,7 @@ function onInit(data) {
 
   // History — server already returns only CLOSED trades
   state.histTrades = data.recent_trades || [];
+  _updateSortHeaders();
   renderHistory();
 
   // Stats
@@ -1404,13 +1437,24 @@ function renderHistory() {
 
   document.getElementById('hist-count').textContent = trades.length ? `(${trades.length})` : '';
 
-  if (!trades.length) {
-    tbody.innerHTML = '<tr><td colspan="13" class="empty">No closed trades yet</td></tr>';
+  // Sort
+  const sorted = _sortTrades(trades);
+
+  // Summary line
+  const winCount = sorted.filter(t => (t.pnl_usdt ?? 0) > 0).length;
+  const totalPnl = sorted.reduce((s, t) => s + (t.pnl_usdt ?? 0), 0);
+  document.getElementById('hist-summary').textContent =
+    sorted.length
+      ? `${sorted.length} trades · ${winCount}W / ${sorted.length - winCount}L · PnL: ${fmtUsdt(totalPnl)}`
+      : '';
+
+  if (!sorted.length) {
+    tbody.innerHTML = '<tr><td colspan="14" class="empty">No closed trades yet</td></tr>';
     return;
   }
 
   tbody.innerHTML = '';
-  trades.forEach(t => {
+  sorted.forEach(t => {
     const pnl    = t.pnl_usdt ?? 0;
     const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
     const isLong = t.direction === 'LONG';
@@ -1458,10 +1502,87 @@ function renderHistory() {
       <td style="color:var(--muted)">${durStr}</td>
       <td><span class="hist-reason ${reasonCfg.cls}">${reasonCfg.label}</span></td>
       <td class="${pnlCls}" style="font-weight:600">${fmtUsdt(pnl)}</td>
+      <td><button class="btn-del-row" title="Delete this trade">🗑</button></td>
     `;
-    tr.onclick = () => selectSymbol(t.symbol);
+    // Row cells → select symbol on chart
+    tr.querySelectorAll('td:not(:last-child)').forEach(td =>
+      td.addEventListener('click', () => selectSymbol(t.symbol))
+    );
+    // Delete button
+    tr.querySelector('.btn-del-row').addEventListener('click', e => {
+      e.stopPropagation();
+      deleteTrade(t.id, tr);
+    });
     tbody.appendChild(tr);
   });
+}
+
+// ============================================================
+// TRADE HISTORY — SORT & DELETE
+// ============================================================
+const _histSort = { col: 'close_time', dir: 'desc' };  // default: newest exit first
+
+function _sortTrades(trades) {
+  const { col, dir } = _histSort;
+  const mult = dir === 'asc' ? 1 : -1;
+  return [...trades].sort((a, b) => {
+    let va, vb;
+    if (col === 'margin') {
+      va = a.entry_price && a.qty && a.leverage ? (a.entry_price * a.qty / a.leverage) : 0;
+      vb = b.entry_price && b.qty && b.leverage ? (b.entry_price * b.qty / b.leverage) : 0;
+    } else if (col === 'duration') {
+      va = (a.close_time && a.entry_time) ? a.close_time - a.entry_time : 0;
+      vb = (b.close_time && b.entry_time) ? b.close_time - b.entry_time : 0;
+    } else {
+      va = a[col] ?? '';
+      vb = b[col] ?? '';
+    }
+    if (va < vb) return -1 * mult;
+    if (va > vb) return  1 * mult;
+    return 0;
+  });
+}
+
+function _updateSortHeaders() {
+  document.querySelectorAll('.hist-table th[data-col]').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.col === _histSort.col) {
+      th.classList.add(_histSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+    }
+  });
+}
+
+async function deleteTrade(id, rowEl) {
+  rowEl.style.opacity = '0.4';
+  try {
+    const r = await fetch(`/api/trades/${id}`, { method: 'DELETE' });
+    if (!r.ok) { rowEl.style.opacity = ''; alert('Delete failed'); return; }
+    // WS event will trigger re-render via onTradeDeleted
+  } catch(e) { rowEl.style.opacity = ''; alert('Delete failed: ' + e.message); }
+}
+
+async function deleteAllTrades() {
+  const n = state.histTrades.length;
+  if (!n) return;
+  if (!confirm(`Delete all ${n} trade history record(s)? This cannot be undone.`)) return;
+  const btn = document.getElementById('btn-del-all');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/trades', { method: 'DELETE' });
+    if (!r.ok) alert('Delete failed');
+    // WS event trades_cleared will re-render
+  } catch(e) { alert('Delete failed: ' + e.message); }
+  finally { btn.disabled = false; }
+}
+
+function onTradeDeleted(data) {
+  state.histTrades = state.histTrades.filter(t => t.id !== data.id);
+  renderHistory();
+}
+
+function onTradesCleared() {
+  state.histTrades = [];
+  renderHistory();
 }
 
 function _fmtDurS(s) {
@@ -1793,6 +1914,21 @@ document.addEventListener('keydown', e => {
   // Expose so renderHistory can switch to history tab on new trade
   window.switchCTab = switchCTab;
 })();
+
+// ── History sort — header click ───────────────────────────────────────────────
+document.querySelector('.hist-table thead').addEventListener('click', e => {
+  const th = e.target.closest('th[data-col]');
+  if (!th) return;
+  const col = th.dataset.col;
+  if (_histSort.col === col) {
+    _histSort.dir = _histSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _histSort.col = col;
+    _histSort.dir = col === 'close_time' || col === 'entry_time' ? 'desc' : 'asc';
+  }
+  _updateSortHeaders();
+  renderHistory();
+});
 
 // ============================================================
 // CLOSE ALL BUTTON
