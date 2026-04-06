@@ -73,9 +73,9 @@ def _calc_qty_and_leverage(entry: float, sl: float, atr: float) -> tuple[float, 
     risk_amount     = capital * risk_pct / 100
     sl_distance_pct = sl_distance / entry
     notional        = risk_amount / sl_distance_pct
-    # Cap: per-trade capital allocation × leverage
-    per_trade_cap   = capital / max(1, config.MAX_OPEN_TRADES)
-    notional_cap    = per_trade_cap * leverage
+    # Cap: full capital × leverage — risk formula already controls size,
+    # MAX_OPEN_TRADES limits concurrent positions (not per-trade margin).
+    notional_cap    = capital * leverage
     notional        = min(notional, notional_cap)
 
     qty = notional / entry
