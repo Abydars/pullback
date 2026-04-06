@@ -15,6 +15,7 @@ Both modes respect MAX_OPEN_TRADES cap.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import time
@@ -25,6 +26,11 @@ import config
 import db
 
 logger = logging.getLogger(__name__)
+
+# Serialise all handle_signal calls so the "count open → insert" sequence is
+# atomic.  Without this, multiple signals firing on the same candle close all
+# read count=N before any insert commits, bypassing MAX_OPEN_TRADES.
+_open_lock = asyncio.Lock()
 
 
 def _calc_qty_and_leverage(entry: float, sl: float) -> tuple[float, int]:
@@ -79,6 +85,11 @@ class OrderManager:
         Act on a validated signal dict.
         Returns True if a trade was opened, False otherwise.
         """
+        async with _open_lock:
+            return await self._handle_signal_locked(signal)
+
+    async def _handle_signal_locked(self, signal: dict) -> bool:
+        """Called under _open_lock — check + insert are atomic."""
         symbol      = signal["symbol"]
         direction   = signal["direction"]
         entry       = signal["entry_price"]
@@ -88,7 +99,8 @@ class OrderManager:
         score       = signal["score"]
         signal_type = signal.get("signal_type", "PULLBACK")
 
-        # Max open trades guard
+        # Max open trades guard — re-checked inside the lock so concurrent
+        # signals can't all pass before any insert commits.
         open_count = await db.count_open_trades()
         if open_count >= config.MAX_OPEN_TRADES:
             logger.info(
