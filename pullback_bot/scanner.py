@@ -40,9 +40,9 @@ _kline_buffers: dict[str, dict[str, list[dict]]] = defaultdict(
     lambda: {"1m": [], "5m": [], "15m": []}
 )
 
-# last signal time per symbol (to avoid flooding)
+# Cooldown: minimum seconds between signals for the same symbol
 _last_signal_ts: dict[str, float] = {}
-_SIGNAL_COOLDOWN_S = 300  # 5 min between signals per symbol
+_SIGNAL_COOLDOWN_S = 300  # 5 min — one signal per 15m candle at most
 
 # reference to order_manager (set by main.py to avoid circular import)
 _order_manager = None
@@ -177,9 +177,6 @@ def _update_buffer(symbol: str, interval: str, candle: dict, is_closed: bool) ->
         limit = {"15m": 220, "5m": 60, "1m": 10}.get(interval, 60)
         if len(buf) > limit:
             _kline_buffers[symbol][interval] = buf[-limit:]
-        # Track last confirmed 15m close — scanner uses this to avoid intra-bar trades
-        if interval == "15m":
-            _last_15m_close[symbol] = int(candle["time"])
 
 
 async def _run_kline_ws(symbols: list[str]) -> None:
@@ -202,6 +199,11 @@ async def _run_kline_ws(symbols: list[str]) -> None:
                     if parsed:
                         sym, interval, candle, is_closed = parsed
                         _update_buffer(sym, interval, candle, is_closed)
+                        # Fire signal check immediately on confirmed 15m close
+                        if interval == "15m" and is_closed:
+                            asyncio.create_task(
+                                _evaluate_symbol(sym), name=f"eval_{sym}"
+                            )
                         # Broadcast to any UI client subscribed to this symbol/interval
                         buf = _kline_buffers[sym][interval]
                         ema50 = _compute_ema_tail(buf, 50) if len(buf) >= 50 else 0.0
@@ -225,79 +227,49 @@ async def _run_kline_ws(symbols: list[str]) -> None:
             backoff = min(backoff * 2, 30)
 
 
-# ── Scanner evaluation loop ───────────────────────────────────────────────────
-# Set when a 15m candle closes — scanner only runs on confirmed closes
-_last_15m_close: dict[str, int] = {}  # symbol -> last closed candle time
+# ── Per-symbol signal evaluation (triggered by 15m candle close) ─────────────
 
-_last_evaluated_15m: dict[str, int] = {}  # symbol -> last 15m candle time we evaluated on
-
-
-async def _evaluate_symbols() -> None:
+async def _evaluate_symbol(symbol: str) -> None:
     """
-    Run signal check on all watchlist symbols.
-    Only evaluates a symbol when a new 15m candle has CLOSED since the last
-    evaluation — prevents intra-bar entries on forming candles.
+    Run the signal engine for one symbol immediately after its 15m candle
+    closes. Called as an asyncio task from the kline WS handler — no polling.
     """
-    for symbol in list(active_watchlist):
-        try:
-            k15 = _kline_buffers[symbol]["15m"]
-            k5 = _kline_buffers[symbol]["5m"]
-            if len(k15) < 210 or len(k5) < 50:
-                continue
+    try:
+        k15 = _kline_buffers[symbol]["15m"]
+        k5  = _kline_buffers[symbol]["5m"]
+        if len(k15) < 210 or len(k5) < 50:
+            return
 
-            # Only run on confirmed closed 15m candles
-            last_close_time = _last_15m_close.get(symbol, 0)
-            if last_close_time == 0:
-                continue  # no closed 15m candle seen yet
-            if last_close_time <= _last_evaluated_15m.get(symbol, 0):
-                continue  # already evaluated this candle close
+        # Cooldown — avoid spamming signals for the same symbol
+        now = time.time()
+        if now - _last_signal_ts.get(symbol, 0) < _SIGNAL_COOLDOWN_S:
+            return
 
-            # Cooldown check
-            now = time.time()
-            if now - _last_signal_ts.get(symbol, 0) < _SIGNAL_COOLDOWN_S:
-                _last_evaluated_15m[symbol] = last_close_time  # mark as evaluated even if cooled down
-                continue
+        # k15[-1] is the candle that just closed; k5[-1] may still be forming.
+        # Pass confirmed candles only: exclude the currently-forming 5m candle.
+        sig = await asyncio.to_thread(
+            signal_engine.check_pullback, symbol, k15[:], k5[:-1]
+        )
+        if sig is None:
+            return
 
-            # Run CPU-heavy pandas computation in a thread so the event
-            # loop stays free for HTTP/WebSocket serving
-            # Pass copies excluding the still-forming last candle to be safe
-            sig = await asyncio.to_thread(
-                signal_engine.check_pullback, symbol, k15[:-1], k5[:-1]
-            )
-            # Mark this 15m close as evaluated regardless of signal outcome
-            _last_evaluated_15m[symbol] = last_close_time
-            if sig is None:
-                continue
+        _last_signal_ts[symbol] = now
 
-            # Signal found
-            _last_signal_ts[symbol] = now
-            acted = False
+        acted = False
+        if _order_manager:
+            acted = await _order_manager.handle_signal(sig)
 
-            # Try to place order
-            if _order_manager:
-                acted = await _order_manager.handle_signal(sig)
+        await db.insert_scanner_log(
+            symbol=symbol,
+            score=sig["score"],
+            direction=sig["direction"],
+            timestamp=sig["timestamp"],
+            acted_on=acted,
+        )
+        await wsb.broadcaster.broadcast("scanner_alert", sig)
 
-            # Log to DB
-            await db.insert_scanner_log(
-                symbol=symbol,
-                score=sig["score"],
-                direction=sig["direction"],
-                timestamp=sig["timestamp"],
-                acted_on=acted,
-            )
-
-            # Broadcast to UI
-            await wsb.broadcaster.broadcast("scanner_alert", sig)
-
-        except Exception as exc:
-            logger.error("Evaluate %s error: %s", symbol, exc)
-
-
-async def scanner_loop() -> None:
-    """Evaluate watchlist on SCANNER_INTERVAL_SECONDS cadence."""
-    while True:
-        await asyncio.sleep(config.SCANNER_INTERVAL_SECONDS)
-        await _evaluate_symbols()
+    except Exception as exc:
+        logger.error("_evaluate_symbol %s error: %s", symbol, exc)
 
 
 # ── Mark-price WebSocket (for paper PnL) ─────────────────────────────────────
@@ -361,8 +333,9 @@ async def start(order_manager=None) -> None:
         await asyncio.sleep(0.5)  # brief pause between batches
 
     # Start background tasks (fire and forget)
+    # scanner_loop removed — evaluation is now triggered directly by the
+    # kline WS whenever a 15m candle closes (zero-latency, no polling)
     asyncio.create_task(_run_kline_ws(active_watchlist), name="kline_ws")
     asyncio.create_task(_run_mark_price_ws(active_watchlist), name="mark_price_ws")
-    asyncio.create_task(scanner_loop(), name="scanner_loop")
     asyncio.create_task(refresh_watchlist_loop(), name="watchlist_refresh")
-    logger.info("Scanner started.")
+    logger.info("Scanner started — evaluation driven by 15m candle close events.")
