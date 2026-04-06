@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import time
 from typing import Optional
 
@@ -33,20 +32,30 @@ logger = logging.getLogger(__name__)
 _open_lock = asyncio.Lock()
 
 
-def _calc_qty_and_leverage(entry: float, sl: float, atr: float) -> tuple[float, int]:
+async def _calc_qty_and_leverage(
+    entry: float,
+    sl: float,
+    atr: float,
+    atr_ratio: float,
+    score: int,
+) -> tuple[float, int]:
     """
-    ATR-volatility-tiered leverage + risk-capped position sizing.
+    Smart position sizing with four compounding adjustments:
 
-    Leverage is chosen by ATR% (ATR as a percentage of price):
-      ATR% > 0.8%        → LOW  leverage (3x)
-      ATR% 0.4% – 0.8%  → MED  leverage (7x)
-      ATR% < 0.4%        → HIGH leverage (MAX_LEVERAGE)
+    1. SMOOTH LEVERAGE  — continuous formula: lev = floor(4 / atr_pct)
+       Low ATR → high leverage; high ATR → low leverage.  No hard buckets.
 
-    Position sizing:
-      risk_amount  = CAPITAL × RISK_PCT / 100   (e.g. $250 × 2% = $5)
-      notional     = risk_amount / sl_distance_pct
-      notional_cap = (CAPITAL / MAX_OPEN_TRADES) × leverage
-      qty          = min(notional, notional_cap) / entry
+    2. SCORE SCALING    — risk_amount × (score / 100)
+       A score-70 signal risks 70 % of target; score-100 risks the full amount.
+
+    3. ATR REGIME       — risk_amount × min(1, 1 / atr_ratio)
+       If current ATR is 2× its 20-bar average the size is halved, protecting
+       against sudden volatility spikes.
+
+    4. DRAWDOWN GUARD   — reduces risk when realized PnL is negative
+       > -5 %  account loss → 75 %
+       > -10 % → 50 %
+       > -15 % → 25 %
     """
     sl_distance = abs(entry - sl)
     if sl_distance <= 0 or entry <= 0 or atr <= 0:
@@ -54,34 +63,57 @@ def _calc_qty_and_leverage(entry: float, sl: float, atr: float) -> tuple[float, 
 
     max_lev  = max(1, config.MAX_LEVERAGE)
     capital  = config.CAPITAL
-    risk_pct = config.RISK_PCT   # e.g. 2.0 → 2 %
+    risk_pct = config.RISK_PCT
 
     if capital <= 0 or risk_pct <= 0:
         return 0.0, max_lev
 
-    # ── Leverage tier ─────────────────────────────────────────────────────────
-    atr_pct = (atr / entry) * 100   # ATR as % of price
-    if atr_pct > 0.8:
-        target_lev = 3              # high-volatility: keep leverage low
-    elif atr_pct >= 0.4:
-        target_lev = 7              # medium-volatility
-    else:
-        target_lev = max_lev        # stable asset: use full allowed leverage
-    leverage = max(1, min(target_lev, max_lev))
+    # ── 1. Smooth leverage ────────────────────────────────────────────────────
+    # leverage = floor(4 / atr_pct) — e.g. ATR=1% → 4x, ATR=0.5% → 8x,
+    # ATR=0.2% → 20x.  Constant 4 keeps leverage conservatively low at all
+    # volatility levels while still scaling smoothly.
+    atr_pct  = (atr / entry) * 100          # e.g. 1.0 for 1 %
+    raw_lev  = int(4.0 / atr_pct) if atr_pct > 0 else max_lev
+    leverage = max(1, min(raw_lev, max_lev))
 
-    # ── Position sizing ───────────────────────────────────────────────────────
-    risk_amount     = capital * risk_pct / 100
+    # ── 2. Score scaling ──────────────────────────────────────────────────────
+    score_scale = max(0.5, score / 100.0)   # floor at 50 % to avoid micro sizes
+
+    # ── 3. ATR regime ─────────────────────────────────────────────────────────
+    # atr_ratio > 1 means current ATR is elevated vs its 20-bar average.
+    # Scale inversely — don't increase size when market is unusually calm.
+    regime_scale = min(1.0, 1.0 / max(1.0, atr_ratio))
+
+    # ── 4. Drawdown guard ─────────────────────────────────────────────────────
+    realized_pnl  = await db.get_realized_pnl()
+    drawdown_pct  = (realized_pnl / capital) * 100   # negative = loss
+    if drawdown_pct <= -15:
+        drawdown_scale = 0.25
+    elif drawdown_pct <= -10:
+        drawdown_scale = 0.50
+    elif drawdown_pct <= -5:
+        drawdown_scale = 0.75
+    else:
+        drawdown_scale = 1.0
+
+    # ── Combine all scales into final risk amount ──────────────────────────────
+    base_risk    = capital * risk_pct / 100
+    risk_amount  = base_risk * score_scale * regime_scale * drawdown_scale
+
     sl_distance_pct = sl_distance / entry
     notional        = risk_amount / sl_distance_pct
-    # Cap margin per trade at CAPITAL / MAX_OPEN_TRADES so that all max-open
-    # positions can be funded simultaneously.  Actual risk may be < risk_amount
-    # when SL is wide relative to the per-trade margin, but capital is never
-    # overcommitted.
-    margin_cap   = capital / max(1, config.MAX_OPEN_TRADES)
-    notional_cap = margin_cap * leverage
-    notional     = min(notional, notional_cap)
+    margin_cap      = capital / max(1, config.MAX_OPEN_TRADES)
+    notional        = min(notional, margin_cap * leverage)
 
     qty = notional / entry
+
+    logger.info(
+        "Sizing: lev=%dx atr_pct=%.2f%% score_scale=%.2f regime_scale=%.2f "
+        "drawdown_scale=%.2f → risk=$%.2f (base=$%.2f) notional=$%.2f",
+        leverage, atr_pct, score_scale, regime_scale, drawdown_scale,
+        risk_amount, base_risk, notional,
+    )
+
     return qty, int(leverage)
 
 
@@ -124,9 +156,12 @@ class OrderManager:
             return False
 
         # Calculate qty and leverage
-        step = bc.get_step_size(symbol)
-        atr  = signal.get("atr", abs(entry - sl) / 1.5)  # fallback: derive from SL
-        raw_qty, leverage = _calc_qty_and_leverage(entry, sl, atr)
+        step      = bc.get_step_size(symbol)
+        atr       = signal.get("atr",       abs(entry - sl) / 1.5)
+        atr_ratio = signal.get("atr_ratio", 1.0)
+        raw_qty, leverage = await _calc_qty_and_leverage(
+            entry, sl, atr, atr_ratio, score
+        )
         qty = bc.round_step(raw_qty, step)
         if qty <= 0:
             logger.warning("Calculated qty=0 for %s, skipping", symbol)

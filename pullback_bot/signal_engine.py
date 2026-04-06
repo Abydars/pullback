@@ -148,7 +148,11 @@ def check_pullback(
         return None
 
     # ── 2. Pullback zone (15m) ────────────────────────────────────────────────
-    atr15 = _atr(df15, 14).iloc[-1]
+    atr_series = _atr(df15, 14)
+    atr15      = atr_series.iloc[-1]
+    # ATR regime: how elevated is current volatility vs recent 20-bar average?
+    atr_avg20  = float(atr_series.iloc[-21:-1].mean()) if len(atr_series) > 21 else atr15
+    atr_ratio  = atr15 / atr_avg20 if atr_avg20 > 0 else 1.0
     ema50_zone_pct = abs(last_close - last_ema50) / last_ema50
 
     in_ema50_zone = ema50_zone_pct <= 0.005  # within 0.5% of EMA50
@@ -238,6 +242,7 @@ def check_pullback(
         "tp1_price":   trail_arm,   # trail arm activation price
         "tp2_price":   trail_arm,   # kept for DB schema compat
         "atr":         round(atr15, 8),
+        "atr_ratio":   round(atr_ratio, 3),
         "timeframe":   "15m",
         "timestamp":   int(time.time()),
         "reasons":     reasons,
@@ -291,7 +296,10 @@ def check_breakout(
     resistance = float(lookback["high"].max())   # breakout level  (LONG)
     support    = float(lookback["low"].min())    # breakdown level (SHORT)
 
-    atr15   = float(_atr(df15, 14).iloc[-1])
+    _atr_series = _atr(df15, 14)
+    atr15       = float(_atr_series.iloc[-1])
+    _atr_avg20  = float(_atr_series.iloc[-21:-1].mean()) if len(_atr_series) > 21 else atr15
+    atr_ratio   = atr15 / _atr_avg20 if _atr_avg20 > 0 else 1.0
     avg_vol = float(df15["volume"].iloc[-21:-1].mean())
 
     ema200_val = float(_ema(df15["close"], 200).iloc[-1]) if len(df15) >= 200 else None
@@ -368,6 +376,7 @@ def check_breakout(
         "tp1_price":    trail_arm,
         "tp2_price":    trail_arm,
         "atr":          round(atr15, 8),
+        "atr_ratio":    round(atr_ratio, 3),
         "timeframe":    "15m",
         "timestamp":    int(time.time()),
         "reasons":      reasons,

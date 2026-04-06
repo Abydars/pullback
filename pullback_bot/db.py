@@ -213,6 +213,16 @@ async def get_all_stats() -> dict:
         }
 
 
+async def get_realized_pnl() -> float:
+    """Sum of pnl_usdt across all closed trades (negative = net loss)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COALESCE(SUM(pnl_usdt), 0.0) FROM trades WHERE status='CLOSED'"
+        )
+        row = await cursor.fetchone()
+        return float(row[0]) if row else 0.0
+
+
 async def count_open_trades() -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(

@@ -2120,14 +2120,6 @@ function renderSizingContent(cfg) {
   const maxOpen  = cfg.MAX_OPEN_TRADES || 5;
   const maxLev   = cfg.MAX_LEVERAGE   || 20;
 
-  // ── Tier definitions (midpoint ATR% for each bucket) ──
-  // SL = 1.5×ATR, trail = 1.0×ATR
-  const TIERS = [
-    { label:'HIGH',  cls:'H', atrPct:1.0,  lev: Math.min(3,  maxLev), range:'ATR > 0.8%'      },
-    { label:'MED',   cls:'M', atrPct:0.6,  lev: Math.min(7,  maxLev), range:'ATR 0.4 – 0.8%'  },
-    { label:'LOW',   cls:'L', atrPct:0.25, lev: Math.min(maxLev, maxLev), range:'ATR < 0.4%'  },
-  ];
-
   if (!capital) {
     return `
       <div class="sz-recs">
@@ -2138,23 +2130,31 @@ function renderSizingContent(cfg) {
       </div>`;
   }
 
-  const riskTarget    = capital * riskPct / 100;
-  const perTradeMgn   = capital / maxOpen;
+  // Smooth leverage formula: lev = floor(4 / atr_pct), same as backend
+  const smoothLev = atrPct => Math.max(1, Math.min(maxLev, Math.floor(4.0 / atrPct)));
 
-  // ── Per-tier calculations ──
+  // Representative ATR% sample points across the volatility spectrum
+  const TIERS = [
+    { label:'HIGH',  cls:'H', atrPct:1.0,  range:'ATR ≈ 1.0%'  },
+    { label:'MED',   cls:'M', atrPct:0.6,  range:'ATR ≈ 0.6%'  },
+    { label:'LOW',   cls:'L', atrPct:0.3,  range:'ATR ≈ 0.3%'  },
+    { label:'CALM',  cls:'L', atrPct:0.15, range:'ATR ≈ 0.15%' },
+  ].map(t => ({ ...t, lev: smoothLev(t.atrPct) }));
+
+  const riskTarget  = capital * riskPct / 100;
+  const perTradeMgn = capital / maxOpen;
+
+  // ── Per-tier calculations (full risk, no scaling applied — baseline) ──
   const tiers = TIERS.map(t => {
-    const slPct        = (t.atrPct * 1.5) / 100;           // decimal e.g. 0.015
-    const notionalRisk = riskTarget / slPct;                // to achieve exact risk target
-    const notionalCap  = perTradeMgn * t.lev;               // margin cap × leverage
+    const slPct       = (t.atrPct * 1.5) / 100;   // decimal
+    const notionalRisk = riskTarget / slPct;
+    const notionalCap  = perTradeMgn * t.lev;
     const notional     = Math.min(notionalRisk, notionalCap);
     const margin       = notional / t.lev;
     const actualRisk   = notional * slPct;
     const coverage     = Math.min(100, (actualRisk / riskTarget) * 100);
-    // Min leverage to hit risk target within the per-trade margin
-    const minLev       = Math.ceil(riskTarget / (perTradeMgn * slPct));
-    // Max open trades that would allow full risk target at this tier's leverage
     const maxOpenFull  = Math.floor(capital / (riskTarget / (slPct * t.lev)));
-    return { ...t, slPct: t.atrPct * 1.5, notional, margin, actualRisk, coverage, minLev, maxOpenFull };
+    return { ...t, slPct: t.atrPct * 1.5, notional, margin, actualRisk, coverage, maxOpenFull };
   });
 
   // ── Summary cards ──
@@ -2167,15 +2167,33 @@ function renderSizingContent(cfg) {
       <div class="sz-kv"><span class="k">Max Leverage</span><span class="v">${maxLev}×</span></div>
     </div>`;
 
+  // ── Scaling factors info ──
+  const scalingInfo = `
+    <div class="sz-section-lbl">Active sizing adjustments (applied every trade)</div>
+    <div class="sz-recs" style="margin-bottom:.75rem">
+      <div class="rec-item rec-info" style="gap:.4rem">
+        <span class="rec-icon">①</span>
+        <div><strong>Score scaling</strong> — risk × (score/100). Score 70 → 70% of $${riskTarget.toFixed(0)} = $${(riskTarget*0.7).toFixed(1)}. Score 100 → full $${riskTarget.toFixed(0)}.</div>
+      </div>
+      <div class="rec-item rec-info" style="gap:.4rem">
+        <span class="rec-icon">②</span>
+        <div><strong>ATR regime</strong> — if current ATR is 2× its 20-bar average, size is halved. Protects against sudden volatility spikes.</div>
+      </div>
+      <div class="rec-item rec-info" style="gap:.4rem">
+        <span class="rec-icon">③</span>
+        <div><strong>Drawdown guard</strong> — account down &gt;5% → 75% size · &gt;10% → 50% · &gt;15% → 25%. Automatically de-risks during losing streaks.</div>
+      </div>
+    </div>`;
+
   // ── Tier table ──
-  const covClass = c => c >= 85 ? 'cov-ok' : c >= 55 ? 'cov-warn' : 'cov-bad';
+  const covClass    = c => c >= 85 ? 'cov-ok' : c >= 55 ? 'cov-warn' : 'cov-bad';
   const covLblStyle = c => c >= 85 ? 'color:var(--green)' : c >= 55 ? 'color:var(--amber)' : 'color:var(--red)';
 
   const rows = tiers.map(t => `
     <tr>
       <td><span class="tier-badge tier-${t.cls}">${t.label}</span></td>
       <td style="color:#666">${t.range}</td>
-      <td>${t.lev}×</td>
+      <td><strong>${t.lev}×</strong></td>
       <td>${t.slPct.toFixed(2)}%</td>
       <td>$${t.notional.toFixed(0)}</td>
       <td>$${t.margin.toFixed(0)}</td>
@@ -2188,11 +2206,11 @@ function renderSizingContent(cfg) {
     </tr>`).join('');
 
   const table = `
-    <div class="sz-section-lbl">Tier Analysis — typical trade at each volatility level</div>
+    <div class="sz-section-lbl">Leverage &amp; risk by volatility level (baseline — score=100, normal ATR, no drawdown)</div>
     <table class="sz-table">
       <thead><tr>
-        <th>Tier</th><th>Condition</th><th>Lev</th><th>SL dist</th>
-        <th>Size</th><th>Margin</th><th>Actual Risk (target $${riskTarget.toFixed(0)})</th>
+        <th>Volatility</th><th>Condition</th><th>Lev</th><th>SL</th>
+        <th>Size</th><th>Margin</th><th>Risk (target $${riskTarget.toFixed(0)})</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
@@ -2242,7 +2260,7 @@ function renderSizingContent(cfg) {
       ${recs.map(r => `<div class="rec-item rec-${r.cls}"><span class="rec-icon">${r.icon}</span><div>${r.text}</div></div>`).join('')}
     </div>`;
 
-  return summary + table + recsHtml;
+  return summary + scalingInfo + table + recsHtml;
 }
 
 // ============================================================
