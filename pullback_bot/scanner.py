@@ -177,6 +177,9 @@ def _update_buffer(symbol: str, interval: str, candle: dict, is_closed: bool) ->
         limit = {"15m": 220, "5m": 60, "1m": 10}.get(interval, 60)
         if len(buf) > limit:
             _kline_buffers[symbol][interval] = buf[-limit:]
+        # Track last confirmed 15m close — scanner uses this to avoid intra-bar trades
+        if interval == "15m":
+            _last_15m_close[symbol] = int(candle["time"])
 
 
 async def _run_kline_ws(symbols: list[str]) -> None:
@@ -223,9 +226,18 @@ async def _run_kline_ws(symbols: list[str]) -> None:
 
 
 # ── Scanner evaluation loop ───────────────────────────────────────────────────
+# Set when a 15m candle closes — scanner only runs on confirmed closes
+_last_15m_close: dict[str, int] = {}  # symbol -> last closed candle time
+
+_last_evaluated_15m: dict[str, int] = {}  # symbol -> last 15m candle time we evaluated on
+
 
 async def _evaluate_symbols() -> None:
-    """Run signal check on all watchlist symbols."""
+    """
+    Run signal check on all watchlist symbols.
+    Only evaluates a symbol when a new 15m candle has CLOSED since the last
+    evaluation — prevents intra-bar entries on forming candles.
+    """
     for symbol in list(active_watchlist):
         try:
             k15 = _kline_buffers[symbol]["15m"]
@@ -233,16 +245,27 @@ async def _evaluate_symbols() -> None:
             if len(k15) < 210 or len(k5) < 50:
                 continue
 
+            # Only run on confirmed closed 15m candles
+            last_close_time = _last_15m_close.get(symbol, 0)
+            if last_close_time == 0:
+                continue  # no closed 15m candle seen yet
+            if last_close_time <= _last_evaluated_15m.get(symbol, 0):
+                continue  # already evaluated this candle close
+
             # Cooldown check
             now = time.time()
             if now - _last_signal_ts.get(symbol, 0) < _SIGNAL_COOLDOWN_S:
+                _last_evaluated_15m[symbol] = last_close_time  # mark as evaluated even if cooled down
                 continue
 
             # Run CPU-heavy pandas computation in a thread so the event
             # loop stays free for HTTP/WebSocket serving
+            # Pass copies excluding the still-forming last candle to be safe
             sig = await asyncio.to_thread(
-                signal_engine.check_pullback, symbol, k15[:], k5[:]
+                signal_engine.check_pullback, symbol, k15[:-1], k5[:-1]
             )
+            # Mark this 15m close as evaluated regardless of signal outcome
+            _last_evaluated_15m[symbol] = last_close_time
             if sig is None:
                 continue
 
