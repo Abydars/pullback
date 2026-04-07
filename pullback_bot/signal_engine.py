@@ -284,10 +284,19 @@ def check_breakout(
     candle-strength confirmation.
 
     Scoring (max 100):
-      +40  price breaks out of 20-candle consolidation range
+      +50  price breaks out of 20-candle consolidation range  (was 40)
       +25  volume surge (last candle > 1.5 × 20-bar average)
       +20  strong candle body (close within top/bottom 40 % of range)
-      +15  EMA200 alignment (above for LONG, below for SHORT)
+      +5   EMA200 alignment (above for LONG, below for SHORT)  (was 15)
+
+    Rationale for rebalancing: with the base at 40 every signal required two
+    secondary conditions to reach the 70 threshold (40+25+20=85, 40+25+15=80,
+    40+20+15=75 — none of the single-condition paths reached 70).  Raising the
+    base to 50 means either volume (75) or a strong candle close (70) alone is
+    sufficient, matching the pullback strategy where one secondary condition is
+    enough.  EMA200 drops to +5 because trend alignment is already implicit in
+    the breakout direction; it remains a useful tiebreaker between otherwise
+    equal signals.
 
     SL placement:
       LONG  : max(resistance - 0.3 × ATR,  entry - 1.5 × ATR)
@@ -325,11 +334,11 @@ def check_breakout(
     # ── Determine breakout direction ──────────────────────────────────────────
     if last_close > resistance:
         direction = "LONG"
-        score += 40
+        score += 50
         reasons.append("breakout")
     elif last_close < support:
         direction = "SHORT"
-        score += 40
+        score += 50
         reasons.append("breakdown")
     else:
         return None   # no breakout on this candle
@@ -356,10 +365,10 @@ def check_breakout(
     # ── EMA200 alignment ──────────────────────────────────────────────────────
     if ema200_val is not None:
         if direction == "LONG" and last_close > ema200_val:
-            score += 15
+            score += 5
             reasons.append("above_ema200")
         elif direction == "SHORT" and last_close < ema200_val:
-            score += 15
+            score += 5
             reasons.append("below_ema200")
 
     # ── Score gate ────────────────────────────────────────────────────────────
