@@ -147,6 +147,17 @@ def check_pullback(
         # Ranging — skip
         return None
 
+    # EMA200 slope — proxy for higher-timeframe alignment.
+    # If EMA200 has been declining over the last 20 bars (≈5 hours on 15m),
+    # the medium-term structure opposes a LONG; rising EMA200 opposes a SHORT.
+    # A 15m EMA cross during a counter-trend bounce would otherwise pass the
+    # trend check above while the broader structure remains against the trade.
+    ema200_slope_up = ema200.iloc[-1] > ema200.iloc[-21]
+    if direction == "LONG" and not ema200_slope_up:
+        return None
+    if direction == "SHORT" and ema200_slope_up:
+        return None
+
     # ── 2. Pullback zone (15m) ────────────────────────────────────────────────
     atr_series = _atr(df15, 14)
     atr15      = atr_series.iloc[-1]
@@ -157,8 +168,11 @@ def check_pullback(
 
     in_ema50_zone = ema50_zone_pct <= 0.005  # within 0.5% of EMA50
 
-    # Swing high/low zones (last 20 candles)
-    recent = df15.tail(21)
+    # Swing high/low zones — exclude the current candle so the zone is always
+    # a *prior* level.  Including it would make in_swing_zone trivially true
+    # whenever price makes a new 21-bar low (LONG) or high (SHORT), which is
+    # a breakdown/breakout, not a pullback to support/resistance.
+    recent = df15.iloc[-22:-1]
     if direction == "LONG":
         swing_level = recent["low"].min()
         in_swing_zone = abs(last_close - swing_level) <= atr15 * 1.5
