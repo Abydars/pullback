@@ -1184,6 +1184,21 @@ async function updatePosChart(positions) {
   pnlSeries.setData(_pnlHistory);
   posChart.timeScale().scrollToRealTime();
 
+  // ── Fit vertical range to include all reference lines ────────────────────
+  // LightweightCharts autoScale only tracks series data, not price lines.
+  // Manually widen the visible range so target/floor/zero are always in view.
+  const refPrices = [0];
+  if (minTpUsdt !== 0) refPrices.push(minTpUsdt);
+  if (_portfolioTrailArmed && _portfolioTrailPeak > minTpUsdt) {
+    refPrices.push(minTpUsdt + (_portfolioTrailPeak - minTpUsdt) * trailFactor);
+  }
+  const histVals = _pnlHistory.map(p => p.value);
+  const allVals  = histVals.concat(refPrices);
+  const lo = Math.min(...allVals);
+  const hi = Math.max(...allVals);
+  const pad = Math.max((hi - lo) * 0.12, 0.5);
+  posChart.priceScale('left').setVisibleRange({ from: lo - pad, to: hi + pad });
+
   // Update top-left overlay
   _updatePnlOverlay(totalPnl);
 }
