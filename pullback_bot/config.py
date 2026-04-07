@@ -72,6 +72,11 @@ CAPITAL: float = _float("CAPITAL", 0.0)
 # Dollar risk = CAPITAL × RISK_PCT / 100.
 RISK_PCT: float = _float("RISK_PCT", 2.0)
 MAX_OPEN_TRADES: int = _int("MAX_OPEN_TRADES", 5)
+# MAX_SAME_DIRECTION: maximum number of trades allowed in the same direction
+# (LONG or SHORT) within a single signal batch (one 15m candle close).
+# Prevents N correlated bets when a broad market move fires N same-direction
+# signals simultaneously.  Default 3; must be ≤ MAX_OPEN_TRADES.
+MAX_SAME_DIRECTION: int = _int("MAX_SAME_DIRECTION", 3)
 # MAX_LEVERAGE: absolute ceiling on leverage regardless of ATR tier.
 MAX_LEVERAGE: int = _int("MAX_LEVERAGE", 20)
 # USE_TRAILING: True = trail arm activates a trailing stop.
@@ -130,6 +135,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "CAPITAL":                   float,
     "RISK_PCT":                  float,
     "MAX_OPEN_TRADES":           int,
+    "MAX_SAME_DIRECTION":        int,
     "MAX_LEVERAGE":              int,
     "USE_TRAILING":              bool,
     "USE_STOP_LOSS":             bool,
@@ -180,6 +186,8 @@ def update(key: str, raw_value: str) -> None:
         raise ValueError("MAX_LEVERAGE must be 1–125")
     if key == "RISK_PCT" and not (0.1 <= value <= 100.0):
         raise ValueError("RISK_PCT must be 0.1–100")
+    if key == "MAX_SAME_DIRECTION" and not (1 <= value <= max(10, globals().get("MAX_OPEN_TRADES", 10))):
+        raise ValueError("MAX_SAME_DIRECTION must be between 1 and MAX_OPEN_TRADES")
     if key == "PORTFOLIO_TP_MODE" and value not in ("trailing", "normal"):
         raise ValueError("PORTFOLIO_TP_MODE must be 'trailing' or 'normal'")
     if key == "PORTFOLIO_TRAIL_FACTOR" and not (0.0 <= value <= 1.0):

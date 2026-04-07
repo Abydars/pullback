@@ -307,9 +307,13 @@ async def _flush_pending_signals() -> None:
     first (asyncio.gather starts tasks in creation order, so the highest-
     scored signal's handle_signal runs first at each yield point).
 
-    Each signal runs independently — a slow live order for symbol A does
-    NOT delay symbol B's I/O.  The _opening set in order_manager prevents
-    exceeding MAX_OPEN_TRADES and duplicate entries without a global lock.
+    A direction-cap filter (MAX_SAME_DIRECTION) is applied before dispatch:
+    signals are processed in score order; once a direction has hit the cap,
+    additional signals in that direction are logged with acted_on=False and
+    skipped.  This prevents N correlated bets on a single broad market move.
+
+    Each admitted signal runs independently — the _opening set in
+    order_manager prevents exceeding MAX_OPEN_TRADES without a global lock.
     """
     await asyncio.sleep(_BATCH_WINDOW_S)
 
@@ -320,11 +324,47 @@ async def _flush_pending_signals() -> None:
     batch = sorted(_pending_signals, key=lambda s: s["score"], reverse=True)
     _pending_signals.clear()
 
+    # ── Direction-cap filter ───────────────────────────────────────────────────
+    cap = config.MAX_SAME_DIRECTION
+    long_count = short_count = 0
+    admitted: list[dict] = []
+    capped:   list[dict] = []
+
+    for sig in batch:
+        if sig["direction"] == "LONG":
+            if long_count < cap:
+                long_count += 1
+                admitted.append(sig)
+            else:
+                capped.append(sig)
+        else:  # SHORT
+            if short_count < cap:
+                short_count += 1
+                admitted.append(sig)
+            else:
+                capped.append(sig)
+
     logger.info(
-        "Signal batch: %d signal(s) — executing concurrently in score order: %s",
-        len(batch),
-        ", ".join(f"{s['symbol']}({s['score']})" for s in batch),
+        "Signal batch: %d signal(s) total, %d admitted, %d capped by MAX_SAME_DIRECTION=%d "
+        "— admitted: %s",
+        len(batch), len(admitted), len(capped), cap,
+        ", ".join(f"{s['symbol']}({s['direction'][0]},{s['score']})" for s in admitted),
     )
+    if capped:
+        logger.info(
+            "Direction-capped (logged, not traded): %s",
+            ", ".join(f"{s['symbol']}({s['direction'][0]},{s['score']})" for s in capped),
+        )
+
+    # Log capped signals immediately with acted_on=False so they appear in history
+    for sig in capped:
+        await db.insert_scanner_log(
+            symbol=sig["symbol"],
+            score=sig["score"],
+            direction=sig["direction"],
+            timestamp=sig["timestamp"],
+            acted_on=False,
+        )
 
     async def _act(sig: dict) -> None:
         acted = await _order_manager.handle_signal(sig) if _order_manager else False
@@ -336,7 +376,8 @@ async def _flush_pending_signals() -> None:
             acted_on=acted,
         )
 
-    await asyncio.gather(*[asyncio.create_task(_act(sig)) for sig in batch])
+    if admitted:
+        await asyncio.gather(*[asyncio.create_task(_act(sig)) for sig in admitted])
 
 
 # ── Mark-price WebSocket (for paper PnL) ─────────────────────────────────────

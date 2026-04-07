@@ -2189,6 +2189,8 @@ const CFG_FIELDS = [
         hint: 'Percentage of Capital to risk per trade (default 2%). Dollar risk = Capital × Risk%. E.g. Capital=250, Risk=2% → $5 at risk per trade.' },
       { key: 'MAX_OPEN_TRADES', label: 'Max Open Positions',  type: 'number',
         hint: 'Hard cap on concurrent open trades' },
+      { key: 'MAX_SAME_DIRECTION', label: 'Max Same-Direction Trades', type: 'number',
+        hint: 'Max trades allowed in the same direction per candle batch. Prevents 5× correlated bets on a single market move. Must be ≤ MAX_OPEN_TRADES.' },
       { key: 'MAX_LEVERAGE', label: 'Max Leverage (ceiling)',  type: 'number',
         hint: 'Hard ceiling on leverage. ATR-based tiers: ATR>0.8% → 3x, ATR 0.4–0.8% → 7x, ATR<0.4% → this max.' },
       { key: 'USE_TRAILING', label: 'Trailing Stop', type: 'select', options: ['true','false'],
