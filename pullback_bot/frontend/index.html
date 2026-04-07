@@ -997,11 +997,13 @@ function drawTradeLines(symbol) {
       lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Trail Arm',
     });
   } else {
-    // Pre-trail: show original SL + trail arm target
-    slLine  = candleSeries.createPriceLine({
-      price: trade.sl_price, color: '#ef4444',
-      lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL',
-    });
+    // Pre-trail: show SL (if enabled) + trail arm target
+    if (trade.use_stop_loss !== false) {
+      slLine = candleSeries.createPriceLine({
+        price: trade.sl_price, color: '#ef4444',
+        lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL',
+      });
+    }
     tp1Line = candleSeries.createPriceLine({
       price: trailArm, color: '#f59e0b',
       lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Trail Arm',
@@ -1527,8 +1529,11 @@ function renderPositions() {
         ${!trailActive ? `
         <div class="pos-kv">
           <span class="k">SL</span>
-          <span class="v" style="color:var(--red)">${fmtPrice(t.sl_price)}</span>
-          ${slPct !== null ? fmtPct(slPct, 'var(--red)') : ''}
+          ${t.use_stop_loss === false
+            ? `<span class="v" style="color:var(--muted);font-style:italic">Disabled</span>`
+            : `<span class="v" style="color:var(--red)">${fmtPrice(t.sl_price)}</span>
+               ${slPct !== null ? fmtPct(slPct, 'var(--red)') : ''}`
+          }
         </div>` : ''}
         <div class="pos-kv">
           <span class="k">${t.use_trailing === false ? 'TP Target' : 'Trail Arm'}</span>

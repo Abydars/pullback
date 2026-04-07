@@ -418,6 +418,7 @@ async def _paper_tick() -> None:
                     enriched["trail_stop"]    = round(trail_stop, 8) if trail_stop is not None else None
                     enriched["trail_extreme"] = round(_trail_extreme[tid], 8) if tid in _trail_extreme else None
                     enriched["use_trailing"]  = config.USE_TRAILING
+                    enriched["use_stop_loss"] = config.USE_STOP_LOSS
                     positions_payload.append(enriched)
 
             # ── Live trades: compute unrealized PnL for display ───────────────
