@@ -827,9 +827,10 @@ let _loadChartId = 0;  // increments on each loadChart() call to cancel stale fe
 // ── Position Chart globals ────────────────────────────────────────────────────
 let posChart = null;
 let pnlSeries = null;
-let posChartPriceAnchor = null;   // invisible right-scale series to anchor price lines
-let pcEntryLine = null, pcSlLine = null, pcArmLine = null, pcTrailLine = null;
+let pcTargetLine = null, pcZeroLine = null, pcFloorLine = null;
 let _pnlHistory = [];             // [{time, value}] cumulative PnL points
+let _portfolioTrailArmed = false;
+let _portfolioTrailPeak  = 0;
 
 function initMainChart() {
   const container = document.getElementById('chart-container');
@@ -938,15 +939,6 @@ function initPosChart() {
     handleScroll: true,
     handleScale: true,
   });
-
-  // Invisible right-scale series — hosts price lines for entry/SL/arm/trail
-  posChartPriceAnchor = posChart.addLineSeries({
-    priceScaleId: 'right',
-    visible: false,
-    lastValueVisible: false,
-    priceLineVisible: false,
-  });
-  posChart.priceScale('right').applyOptions({ visible: false });
 
   // PnL line series on left scale
   pnlSeries = posChart.addLineSeries({
@@ -1103,10 +1095,10 @@ function drawTradeLines(symbol) {
 // ── Position Chart helpers ────────────────────────────────────────────────────
 
 function clearPosChartLines() {
-  [pcEntryLine, pcSlLine, pcArmLine, pcTrailLine].forEach(l => {
-    if (l) try { posChartPriceAnchor.removePriceLine(l); } catch(e) {}
+  [pcTargetLine, pcZeroLine, pcFloorLine].forEach(l => {
+    if (l) try { pnlSeries.removePriceLine(l); } catch(e) {}
   });
-  pcEntryLine = pcSlLine = pcArmLine = pcTrailLine = null;
+  pcTargetLine = pcZeroLine = pcFloorLine = null;
 }
 
 function _updatePnlOverlay(pnl) {
@@ -1120,105 +1112,70 @@ function _updatePnlOverlay(pnl) {
   overlay.style.display = 'block';
 }
 
-function updatePosChart(positions) {
+async function updatePosChart(positions) {
   if (!posChart) return;
   const empty = document.getElementById('pos-chart-empty');
 
   if (!positions || positions.length === 0) {
     clearPosChartLines();
     _pnlHistory = [];
+    _portfolioTrailArmed = false;
+    _portfolioTrailPeak  = 0;
     if (pnlSeries) pnlSeries.setData([]);
-    if (posChartPriceAnchor) posChartPriceAnchor.setData([]);
     if (empty) empty.style.display = 'flex';
     _updatePnlOverlay(null);
     return;
   }
   if (empty) empty.style.display = 'none';
 
-  // ── Compute aggregates across all open positions ─────────────────────────
-  let totalPnl = 0, totalQty = 0;
-  let sumEntryWeighted = 0, sumSlWeighted = 0, sumArmWeighted = 0;
-  let hasTrailActive = false;
-  let sumTrailStop = 0, trailCount = 0;
+  // ── Compute total unrealized PnL ─────────────────────────────────────────
+  let totalPnl = 0;
+  positions.forEach(t => { totalPnl += (t.unrealized_pnl ?? 0); });
 
-  positions.forEach(t => {
-    const qty = t.qty || 1;
-    totalQty += qty;
-    totalPnl += (t.unrealized_pnl ?? 0);
-    sumEntryWeighted += (t.entry_price ?? 0) * qty;
-    sumSlWeighted    += (t.sl_price   ?? 0) * qty;
-    const arm = t.trail_arm ?? t.tp1_price ?? 0;
-    sumArmWeighted   += arm * qty;
-    if (t.trail_active && t.trail_stop != null) {
-      hasTrailActive = true;
-      sumTrailStop += t.trail_stop;
-      trailCount++;
-    }
-  });
+  // ── Fetch live config values for reference lines ──────────────────────────
+  let minTpUsdt = 0, trailFactor = 0.5;
+  try {
+    const cfg = await fetch('/api/config').then(r => r.json());
+    minTpUsdt   = parseFloat(cfg.PORTFOLIO_MIN_TP_USDT)  || 0;
+    trailFactor = parseFloat(cfg.PORTFOLIO_TRAIL_FACTOR) || 0.5;
+  } catch(e) {}
 
-  const avgEntry = totalQty > 0 ? sumEntryWeighted / totalQty : 0;
-  const avgSl    = totalQty > 0 ? sumSlWeighted    / totalQty : 0;
-  const avgArm   = totalQty > 0 ? sumArmWeighted   / totalQty : 0;
-  const avgTrail = trailCount  > 0 ? sumTrailStop  / trailCount : 0;
-
-  // ── Update price anchor + price lines ────────────────────────────────────
-  const now = Math.floor(Date.now() / 1000);
-  // Feed two points so the series is visible
-  if (avgEntry > 0) {
-    posChartPriceAnchor.setData([
-      { time: now - 60, value: avgEntry },
-      { time: now,      value: avgEntry },
-    ]);
-  }
-
+  // ── Rebuild reference lines ───────────────────────────────────────────────
   clearPosChartLines();
 
-  if (avgEntry > 0) {
-    pcEntryLine = posChartPriceAnchor.createPriceLine({
-      price: avgEntry, color: 'rgba(255,255,255,0.6)',
-      lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Avg Entry',
+  // Zero / break-even line
+  pcZeroLine = pnlSeries.createPriceLine({
+    price: 0, color: 'rgba(150,150,150,0.7)',
+    lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Break Even',
+  });
+
+  // Target line
+  if (minTpUsdt !== 0) {
+    pcTargetLine = pnlSeries.createPriceLine({
+      price: minTpUsdt, color: 'rgba(255,255,255,0.75)',
+      lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+      title: `Target ${fmtUsdt(minTpUsdt)}`,
     });
   }
 
-  const firstPos = positions[0];
-  const useStopLoss   = firstPos.use_stop_loss   !== false;
-  const useTakeProfit = firstPos.use_take_profit  !== false;
-  const useTrailing   = firstPos.use_trailing     !== false;
-
-  if (useStopLoss && avgSl > 0) {
-    if (hasTrailActive) {
-      // Trail is active: show trail stop in amber
-      if (avgTrail > 0) {
-        pcSlLine = posChartPriceAnchor.createPriceLine({
-          price: avgTrail, color: '#f59e0b',
-          lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'Trail Stop',
-        });
-      }
-    } else {
-      pcSlLine = posChartPriceAnchor.createPriceLine({
-        price: avgSl, color: '#ef4444',
-        lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Avg SL',
-      });
-    }
-  }
-
-  if (useTakeProfit && avgArm > 0 && !hasTrailActive) {
-    pcArmLine = posChartPriceAnchor.createPriceLine({
-      price: avgArm, color: '#f59e0b',
+  // Floor line — only when portfolio trail is armed and peak has moved above target
+  if (_portfolioTrailArmed && _portfolioTrailPeak > minTpUsdt) {
+    const floor = minTpUsdt + (_portfolioTrailPeak - minTpUsdt) * trailFactor;
+    pcFloorLine = pnlSeries.createPriceLine({
+      price: floor, color: '#f59e0b',
       lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
-      title: useTrailing ? 'Trail Arm' : 'TP',
+      title: `Floor ${fmtUsdt(floor)}`,
     });
   }
 
   // ── Append PnL point ─────────────────────────────────────────────────────
-  // Deduplicate: only append if time differs from last point
+  const now = Math.floor(Date.now() / 1000);
   const lastPt = _pnlHistory[_pnlHistory.length - 1];
   if (!lastPt || lastPt.time < now) {
     _pnlHistory.push({ time: now, value: parseFloat(totalPnl.toFixed(4)) });
     // Keep last 1440 points (~24 h at 1-min resolution)
     if (_pnlHistory.length > 1440) _pnlHistory.shift();
   } else {
-    // Same second — update in-place
     lastPt.value = parseFloat(totalPnl.toFixed(4));
   }
 
@@ -1489,6 +1446,13 @@ function onPositionUpdate(positions) {
   // Update unrealized PnL total in stats bar
   updateUnrealizedStat();
 
+  // Track portfolio trail peak for floor line
+  if (_portfolioTrailArmed) {
+    let totalPnl = 0;
+    positions.forEach(t => { totalPnl += (t.unrealized_pnl ?? 0); });
+    if (totalPnl > _portfolioTrailPeak) _portfolioTrailPeak = totalPnl;
+  }
+
   // Update position chart
   updatePosChart(positions);
 }
@@ -1526,6 +1490,8 @@ function onTradeClosed(trade) {
 }
 
 function onPortfolioStop(data) {
+  _portfolioTrailArmed = false;
+  _portfolioTrailPeak  = 0;
   const reason = data.reason || '';
   const pnlStr = fmtUsdt(data.total_pnl ?? 0);
   let cls, icon, title;
@@ -1540,6 +1506,8 @@ function onPortfolioStop(data) {
 }
 
 function onPortfolioTrailArmed(data) {
+  _portfolioTrailArmed = true;
+  _portfolioTrailPeak  = data.total_pnl ?? 0;
   const pnlStr  = fmtUsdt(data.total_pnl ?? 0);
   const tgtStr  = fmtUsdt(data.target ?? 0);
   toast('t-amber', '🎯', 'Portfolio trail armed',
