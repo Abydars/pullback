@@ -453,49 +453,55 @@ async def _paper_tick() -> None:
             for stale_tid in set(paper_unrealized) - open_ids:
                 paper_unrealized.pop(stale_tid, None)
             total_unrealized = sum(paper_unrealized.values())
-            stop_loss_limit   = config.PORTFOLIO_STOP_LOSS_USDT
-            take_profit_limit = config.PORTFOLIO_TAKE_PROFIT_USDT
+            stop_loss_limit = config.PORTFOLIO_STOP_LOSS_USDT
+            min_tp_usdt     = config.PORTFOLIO_MIN_TP_USDT
 
             triggered_reason: Optional[str] = None
 
-            # Phase 1 — Portfolio SL (unchanged)
+            # Portfolio SL — always checked regardless of TP mode
             if stop_loss_limit != 0.0 and total_unrealized <= stop_loss_limit:
                 triggered_reason = "PORTFOLIO_SL"
 
-            # Phase 2/3 — Portfolio trailing floor
-            elif take_profit_limit != 0.0:
-                global _portfolio_trail_armed, _peak_portfolio_pnl
+            elif min_tp_usdt != 0.0:
+                if config.PORTFOLIO_TP_MODE == "normal":
+                    # Normal mode — close immediately when PnL reaches the threshold
+                    if total_unrealized >= min_tp_usdt:
+                        triggered_reason = "PORTFOLIO_TP"
 
-                if not _portfolio_trail_armed:
-                    # Phase 2a — arm: PnL just crossed the target
-                    if total_unrealized >= take_profit_limit:
-                        _portfolio_trail_armed = True
-                        _peak_portfolio_pnl    = total_unrealized
-                        logger.info(
-                            "Portfolio trail armed: pnl=%.4f target=%.4f",
-                            total_unrealized, take_profit_limit,
-                        )
-                        await wsb.broadcaster.broadcast("portfolio_trail_armed", {
-                            "total_pnl": round(total_unrealized, 4),
-                            "target":    take_profit_limit,
-                        })
-                else:
-                    # Phase 2b — update peak and check floor
-                    _peak_portfolio_pnl = max(_peak_portfolio_pnl, total_unrealized)
-                    trail_factor = config.PORTFOLIO_TRAIL_FACTOR
-                    floor = take_profit_limit + (_peak_portfolio_pnl - take_profit_limit) * trail_factor
+                else:  # "trailing"
+                    # Trailing floor — 3-phase arm / trail / disarm
+                    global _portfolio_trail_armed, _peak_portfolio_pnl
 
-                    if total_unrealized <= floor:
-                        triggered_reason = "PORT_TP_TRAIL"
-                    elif total_unrealized < 0:
-                        # Phase 3 — disarm: portfolio has gone negative → reset so
-                        # the trail can re-arm when PnL recovers back to target.
-                        _portfolio_trail_armed = False
-                        _peak_portfolio_pnl    = 0.0
-                        logger.info(
-                            "Portfolio trail disarmed (PnL went negative): pnl=%.4f",
-                            total_unrealized,
-                        )
+                    if not _portfolio_trail_armed:
+                        # Phase 2a — arm: PnL just crossed the target
+                        if total_unrealized >= min_tp_usdt:
+                            _portfolio_trail_armed = True
+                            _peak_portfolio_pnl    = total_unrealized
+                            logger.info(
+                                "Portfolio trail armed: pnl=%.4f target=%.4f",
+                                total_unrealized, min_tp_usdt,
+                            )
+                            await wsb.broadcaster.broadcast("portfolio_trail_armed", {
+                                "total_pnl": round(total_unrealized, 4),
+                                "target":    min_tp_usdt,
+                            })
+                    else:
+                        # Phase 2b — update peak and check floor
+                        _peak_portfolio_pnl = max(_peak_portfolio_pnl, total_unrealized)
+                        trail_factor = config.PORTFOLIO_TRAIL_FACTOR
+                        floor = min_tp_usdt + (_peak_portfolio_pnl - min_tp_usdt) * trail_factor
+
+                        if total_unrealized <= floor:
+                            triggered_reason = "PORT_TP_TRAIL"
+                        elif total_unrealized < 0:
+                            # Phase 3 — disarm: portfolio went negative → reset so
+                            # the trail can re-arm when PnL recovers to the target.
+                            _portfolio_trail_armed = False
+                            _peak_portfolio_pnl    = 0.0
+                            logger.info(
+                                "Portfolio trail disarmed (PnL went negative): pnl=%.4f",
+                                total_unrealized,
+                            )
 
             if triggered_reason and open_trades:
                 logger.warning(

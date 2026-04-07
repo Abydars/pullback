@@ -2160,9 +2160,18 @@ const CFG_FIELDS = [
   {
     section: 'Portfolio Stops',
     fields: [
-      { key: 'PORTFOLIO_STOP_LOSS_USDT',   label: 'Portfolio Stop-Loss (USDT)',    type: 'number', step: '1',    hint: 'Close ALL positions if total unrealized PnL ≤ this (e.g. -50). 0 = disabled.' },
-      { key: 'PORTFOLIO_TAKE_PROFIT_USDT', label: 'Portfolio Take-Profit (USDT)',  type: 'number', step: '1',    hint: 'Arm portfolio trailing floor when unrealized PnL reaches this (e.g. 100). 0 = disabled.' },
-      { key: 'PORTFOLIO_TRAIL_FACTOR',     label: 'Portfolio Trail Factor (0–1)',   type: 'number', step: '0.05', hint: 'Floor = target + (peak − target) × factor. 0 = lock at target; 0.5 = trail 50% of gains; 1 = trail from peak.' },
+      { key: 'PORTFOLIO_STOP_LOSS_USDT', label: 'Portfolio Stop-Loss (USDT)', type: 'number', step: '1',
+        hint: 'Close ALL positions if total unrealized PnL ≤ this (e.g. -50). 0 = disabled.' },
+      { key: 'PORTFOLIO_TP_MODE', label: 'Portfolio TP Mode', type: 'select',
+        options: [
+          { value: 'trailing', label: 'Trailing Floor' },
+          { value: 'normal',   label: 'Normal (close immediately)' },
+        ],
+        hint: 'Trailing Floor = arm a trailing stop at the min target and trail gains. Normal = close all positions instantly when the target is hit.' },
+      { key: 'PORTFOLIO_MIN_TP_USDT', label: 'Min Portfolio Take-Profit (USDT)', type: 'number', step: '1',
+        hint: 'Minimum PnL to protect. In trailing mode this is the floor; in normal mode closes immediately at this value. 0 = disabled.' },
+      { key: 'PORTFOLIO_TRAIL_FACTOR', label: 'Portfolio Trail Factor (0–1)', type: 'number', step: '0.05',
+        hint: 'Floor = target + (peak − target) × factor. 0 = lock at target; 0.5 = trail 50% of gains; 1 = trail from peak. (Trailing mode only.)' },
       { key: 'SYMBOL_COOLDOWN_MINUTES',    label: 'Symbol Re-entry Cooldown (min)', type: 'number', step: '5', hint: 'After any close (SL, trail, manual), block re-entry on that symbol for this many minutes. 0 = disabled.' },
     ],
   },
@@ -2212,9 +2221,11 @@ function renderConfigForm(values) {
       const restartNote = f.restart ? ' <span style="color:var(--amber)">(restart required)</span>' : '';
       let input;
       if (f.type === 'select') {
-        const opts = f.options.map(o =>
-          `<option value="${o}" ${String(o) === String(val) ? 'selected' : ''}>${o}</option>`
-        ).join('');
+        const opts = f.options.map(o => {
+          const optVal   = typeof o === 'object' ? o.value : o;
+          const optLabel = typeof o === 'object' ? o.label : o;
+          return `<option value="${optVal}" ${String(optVal) === String(val) ? 'selected' : ''}>${optLabel}</option>`;
+        }).join('');
         input = `<select class="cfg-select" data-key="${f.key}">${opts}</select>`;
       } else {
         input = `<input class="cfg-input" type="number" data-key="${f.key}"
