@@ -279,16 +279,16 @@ canvas.sparkline { display: block; border-radius: 2px; }
   pointer-events: none; z-index: 1;
 }
 #pos-pnl-overlay {
-  position: absolute; top: 10px; left: 58px; z-index: 10;
+  position: absolute; top: 12px; left: 62px; z-index: 10;
   pointer-events: none; line-height: 1;
 }
 #pos-pnl-overlay .pnl-val {
-  font-size: 26px; font-weight: 700; font-family: var(--font);
-  letter-spacing: -0.5px;
+  font-size: 34px; font-weight: 700; font-family: var(--font);
+  letter-spacing: -1px;
 }
 #pos-pnl-overlay .pnl-label {
-  font-size: 10px; font-weight: 500; color: var(--muted);
-  letter-spacing: .06em; margin-top: 2px;
+  font-size: 11px; font-weight: 500; color: var(--muted);
+  letter-spacing: .06em; margin-top: 4px;
 }
 
 /* History pane */
@@ -1115,7 +1115,7 @@ function _updatePnlOverlay(pnl) {
   if (!overlay || !valEl) return;
   if (pnl === null) { overlay.style.display = 'none'; return; }
   const isPos  = pnl >= 0;
-  valEl.textContent  = (isPos ? '+' : '') + fmtUsdt(pnl);
+  valEl.textContent  = fmtUsdt(pnl);
   valEl.style.color  = isPos ? 'var(--green)' : 'var(--red)';
   overlay.style.display = 'block';
 }
