@@ -325,8 +325,12 @@ async def _flush_pending_signals() -> None:
     _pending_signals.clear()
 
     # ── Direction-cap filter ───────────────────────────────────────────────────
+    # Seed counts from already-open trades so the cap accounts for existing
+    # directional exposure, not just signals in this batch.
     cap = config.MAX_SAME_DIRECTION
-    long_count = short_count = 0
+    open_trades = await db.get_open_trades()
+    long_count  = sum(1 for t in open_trades if t["direction"] == "LONG")
+    short_count = sum(1 for t in open_trades if t["direction"] == "SHORT")
     admitted: list[dict] = []
     capped:   list[dict] = []
 
