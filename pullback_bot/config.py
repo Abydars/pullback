@@ -1,9 +1,29 @@
 """
 config.py — Load all bot settings from .env with typed defaults.
+
+Boot flow
+---------
+1. Module import: values are read from .env (or OS env) into module globals.
+   This provides defaults for every key — including keys never changed via UI.
+2. Startup (main.py): after DB is ready, config.load_from_db() is called.
+   It overlays any keys stored in the `config` table, so UI changes made
+   before the last restart are restored exactly.
+
+Runtime changes (via /api/config → config.update())
+----------------------------------------------------
+  • Applied in-memory immediately (globals()[key] = value).
+  • Persisted to the DB config table via db.upsert_config().
+  • .env is NOT written at runtime — it is read-only after startup.
+
+This means .env is the source of defaults / secrets; the DB is the
+single source of truth for any key that has ever been changed via UI.
 """
+import logging
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Load .env from the directory containing this file
 _env_path = Path(__file__).parent / ".env"
@@ -158,9 +178,33 @@ def get_all() -> dict:
     return {k: globals()[k] for k in EDITABLE_KEYS}
 
 
-def update(key: str, raw_value: str) -> None:
+async def load_from_db() -> None:
     """
-    Validate, cast, and apply a config change in-memory + persist to .env.
+    Overlay DB-persisted config values on top of .env defaults.
+    Called once at startup, after db.init_db() and before scanner start.
+    Importing db inside the function body avoids the circular import
+    (db.py imports DB_PATH from this module at module level).
+    """
+    import db as _db
+    rows = await _db.get_all_config()
+    for key, raw_value in rows.items():
+        if key not in EDITABLE_KEYS:
+            continue
+        cast = EDITABLE_KEYS[key]
+        try:
+            if cast is bool:
+                value = raw_value.strip().lower() in ("1", "true", "yes")
+            else:
+                value = cast(raw_value)
+            globals()[key] = value
+            logger.debug("Config loaded from DB: %s=%s", key, value)
+        except (ValueError, TypeError) as exc:
+            logger.warning("Config load_from_db: failed to cast %s=%r: %s", key, raw_value, exc)
+
+
+async def update(key: str, raw_value: str) -> None:
+    """
+    Validate, cast, and apply a config change in-memory + persist to DB.
     Raises ValueError on bad key or type.
     """
     if key not in EDITABLE_KEYS:
@@ -196,25 +240,7 @@ def update(key: str, raw_value: str) -> None:
     # Apply in-memory
     globals()[key] = value
 
-    # Persist to .env
-    _write_env(key, str(value))
-
-
-def _write_env(key: str, value: str) -> None:
-    """Upsert KEY=value in the .env file."""
-    lines: list[str] = []
-    found = False
-    if _env_path.exists():
-        for line in _env_path.read_text().splitlines(keepends=True):
-            if line.strip().startswith(f"{key}="):
-                lines.append(f"{key}={value}\n")
-                found = True
-            else:
-                lines.append(line)
-    if not found:
-        # Append a trailing newline if needed before adding
-        if lines and not lines[-1].endswith("\n"):
-            lines.append("\n")
-        lines.append(f"{key}={value}\n")
-    _env_path.write_text("".join(lines))
+    # Persist to DB (survives restart; .env is read-only at runtime)
+    import db as _db
+    await _db.upsert_config(key, str(value))
 

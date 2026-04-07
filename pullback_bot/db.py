@@ -3,6 +3,7 @@ db.py — SQLite schema creation and async query helpers.
 """
 import aiosqlite
 import logging
+import time
 from typing import Optional
 from config import DB_PATH
 
@@ -46,6 +47,14 @@ CREATE TABLE IF NOT EXISTS scanner_log (
 );
 """
 
+CREATE_CONFIG_TABLE = """
+CREATE TABLE IF NOT EXISTS config (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+"""
+
 CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);",
     "CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);",
@@ -58,6 +67,7 @@ async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(CREATE_TRADES_TABLE)
         await db.execute(CREATE_SCANNER_LOG_TABLE)
+        await db.execute(CREATE_CONFIG_TABLE)
         for idx in CREATE_INDEXES:
             await db.execute(idx)
         # Migrations: add columns that didn't exist in earlier schema versions
@@ -294,3 +304,31 @@ async def get_recent_scanner_log(limit: int = 100) -> list[dict]:
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+
+# ── Config persistence helpers ─────────────────────────────────────────────────
+
+async def get_all_config() -> dict[str, str]:
+    """Return all rows from the config table as a {key: value} string dict."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT key, value FROM config")
+        rows = await cursor.fetchall()
+        return {row["key"]: row["value"] for row in rows}
+
+
+async def upsert_config(key: str, value: str) -> None:
+    """Persist a config key/value to the config table."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?,?,?)",
+            (key, value, int(time.time())),
+        )
+        await db.commit()
+
+
+async def delete_config(key: str) -> None:
+    """Remove a key from the config table (reverts to .env / compiled default)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM config WHERE key=?", (key,))
+        await db.commit()

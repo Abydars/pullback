@@ -62,6 +62,9 @@ async def on_startup() -> None:
     # 1. Database
     await db.init_db()
 
+    # 1b. Overlay DB-persisted config on top of .env defaults
+    await config.load_from_db()
+
     # 2. Exchange info (populates symbol filter cache for order sizing)
     try:
         await bc.get_exchange_info()
@@ -487,7 +490,7 @@ async def api_config_post(request: Request) -> JSONResponse:
 
     for key, raw in body.items():
         try:
-            config.update(key, str(raw))
+            await config.update(key, str(raw))
             applied.append(key)
             if key in config.RESTART_REQUIRED_KEYS:
                 needs_restart.append(key)
