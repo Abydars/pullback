@@ -263,22 +263,23 @@ class OrderManager:
                     closePosition="true",
                 )
 
-            # 4. Trail or fixed TP via WS API
-            if config.USE_TRAILING and atr > 0:
-                # Native trailing stop — activates at trail_arm, trails at 1×ATR distance
-                atr_pct = max(0.1, min(10.0, (atr / actual_entry) * 100))
-                await ws_order_api.place_order(
-                    symbol=symbol, side=sl_side, type="TRAILING_STOP_MARKET",
-                    activationPrice=bc.round_step(tp1, tick),
-                    callbackRate=round(atr_pct, 1),
-                    closePosition="true",
-                )
-            else:
-                await ws_order_api.place_order(
-                    symbol=symbol, side=sl_side, type="TAKE_PROFIT_MARKET",
-                    stopPrice=bc.round_step(tp1, tick),
-                    closePosition="true",
-                )
+            # 4. Trail or fixed TP via WS API (skipped when USE_TAKE_PROFIT=false)
+            if config.USE_TAKE_PROFIT:
+                if config.USE_TRAILING and atr > 0:
+                    # Native trailing stop — activates at trail_arm, trails at 1×ATR distance
+                    atr_pct = max(0.1, min(10.0, (atr / actual_entry) * 100))
+                    await ws_order_api.place_order(
+                        symbol=symbol, side=sl_side, type="TRAILING_STOP_MARKET",
+                        activationPrice=bc.round_step(tp1, tick),
+                        callbackRate=round(atr_pct, 1),
+                        closePosition="true",
+                    )
+                else:
+                    await ws_order_api.place_order(
+                        symbol=symbol, side=sl_side, type="TAKE_PROFIT_MARKET",
+                        stopPrice=bc.round_step(tp1, tick),
+                        closePosition="true",
+                    )
 
             # 5. Record in DB
             trade_id = await db.insert_trade(

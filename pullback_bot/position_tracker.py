@@ -326,9 +326,9 @@ async def _paper_tick() -> None:
                 # Fee-adjusted unrealized PnL (entry fee already paid + exit fee at mark)
                 paper_unrealized[tid] = _net_pnl(raw_pnl, entry, mark, qty)
 
-                # ── Activate trailing (only when USE_TRAILING is on) ──────────
+                # ── Activate trailing (only when USE_TAKE_PROFIT + USE_TRAILING) ─
                 trail_active = _trail_active.get(tid, False)
-                if not trail_active and config.USE_TRAILING:
+                if not trail_active and config.USE_TAKE_PROFIT and config.USE_TRAILING:
                     armed = (direction == "LONG" and mark >= trail_arm) or \
                             (direction == "SHORT" and mark <= trail_arm)
                     if armed:
@@ -368,8 +368,8 @@ async def _paper_tick() -> None:
                         elif direction == "SHORT" and mark >= sl:
                             hit_price = sl
                             close_reason = "SL"
-                    # Fixed-TP check (only when trailing is disabled)
-                    if not hit_price and not config.USE_TRAILING:
+                    # Fixed-TP check (only when TP enabled but trailing disabled)
+                    if not hit_price and config.USE_TAKE_PROFIT and not config.USE_TRAILING:
                         if direction == "LONG" and mark >= trail_arm:
                             hit_price = trail_arm
                             close_reason = "TP"
@@ -417,8 +417,9 @@ async def _paper_tick() -> None:
                     enriched["trail_active"]  = trail_active
                     enriched["trail_stop"]    = round(trail_stop, 8) if trail_stop is not None else None
                     enriched["trail_extreme"] = round(_trail_extreme[tid], 8) if tid in _trail_extreme else None
-                    enriched["use_trailing"]  = config.USE_TRAILING
-                    enriched["use_stop_loss"] = config.USE_STOP_LOSS
+                    enriched["use_trailing"]   = config.USE_TRAILING
+                    enriched["use_stop_loss"]  = config.USE_STOP_LOSS
+                    enriched["use_take_profit"] = config.USE_TAKE_PROFIT
                     positions_payload.append(enriched)
 
             # ── Live trades: compute unrealized PnL for display ───────────────

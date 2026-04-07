@@ -80,6 +80,9 @@ USE_TRAILING: bool = _bool("USE_TRAILING", True)
 # USE_STOP_LOSS: True = place a hard SL order when entering a trade.
 # False = no SL order is placed (use only if you manage risk another way).
 USE_STOP_LOSS: bool = _bool("USE_STOP_LOSS", True)
+# USE_TAKE_PROFIT: True = place a TP/trailing-stop order when entering a trade.
+# False = no TP or trail order is placed; exit manually or via portfolio stop.
+USE_TAKE_PROFIT: bool = _bool("USE_TAKE_PROFIT", True)
 
 # ── Portfolio-level stops ─────────────────────────────────────────────────────
 # If total unrealized PnL across all open positions reaches either threshold,
@@ -113,6 +116,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "MAX_LEVERAGE":              int,
     "USE_TRAILING":              bool,
     "USE_STOP_LOSS":             bool,
+    "USE_TAKE_PROFIT":           bool,
     "PORTFOLIO_STOP_LOSS_USDT":  float,
     "PORTFOLIO_TAKE_PROFIT_USDT":float,
     "LOG_LEVEL":                 str,

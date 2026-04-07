@@ -997,17 +997,19 @@ function drawTradeLines(symbol) {
       lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Trail Arm',
     });
   } else {
-    // Pre-trail: show SL (if enabled) + trail arm target
+    // Pre-trail: show SL (if enabled) and TP/trail arm (if enabled)
     if (trade.use_stop_loss !== false) {
       slLine = candleSeries.createPriceLine({
         price: trade.sl_price, color: '#ef4444',
         lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL',
       });
     }
-    tp1Line = candleSeries.createPriceLine({
-      price: trailArm, color: '#f59e0b',
-      lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Trail Arm',
-    });
+    if (trade.use_take_profit !== false) {
+      tp1Line = candleSeries.createPriceLine({
+        price: trailArm, color: '#f59e0b',
+        lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Trail Arm',
+      });
+    }
   }
 }
 
@@ -1537,8 +1539,11 @@ function renderPositions() {
         </div>` : ''}
         <div class="pos-kv">
           <span class="k">${t.use_trailing === false ? 'TP Target' : 'Trail Arm'}</span>
-          <span class="v" style="color:${t.use_trailing === false ? 'var(--green)' : 'var(--amber)'}">${fmtPrice(trailArm)}</span>
-          ${armPct !== null ? fmtPct(armPct, t.use_trailing === false ? 'var(--green)' : 'var(--amber)') : ''}
+          ${t.use_take_profit === false
+            ? `<span class="v" style="color:var(--muted);font-style:italic">Disabled</span>`
+            : `<span class="v" style="color:${t.use_trailing === false ? 'var(--green)' : 'var(--amber)'}">${fmtPrice(trailArm)}</span>
+               ${armPct !== null ? fmtPct(armPct, t.use_trailing === false ? 'var(--green)' : 'var(--amber)') : ''}`
+          }
         </div>
         ${trailActive && trailExtreme !== null ? `
         <div class="pos-kv">
@@ -1943,6 +1948,8 @@ const CFG_FIELDS = [
         hint: 'true = trail arm activates a trailing stop that follows the peak (trail distance = 1×ATR). false = arm price is a fixed TP.' },
       { key: 'USE_STOP_LOSS', label: 'Stop Loss', type: 'select', options: ['true','false'],
         hint: 'true = place a hard SL order at entry ± 1.5×ATR. false = no SL order placed (manage risk manually).' },
+      { key: 'USE_TAKE_PROFIT', label: 'Take Profit / Trail', type: 'select', options: ['true','false'],
+        hint: 'true = place a TP or trailing-stop order on entry. false = no TP/trail order placed; exit manually or via portfolio stop.' },
     ],
   },
   {
