@@ -1318,6 +1318,15 @@ function updateSparkline(symbol, closes) {
 let ws = null;
 let wsReconnectDelay = 1000;
 let wsReconnectTimer = null;
+let _wsLastMsg = Date.now();   // updated on every incoming message
+
+// Watchdog: if no message arrives in 60 s, force-close so onclose → reconnect.
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN && Date.now() - _wsLastMsg > 60_000) {
+    console.warn('WS watchdog: no message in 60 s — forcing reconnect');
+    ws.close();
+  }
+}, 15_000);
 
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -1326,11 +1335,14 @@ function connectWS() {
   ws.onopen = () => {
     document.getElementById('conn-dot').classList.add('ok');
     wsReconnectDelay = 1000;
+    _wsLastMsg = Date.now();   // fresh connection — reset so watchdog doesn't fire immediately
     console.log('WS connected');
   };
 
   ws.onmessage = (evt) => {
+    _wsLastMsg = Date.now();
     const msg = JSON.parse(evt.data);
+    if (msg.type === 'ping') return;   // heartbeat — consume silently
     handleMessage(msg.type, msg.data);
   };
 

@@ -6,8 +6,11 @@ module.exports = {
       interpreter: "./venv/bin/python",
       watch: false,
       autorestart: true,
-      max_restarts: 10,
-      restart_delay: 5000,
+      max_restarts: 20,
+      min_uptime: "10s",
+      restart_delay: 3000,
+      exp_backoff_restart_delay: 100,
+      max_memory_restart: "400M",
       env: {
         PYTHONUNBUFFERED: "1"
       },

@@ -80,8 +80,9 @@ async def on_startup() -> None:
     # 5. Position tracker
     await position_tracker.start()
 
-    # 6. Periodic system_status broadcast
+    # 6. Periodic system_status broadcast + WS heartbeat
     asyncio.create_task(_status_broadcast_loop(), name="status_broadcast")
+    asyncio.create_task(wsb.broadcaster.start_heartbeat(), name="ws_heartbeat")
 
     logger.info("=== Bot ready on port %d ===", config.PORT)
 

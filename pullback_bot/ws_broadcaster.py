@@ -105,6 +105,15 @@ class WSBroadcaster:
     def get_chart_sub(self, ws: WebSocket) -> Optional[tuple[str, str]]:
         return self._chart_subs.get(ws)
 
+    async def start_heartbeat(self) -> None:
+        """Broadcast a ping to all clients every 30 s. Never raises."""
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await self.broadcast("ping", {})
+            except Exception:
+                pass
+
 
 # Global singleton — imported everywhere
 broadcaster = WSBroadcaster()
