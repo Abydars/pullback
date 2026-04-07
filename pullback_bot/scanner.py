@@ -44,6 +44,13 @@ _kline_buffers: dict[str, dict[str, list[dict]]] = defaultdict(
 _last_signal_ts: dict[str, float] = {}
 _SIGNAL_COOLDOWN_S = 300  # 5 min — one signal per 15m candle at most
 
+# Signal batch queue — signals from concurrent 15m closes are held here
+# for a short window, then flushed in score order so the best signal gets
+# the first trade slot rather than whichever symbol's WS message arrived first.
+_pending_signals: list[dict] = []
+_flush_task: Optional[asyncio.Task] = None
+_BATCH_WINDOW_S = 3.0  # seconds to wait for stragglers after first signal
+
 # reference to order_manager (set by main.py to avoid circular import)
 _order_manager = None
 
@@ -267,26 +274,63 @@ async def _evaluate_symbol(symbol: str) -> None:
         if not candidates:
             return
 
-        # If both fired, take the higher-scoring signal
+        # If both fired, take the higher-scoring signal for this symbol
         sig = max(candidates, key=lambda x: x["score"])
 
         _last_signal_ts[symbol] = now
 
+        # Queue for batch ranking — flush fires after _BATCH_WINDOW_S so
+        # signals from all symbols that closed on the same candle are sorted
+        # by score before any trade slot is allocated.
+        _pending_signals.append(sig)
+        await wsb.broadcaster.broadcast("scanner_alert", sig)
+        _arm_flush()
+
+    except Exception as exc:
+        logger.error("_evaluate_symbol %s error: %s", symbol, exc)
+
+
+def _arm_flush() -> None:
+    """Start the flush timer if not already running."""
+    global _flush_task
+    if _flush_task is None or _flush_task.done():
+        _flush_task = asyncio.create_task(
+            _flush_pending_signals(), name="signal_flush"
+        )
+
+
+async def _flush_pending_signals() -> None:
+    """
+    Wait for the batch window, then execute pending signals in score order.
+    Highest score gets the first trade slot; lower scores fill remaining slots
+    or are skipped if MAX_OPEN_TRADES is already reached.
+    """
+    await asyncio.sleep(_BATCH_WINDOW_S)
+
+    if not _pending_signals:
+        return
+
+    # Drain the queue atomically
+    batch = sorted(_pending_signals, key=lambda s: s["score"], reverse=True)
+    _pending_signals.clear()
+
+    logger.info(
+        "Signal batch: %d signal(s) — executing in score order: %s",
+        len(batch),
+        ", ".join(f"{s['symbol']}({s['score']})" for s in batch),
+    )
+
+    for sig in batch:
         acted = False
         if _order_manager:
             acted = await _order_manager.handle_signal(sig)
-
         await db.insert_scanner_log(
-            symbol=symbol,
+            symbol=sig["symbol"],
             score=sig["score"],
             direction=sig["direction"],
             timestamp=sig["timestamp"],
             acted_on=acted,
         )
-        await wsb.broadcaster.broadcast("scanner_alert", sig)
-
-    except Exception as exc:
-        logger.error("_evaluate_symbol %s error: %s", symbol, exc)
 
 
 # ── Mark-price WebSocket (for paper PnL) ─────────────────────────────────────
