@@ -77,6 +77,9 @@ MAX_LEVERAGE: int = _int("MAX_LEVERAGE", 20)
 # USE_TRAILING: True = trail arm activates a trailing stop.
 # False = arm price is a fixed TP; trade closes immediately when hit.
 USE_TRAILING: bool = _bool("USE_TRAILING", True)
+# USE_STOP_LOSS: True = place a hard SL order when entering a trade.
+# False = no SL order is placed (use only if you manage risk another way).
+USE_STOP_LOSS: bool = _bool("USE_STOP_LOSS", True)
 
 # ── Portfolio-level stops ─────────────────────────────────────────────────────
 # If total unrealized PnL across all open positions reaches either threshold,
@@ -109,6 +112,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "MAX_OPEN_TRADES":           int,
     "MAX_LEVERAGE":              int,
     "USE_TRAILING":              bool,
+    "USE_STOP_LOSS":             bool,
     "PORTFOLIO_STOP_LOSS_USDT":  float,
     "PORTFOLIO_TAKE_PROFIT_USDT":float,
     "LOG_LEVEL":                 str,

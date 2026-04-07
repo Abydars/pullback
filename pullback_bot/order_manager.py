@@ -255,12 +255,13 @@ class OrderManager:
             binance_order_id = str(order.get("orderId", ""))
             actual_entry = float(order.get("avgPrice") or entry)
 
-            # 3. Stop Loss via WS API
-            await ws_order_api.place_order(
-                symbol=symbol, side=sl_side, type="STOP_MARKET",
-                stopPrice=bc.round_step(sl, tick),
-                closePosition="true",
-            )
+            # 3. Stop Loss via WS API (skipped when USE_STOP_LOSS=false)
+            if config.USE_STOP_LOSS:
+                await ws_order_api.place_order(
+                    symbol=symbol, side=sl_side, type="STOP_MARKET",
+                    stopPrice=bc.round_step(sl, tick),
+                    closePosition="true",
+                )
 
             # 4. Trail or fixed TP via WS API
             if config.USE_TRAILING and atr > 0:

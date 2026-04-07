@@ -360,15 +360,16 @@ async def _paper_tick() -> None:
                             hit_price = trail_stop
                             close_reason = "TRAIL"
                 else:
-                    # SL check (always active)
-                    if direction == "LONG" and mark <= sl:
-                        hit_price = sl
-                        close_reason = "SL"
-                    elif direction == "SHORT" and mark >= sl:
-                        hit_price = sl
-                        close_reason = "SL"
+                    # SL check (skipped when USE_STOP_LOSS=false)
+                    if config.USE_STOP_LOSS:
+                        if direction == "LONG" and mark <= sl:
+                            hit_price = sl
+                            close_reason = "SL"
+                        elif direction == "SHORT" and mark >= sl:
+                            hit_price = sl
+                            close_reason = "SL"
                     # Fixed-TP check (only when trailing is disabled)
-                    elif not config.USE_TRAILING:
+                    if not hit_price and not config.USE_TRAILING:
                         if direction == "LONG" and mark >= trail_arm:
                             hit_price = trail_arm
                             close_reason = "TP"
