@@ -494,7 +494,7 @@ async def _paper_tick() -> None:
                         trail_factor = config.PORTFOLIO_TRAIL_FACTOR
                         floor = min_tp_usdt + (_peak_portfolio_pnl - min_tp_usdt) * trail_factor
 
-                        if total_unrealized <= floor:
+                        if _peak_portfolio_pnl > min_tp_usdt and total_unrealized <= floor:
                             triggered_reason = "PORT_TP_TRAIL"
                         elif total_unrealized < 0:
                             # Phase 3 — disarm: portfolio went negative → reset so
