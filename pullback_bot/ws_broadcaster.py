@@ -59,7 +59,7 @@ class WSBroadcaster:
         dead: list[WebSocket] = []
         for ws in targets:
             try:
-                await ws.send_text(message)
+                await asyncio.wait_for(ws.send_text(message), timeout=3.0)
             except Exception:
                 dead.append(ws)
 
@@ -72,7 +72,11 @@ class WSBroadcaster:
     # ── General broadcast ──────────────────────────────────────────────────────
 
     async def broadcast(self, msg_type: str, data: Any) -> None:
-        """Send {type, data} JSON to all connected clients. Dead clients removed."""
+        """Send {type, data} JSON to all connected clients. Dead clients removed.
+
+        Each send is wrapped in a 3-second timeout — a stalled TCP client
+        cannot delay broadcasts to all subsequent clients in the loop.
+        """
         message = json.dumps({"type": msg_type, "data": data})
         async with self._lock:
             clients = list(self._clients)
@@ -80,7 +84,7 @@ class WSBroadcaster:
         dead: list[WebSocket] = []
         for ws in clients:
             try:
-                await ws.send_text(message)
+                await asyncio.wait_for(ws.send_text(message), timeout=3.0)
             except Exception:
                 dead.append(ws)
 

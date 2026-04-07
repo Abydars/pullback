@@ -114,8 +114,11 @@ _trail_extreme: dict[int, float] = {}  # trade_id -> best price reached (high fo
 _portfolio_trail_armed: bool  = False   # True once total unrealized >= PORT TP target
 _peak_portfolio_pnl:    float = 0.0    # highest total unrealized PnL since arming
 
-# Lock prevents concurrent paper-tick processing when scanner fires rapidly.
-_paper_tick_lock: Optional[asyncio.Lock] = None
+# Simple boolean re-entrancy guard for _paper_tick.
+# asyncio.Lock() required deferred init (must be created inside a running event
+# loop).  A plain bool works just as well in single-threaded asyncio and needs
+# no initialisation.
+_tick_running: bool = False
 
 
 # ── LIVE mode: User Data Stream ───────────────────────────────────────────────
@@ -285,14 +288,14 @@ async def _paper_tick() -> None:
     calculate unrealized PnL, check SL/trail hits, broadcast position_update.
 
     Called by the scanner immediately after each mark-price batch arrives
-    (~1 s cadence).  A lock prevents concurrent runs if scanner fires faster
-    than processing completes.
+    (~1 s cadence).  The _tick_running guard skips the tick if the previous
+    one has not finished yet (avoids pile-up without blocking anything).
     """
-    global _paper_tick_lock
-    if _paper_tick_lock is None or _paper_tick_lock.locked():
-        return  # already processing a previous tick — skip this one
-
-    async with _paper_tick_lock:
+    global _tick_running
+    if _tick_running:
+        return
+    _tick_running = True
+    try:
         from scanner import mark_prices  # avoid circular at module level
         try:
             open_trades = await db.get_open_trades()
@@ -515,13 +518,15 @@ async def _paper_tick() -> None:
 
         except Exception as exc:
             logger.error("paper_tick error: %s", exc)
+    finally:
+        _tick_running = False
 
 
 async def _paper_pnl_fallback() -> None:
     """
     Safety-net: run _paper_tick every 2 s even if the scanner never notifies us
     (e.g. WS reconnecting).  Scanner-triggered ticks still take priority because
-    _paper_tick returns immediately if the lock is already held.
+    _paper_tick returns immediately if _tick_running is True.
     """
     while True:
         await asyncio.sleep(2.0)
@@ -683,9 +688,7 @@ async def start() -> None:
         except Exception as exc:
             logger.error("Failed to start live position tracker: %s", exc)
     else:
-        # Paper: initialise lock, start 2s fallback loop, reconcile open trades
-        global _paper_tick_lock
-        _paper_tick_lock = asyncio.Lock()
+        # Paper: start 2s fallback loop and reconcile open trades on restart
         asyncio.create_task(_paper_pnl_fallback(), name="paper_pnl_fallback")
         asyncio.create_task(_reconcile_paper(), name="paper_reconcile")
         logger.info("Paper position tracker started")

@@ -301,9 +301,15 @@ def _arm_flush() -> None:
 
 async def _flush_pending_signals() -> None:
     """
-    Wait for the batch window, then execute pending signals in score order.
-    Highest score gets the first trade slot; lower scores fill remaining slots
-    or are skipped if MAX_OPEN_TRADES is already reached.
+    Wait for the batch window, then execute pending signals concurrently.
+
+    The batch is sorted by score so higher-confidence signals are submitted
+    first (asyncio.gather starts tasks in creation order, so the highest-
+    scored signal's handle_signal runs first at each yield point).
+
+    Each signal runs independently — a slow live order for symbol A does
+    NOT delay symbol B's I/O.  The _opening set in order_manager prevents
+    exceeding MAX_OPEN_TRADES and duplicate entries without a global lock.
     """
     await asyncio.sleep(_BATCH_WINDOW_S)
 
@@ -315,15 +321,13 @@ async def _flush_pending_signals() -> None:
     _pending_signals.clear()
 
     logger.info(
-        "Signal batch: %d signal(s) — executing in score order: %s",
+        "Signal batch: %d signal(s) — executing concurrently in score order: %s",
         len(batch),
         ", ".join(f"{s['symbol']}({s['score']})" for s in batch),
     )
 
-    for sig in batch:
-        acted = False
-        if _order_manager:
-            acted = await _order_manager.handle_signal(sig)
+    async def _act(sig: dict) -> None:
+        acted = await _order_manager.handle_signal(sig) if _order_manager else False
         await db.insert_scanner_log(
             symbol=sig["symbol"],
             score=sig["score"],
@@ -331,6 +335,8 @@ async def _flush_pending_signals() -> None:
             timestamp=sig["timestamp"],
             acted_on=acted,
         )
+
+    await asyncio.gather(*[asyncio.create_task(_act(sig)) for sig in batch])
 
 
 # ── Mark-price WebSocket (for paper PnL) ─────────────────────────────────────
