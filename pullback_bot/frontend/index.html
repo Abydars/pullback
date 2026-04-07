@@ -252,7 +252,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
 #chart-tabs .ctab.active { color: var(--amber); border-bottom-color: var(--amber); }
 #chart-tabs .ctab-count { color: var(--amber); }
 
-/* The two content panes */
+/* Chart panel content panes */
 #chart-pane, #hist-pane {
   flex: 1; overflow: hidden; display: none; flex-direction: column;
 }
@@ -264,6 +264,19 @@ canvas.sparkline { display: block; border-radius: 2px; }
 }
 #chart-container {
   flex: 1; position: relative; min-height: 0;
+}
+
+/* Position Chart pane */
+#pos-chart-pane {
+  flex: 1; overflow: hidden; display: none; flex-direction: column;
+  position: relative;
+}
+#pos-chart-pane.active { display: flex; }
+#pos-chart-container { flex: 1; position: relative; min-height: 0; }
+.pos-chart-empty-state {
+  position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; color: var(--muted); font-size: 11px;
+  pointer-events: none; z-index: 1;
 }
 
 /* History pane */
@@ -631,6 +644,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
   <!-- ── Mobile Tabs ── -->
   <div id="mobile-tabs">
     <button class="mob-tab active" data-panel="scanner-panel">Scanner</button>
+    <button class="mob-tab" data-panel="chart-panel" data-ctab="pos-chart-pane">Pos Chart</button>
     <button class="mob-tab" data-panel="chart-panel">Chart</button>
     <button class="mob-tab" data-panel="right-panel">Positions</button>
   </div>
@@ -651,6 +665,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
 
       <!-- Tab bar -->
       <div id="chart-tabs">
+        <button class="ctab" data-ctab="pos-chart-pane">Position Chart</button>
         <button class="ctab active" data-ctab="chart-pane">Chart</button>
         <button class="ctab" data-ctab="hist-pane">
           Trade History <span class="ctab-count" id="hist-count"></span>
@@ -679,6 +694,13 @@ canvas.sparkline { display: block; border-radius: 2px; }
           </div>
         </div>
         <div id="chart-container"></div>
+      </div>
+
+      <!-- Position Chart pane -->
+      <div id="pos-chart-pane">
+        <div id="pos-chart-container">
+          <div class="pos-chart-empty-state" id="pos-chart-empty">No open positions</div>
+        </div>
       </div>
 
       <!-- History pane -->
@@ -786,6 +808,13 @@ let ema200Series = null;
 let slLine = null, tp1Line = null, entryLine = null;
 let _loadChartId = 0;  // increments on each loadChart() call to cancel stale fetches
 
+// ── Position Chart globals ────────────────────────────────────────────────────
+let posChart = null;
+let pnlSeries = null;
+let posChartPriceAnchor = null;   // invisible right-scale series to anchor price lines
+let pcEntryLine = null, pcSlLine = null, pcArmLine = null, pcTrailLine = null;
+let _pnlHistory = [];             // [{time, value}] cumulative PnL points
+
 function initMainChart() {
   const container = document.getElementById('chart-container');
   mainChart = LightweightCharts.createChart(container, {
@@ -870,6 +899,48 @@ function initMainChart() {
     priceLineVisible: false,
     lastValueVisible: false,
     crosshairMarkerVisible: false,
+  });
+}
+
+function initPosChart() {
+  const container = document.getElementById('pos-chart-container');
+  posChart = LightweightCharts.createChart(container, {
+    autoSize: true,
+    layout: { background: { color: '#0d0d0d' }, textColor: '#888' },
+    grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { visible: false },
+    leftPriceScale: {
+      visible: true,
+      borderColor: '#2a2a2a',
+    },
+    timeScale: {
+      borderColor: '#2a2a2a',
+      timeVisible: true,
+      secondsVisible: false,
+    },
+    handleScroll: true,
+    handleScale: true,
+  });
+
+  // Invisible right-scale series — hosts price lines for entry/SL/arm/trail
+  posChartPriceAnchor = posChart.addLineSeries({
+    priceScaleId: 'right',
+    visible: false,
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  posChart.priceScale('right').applyOptions({ visible: false });
+
+  // PnL line series on left scale
+  pnlSeries = posChart.addLineSeries({
+    priceScaleId: 'left',
+    color: '#22c55e',
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: true,
+    crosshairMarkerVisible: true,
+    title: 'PnL $',
   });
 }
 
@@ -1013,6 +1084,123 @@ function drawTradeLines(symbol) {
   }
 }
 
+// ── Position Chart helpers ────────────────────────────────────────────────────
+
+function clearPosChartLines() {
+  [pcEntryLine, pcSlLine, pcArmLine, pcTrailLine].forEach(l => {
+    if (l) try { posChartPriceAnchor.removePriceLine(l); } catch(e) {}
+  });
+  pcEntryLine = pcSlLine = pcArmLine = pcTrailLine = null;
+}
+
+function updatePosChart(positions) {
+  if (!posChart) return;
+  const empty = document.getElementById('pos-chart-empty');
+
+  if (!positions || positions.length === 0) {
+    clearPosChartLines();
+    _pnlHistory = [];
+    if (pnlSeries) pnlSeries.setData([]);
+    // Show empty state
+    if (posChartPriceAnchor) posChartPriceAnchor.setData([]);
+    if (empty) empty.style.display = 'flex';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  // ── Compute aggregates across all open positions ─────────────────────────
+  let totalPnl = 0, totalQty = 0;
+  let sumEntryWeighted = 0, sumSlWeighted = 0, sumArmWeighted = 0;
+  let hasTrailActive = false;
+  let sumTrailStop = 0, trailCount = 0;
+
+  positions.forEach(t => {
+    const qty = t.qty || 1;
+    totalQty += qty;
+    totalPnl += (t.unrealized_pnl ?? 0);
+    sumEntryWeighted += (t.entry_price ?? 0) * qty;
+    sumSlWeighted    += (t.sl_price   ?? 0) * qty;
+    const arm = t.trail_arm ?? t.tp1_price ?? 0;
+    sumArmWeighted   += arm * qty;
+    if (t.trail_active && t.trail_stop != null) {
+      hasTrailActive = true;
+      sumTrailStop += t.trail_stop;
+      trailCount++;
+    }
+  });
+
+  const avgEntry = totalQty > 0 ? sumEntryWeighted / totalQty : 0;
+  const avgSl    = totalQty > 0 ? sumSlWeighted    / totalQty : 0;
+  const avgArm   = totalQty > 0 ? sumArmWeighted   / totalQty : 0;
+  const avgTrail = trailCount  > 0 ? sumTrailStop  / trailCount : 0;
+
+  // ── Update price anchor + price lines ────────────────────────────────────
+  const now = Math.floor(Date.now() / 1000);
+  // Feed two points so the series is visible
+  if (avgEntry > 0) {
+    posChartPriceAnchor.setData([
+      { time: now - 60, value: avgEntry },
+      { time: now,      value: avgEntry },
+    ]);
+  }
+
+  clearPosChartLines();
+
+  if (avgEntry > 0) {
+    pcEntryLine = posChartPriceAnchor.createPriceLine({
+      price: avgEntry, color: 'rgba(255,255,255,0.6)',
+      lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Avg Entry',
+    });
+  }
+
+  const firstPos = positions[0];
+  const useStopLoss   = firstPos.use_stop_loss   !== false;
+  const useTakeProfit = firstPos.use_take_profit  !== false;
+  const useTrailing   = firstPos.use_trailing     !== false;
+
+  if (useStopLoss && avgSl > 0) {
+    if (hasTrailActive) {
+      // Trail is active: show trail stop in amber
+      if (avgTrail > 0) {
+        pcSlLine = posChartPriceAnchor.createPriceLine({
+          price: avgTrail, color: '#f59e0b',
+          lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'Trail Stop',
+        });
+      }
+    } else {
+      pcSlLine = posChartPriceAnchor.createPriceLine({
+        price: avgSl, color: '#ef4444',
+        lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Avg SL',
+      });
+    }
+  }
+
+  if (useTakeProfit && avgArm > 0 && !hasTrailActive) {
+    pcArmLine = posChartPriceAnchor.createPriceLine({
+      price: avgArm, color: '#f59e0b',
+      lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+      title: useTrailing ? 'Trail Arm' : 'TP',
+    });
+  }
+
+  // ── Append PnL point ─────────────────────────────────────────────────────
+  // Deduplicate: only append if time differs from last point
+  const lastPt = _pnlHistory[_pnlHistory.length - 1];
+  if (!lastPt || lastPt.time < now) {
+    _pnlHistory.push({ time: now, value: parseFloat(totalPnl.toFixed(4)) });
+    // Keep last 1440 points (~24 h at 1-min resolution)
+    if (_pnlHistory.length > 1440) _pnlHistory.shift();
+  } else {
+    // Same second — update in-place
+    lastPt.value = parseFloat(totalPnl.toFixed(4));
+  }
+
+  // Colour line green/red based on current PnL
+  pnlSeries.applyOptions({ color: totalPnl >= 0 ? '#22c55e' : '#ef4444' });
+  pnlSeries.setData(_pnlHistory);
+  posChart.timeScale().scrollToRealTime();
+}
+
 // ============================================================
 // EMA CALCULATION (client-side)
 // ============================================================
@@ -1149,6 +1337,7 @@ function handleMessage(type, data) {
     case 'position_update': onPositionUpdate(data); break;
     case 'trade_closed':             onTradeClosed(data);          break;
     case 'portfolio_stop_triggered': onPortfolioStop(data);         break;
+    case 'portfolio_trail_armed':    onPortfolioTrailArmed(data);   break;
     case 'stats_update':             updateStats(data);             break;
     case 'trade_deleted':            onTradeDeleted(data);          break;
     case 'trades_cleared':           onTradesCleared();             break;
@@ -1257,6 +1446,9 @@ function onPositionUpdate(positions) {
 
   // Update unrealized PnL total in stats bar
   updateUnrealizedStat();
+
+  // Update position chart
+  updatePosChart(positions);
 }
 
 function onTradeClosed(trade) {
@@ -1276,11 +1468,14 @@ function onTradeClosed(trade) {
   const reason = (trade.close_reason || 'CLOSED').toUpperCase();
 
   const cfg = {
-    SL:     { type: 't-red',    icon: '🛑', label: 'SL hit' },
-    TRAIL:  { type: pnl >= 0 ? 't-green' : 't-red', icon: pnl >= 0 ? '✅' : '📉', label: 'trail stop hit' },
-    TP1:    { type: 't-green',  icon: '✅', label: 'TP1 hit' },
-    TP2:    { type: 't-green',  icon: '🏆', label: 'TP2 hit' },
-    MANUAL: { type: 't-indigo', icon: '✋', label: 'closed manually' },
+    SL:            { type: 't-red',    icon: '🛑', label: 'SL hit' },
+    TRAIL:         { type: pnl >= 0 ? 't-green' : 't-red', icon: pnl >= 0 ? '✅' : '📉', label: 'trail stop hit' },
+    TP1:           { type: 't-green',  icon: '✅', label: 'TP1 hit' },
+    TP2:           { type: 't-green',  icon: '🏆', label: 'TP2 hit' },
+    MANUAL:        { type: 't-indigo', icon: '✋', label: 'closed manually' },
+    PORTFOLIO_SL:  { type: 't-red',   icon: '🛑', label: 'portfolio SL' },
+    PORTFOLIO_TP:  { type: 't-green', icon: '🏆', label: 'portfolio TP' },
+    PORT_TP_TRAIL: { type: 't-amber', icon: '🎯', label: 'portfolio trail floor' },
   }[reason] ?? { type: pnl >= 0 ? 't-green' : 't-red', icon: '📋', label: reason };
 
   toast(cfg.type, cfg.icon,
@@ -1289,15 +1484,24 @@ function onTradeClosed(trade) {
 }
 
 function onPortfolioStop(data) {
-  const isSL = data.reason === 'PORTFOLIO_SL';
+  const reason = data.reason || '';
   const pnlStr = fmtUsdt(data.total_pnl ?? 0);
-  toast(
-    isSL ? 't-red' : 't-green',
-    isSL ? '🛑' : '🏆',
-    isSL ? `Portfolio stop-loss triggered` : `Portfolio take-profit triggered`,
-    `${data.count} position(s) closed · Total PnL: ${pnlStr}`,
-    10000,
-  );
+  let cls, icon, title;
+  if (reason === 'PORTFOLIO_SL') {
+    cls = 't-red'; icon = '🛑'; title = 'Portfolio stop-loss triggered';
+  } else if (reason === 'PORT_TP_TRAIL') {
+    cls = 't-amber'; icon = '🎯'; title = 'Portfolio trailing floor hit';
+  } else {
+    cls = 't-green'; icon = '🏆'; title = 'Portfolio take-profit triggered';
+  }
+  toast(cls, icon, title, `${data.count} position(s) closed · Total PnL: ${pnlStr}`, 10000);
+}
+
+function onPortfolioTrailArmed(data) {
+  const pnlStr  = fmtUsdt(data.total_pnl ?? 0);
+  const tgtStr  = fmtUsdt(data.target ?? 0);
+  toast('t-amber', '🎯', 'Portfolio trail armed',
+    `PnL: ${pnlStr}  ·  Target: ${tgtStr}`, 8000);
 }
 
 function onKlineUpdate(data) {
@@ -1674,6 +1878,7 @@ function renderHistory() {
       MANUAL:        { cls: 'hr-manual',label: 'MANUAL' },
       PORTFOLIO_SL:  { cls: 'hr-pf-sl', label: 'PORT SL' },
       PORTFOLIO_TP:  { cls: 'hr-pf-tp', label: 'PORT TP' },
+      PORT_TP_TRAIL: { cls: 'hr-pf-tp', label: 'PORT TP TRAIL' },
       FILLED:        { cls: 'hr-other', label: 'FILLED' },
       RECONCILED:    { cls: 'hr-other', label: 'RECONCILED' },
     }[reason] ?? { cls: 'hr-other', label: reason || '—' };
@@ -1955,8 +2160,9 @@ const CFG_FIELDS = [
   {
     section: 'Portfolio Stops',
     fields: [
-      { key: 'PORTFOLIO_STOP_LOSS_USDT',   label: 'Portfolio Stop-Loss (USDT)',    type: 'number', step: '1', hint: 'Close ALL positions if total unrealized PnL ≤ this (e.g. -50). 0 = disabled.' },
-      { key: 'PORTFOLIO_TAKE_PROFIT_USDT', label: 'Portfolio Take-Profit (USDT)',  type: 'number', step: '1', hint: 'Close ALL positions if total unrealized PnL ≥ this (e.g. 100). 0 = disabled.' },
+      { key: 'PORTFOLIO_STOP_LOSS_USDT',   label: 'Portfolio Stop-Loss (USDT)',    type: 'number', step: '1',    hint: 'Close ALL positions if total unrealized PnL ≤ this (e.g. -50). 0 = disabled.' },
+      { key: 'PORTFOLIO_TAKE_PROFIT_USDT', label: 'Portfolio Take-Profit (USDT)',  type: 'number', step: '1',    hint: 'Arm portfolio trailing floor when unrealized PnL reaches this (e.g. 100). 0 = disabled.' },
+      { key: 'PORTFOLIO_TRAIL_FACTOR',     label: 'Portfolio Trail Factor (0–1)',   type: 'number', step: '0.05', hint: 'Floor = target + (peak − target) × factor. 0 = lock at target; 0.5 = trail 50% of gains; 1 = trail from peak.' },
       { key: 'SYMBOL_COOLDOWN_MINUTES',    label: 'Symbol Re-entry Cooldown (min)', type: 'number', step: '5', hint: 'After any close (SL, trail, manual), block re-entry on that symbol for this many minutes. 0 = disabled.' },
     ],
   },
@@ -2450,12 +2656,15 @@ document.getElementById('trade-modal').addEventListener('click', e => {
     document.querySelectorAll('#chart-tabs .ctab').forEach(t =>
       t.classList.toggle('active', t.dataset.ctab === tabId)
     );
-    document.querySelectorAll('#chart-pane, #hist-pane').forEach(p =>
+    document.querySelectorAll('#chart-pane, #hist-pane, #pos-chart-pane').forEach(p =>
       p.classList.toggle('active', p.id === tabId)
     );
     // Re-fit time scale when switching back to chart tab
     if (tabId === 'chart-pane' && mainChart) {
       requestAnimationFrame(() => mainChart.timeScale().fitContent());
+    }
+    if (tabId === 'pos-chart-pane' && posChart) {
+      requestAnimationFrame(() => posChart.timeScale().fitContent());
     }
   }
 
@@ -2494,33 +2703,55 @@ document.getElementById('btn-close-all').disabled = true;
 (function() {
   const panels = ['scanner-panel', 'chart-panel', 'right-panel'];
   const tabs = document.querySelectorAll('.mob-tab');
-  let activePanel = 'scanner-panel';
 
-  function activateTab(panelId) {
-    activePanel = panelId;
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.panel === panelId));
-    panels.forEach(id => {
-      const el = document.getElementById(id);
-      el.classList.toggle('mob-active', id === panelId);
+  // activateMobTab: switch panel and, for chart-panel tabs, also switch the
+  // inner ctab (pos-chart-pane or chart-pane).
+  function activateMobTab(tabEl) {
+    const panelId = tabEl.dataset.panel;
+    const ctabId  = tabEl.dataset.ctab || null;   // optional inner tab
+
+    // Mark all mob-tabs inactive; then mark only matching ones active.
+    // Two "Chart" mob-tabs point to chart-panel — we need to distinguish them
+    // by ctab: a tab is "active" only when both panel AND ctab match.
+    tabs.forEach(t => {
+      const samePanel = t.dataset.panel === panelId;
+      const sameCtab  = ctabId
+        ? (t.dataset.ctab === ctabId)           // ctab tab: exact match
+        : (!t.dataset.ctab && t.dataset.panel === panelId);  // plain tab
+      t.classList.toggle('active', samePanel && (ctabId ? sameCtab : !t.dataset.ctab));
     });
-    // Re-fit chart when switching to chart panel on mobile
-    if (panelId === 'chart-panel' && mainChart) {
-      requestAnimationFrame(() => mainChart.timeScale().fitContent());
+
+    panels.forEach(id => {
+      document.getElementById(id).classList.toggle('mob-active', id === panelId);
+    });
+
+    // Switch inner ctab if specified; otherwise activate main chart-pane
+    if (panelId === 'chart-panel') {
+      const innerTab = ctabId || 'chart-pane';
+      if (window.switchCTab) window.switchCTab(innerTab);
+      // Fit whichever chart is now active
+      if (innerTab === 'pos-chart-pane' && posChart) {
+        requestAnimationFrame(() => posChart.timeScale().fitContent());
+      } else if (mainChart) {
+        requestAnimationFrame(() => mainChart.timeScale().fitContent());
+      }
     }
   }
 
-  tabs.forEach(tab => {
-    tab.addEventListener('click', () => activateTab(tab.dataset.panel));
-  });
+  tabs.forEach(tab => tab.addEventListener('click', () => activateMobTab(tab)));
 
   // Initial state: scanner panel active on mobile
-  activateTab('scanner-panel');
+  activateMobTab(tabs[0]);
 
   // When a symbol is selected on mobile, switch to chart tab
   const _origSelectSymbol = selectSymbol;
   window.selectSymbol = function(sym) {
     _origSelectSymbol(sym);
-    if (window.innerWidth <= 900) activateTab('chart-panel');
+    if (window.innerWidth <= 900) {
+      // Find the plain "Chart" mob-tab (no data-ctab)
+      const chartTab = [...tabs].find(t => t.dataset.panel === 'chart-panel' && !t.dataset.ctab);
+      if (chartTab) activateMobTab(chartTab);
+    }
   };
 })();
 
@@ -2528,6 +2759,7 @@ document.getElementById('btn-close-all').disabled = true;
 // BOOT
 // ============================================================
 initMainChart();
+initPosChart();
 connectWS();
 </script>
 </body>

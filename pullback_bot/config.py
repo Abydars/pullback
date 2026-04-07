@@ -94,6 +94,11 @@ SYMBOL_COOLDOWN_MINUTES: int = _int("SYMBOL_COOLDOWN_MINUTES", 60)
 # 0.0 = disabled (default).
 PORTFOLIO_STOP_LOSS_USDT: float  = _float("PORTFOLIO_STOP_LOSS_USDT",  0.0)   # e.g. -50
 PORTFOLIO_TAKE_PROFIT_USDT: float = _float("PORTFOLIO_TAKE_PROFIT_USDT", 0.0)  # e.g. 100
+# PORTFOLIO_TRAIL_FACTOR: once unrealized PnL hits PORTFOLIO_TAKE_PROFIT_USDT the
+# portfolio trailing floor activates.  floor = target + (peak - target) * factor.
+# 0.5 = trail 50 % of gains above target; 0.0 = lock floor at target (immediate
+# close when PnL drops back to target); 1.0 = never trail below peak.
+PORTFOLIO_TRAIL_FACTOR: float = _float("PORTFOLIO_TRAIL_FACTOR", 0.5)
 
 # ── Server ────────────────────────────────────────────────────────────────────
 PORT: int = _int("PORT", 8080)
@@ -124,6 +129,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "SYMBOL_COOLDOWN_MINUTES":   int,
     "PORTFOLIO_STOP_LOSS_USDT":  float,
     "PORTFOLIO_TAKE_PROFIT_USDT":float,
+    "PORTFOLIO_TRAIL_FACTOR":    float,
     "LOG_LEVEL":                 str,
     "MODE":                      str,
 }
@@ -165,6 +171,8 @@ def update(key: str, raw_value: str) -> None:
         raise ValueError("MAX_LEVERAGE must be 1–125")
     if key == "RISK_PCT" and not (0.1 <= value <= 100.0):
         raise ValueError("RISK_PCT must be 0.1–100")
+    if key == "PORTFOLIO_TRAIL_FACTOR" and not (0.0 <= value <= 1.0):
+        raise ValueError("PORTFOLIO_TRAIL_FACTOR must be 0.0–1.0")
 
     # Apply in-memory
     globals()[key] = value

@@ -110,6 +110,10 @@ paper_unrealized: dict[int, float] = {}
 _trail_active: dict[int, bool] = {}    # trade_id -> trailing is armed
 _trail_extreme: dict[int, float] = {}  # trade_id -> best price reached (high for LONG, low for SHORT)
 
+# ── Portfolio trailing floor state ────────────────────────────────────────────
+_portfolio_trail_armed: bool  = False   # True once total unrealized >= PORT TP target
+_peak_portfolio_pnl:    float = 0.0    # highest total unrealized PnL since arming
+
 # Lock prevents concurrent paper-tick processing when scanner fires rapidly.
 _paper_tick_lock: Optional[asyncio.Lock] = None
 
@@ -453,10 +457,45 @@ async def _paper_tick() -> None:
             take_profit_limit = config.PORTFOLIO_TAKE_PROFIT_USDT
 
             triggered_reason: Optional[str] = None
+
+            # Phase 1 — Portfolio SL (unchanged)
             if stop_loss_limit != 0.0 and total_unrealized <= stop_loss_limit:
                 triggered_reason = "PORTFOLIO_SL"
-            elif take_profit_limit != 0.0 and total_unrealized >= take_profit_limit:
-                triggered_reason = "PORTFOLIO_TP"
+
+            # Phase 2/3 — Portfolio trailing floor
+            elif take_profit_limit != 0.0:
+                global _portfolio_trail_armed, _peak_portfolio_pnl
+
+                if not _portfolio_trail_armed:
+                    # Phase 2a — arm: PnL just crossed the target
+                    if total_unrealized >= take_profit_limit:
+                        _portfolio_trail_armed = True
+                        _peak_portfolio_pnl    = total_unrealized
+                        logger.info(
+                            "Portfolio trail armed: pnl=%.4f target=%.4f",
+                            total_unrealized, take_profit_limit,
+                        )
+                        await wsb.broadcaster.broadcast("portfolio_trail_armed", {
+                            "total_pnl": round(total_unrealized, 4),
+                            "target":    take_profit_limit,
+                        })
+                else:
+                    # Phase 2b — update peak and check floor
+                    _peak_portfolio_pnl = max(_peak_portfolio_pnl, total_unrealized)
+                    trail_factor = config.PORTFOLIO_TRAIL_FACTOR
+                    floor = take_profit_limit + (_peak_portfolio_pnl - take_profit_limit) * trail_factor
+
+                    if total_unrealized <= floor:
+                        triggered_reason = "PORT_TP_TRAIL"
+                    elif total_unrealized < 0:
+                        # Phase 3 — disarm: portfolio has gone negative → reset so
+                        # the trail can re-arm when PnL recovers back to target.
+                        _portfolio_trail_armed = False
+                        _peak_portfolio_pnl    = 0.0
+                        logger.info(
+                            "Portfolio trail disarmed (PnL went negative): pnl=%.4f",
+                            total_unrealized,
+                        )
 
             if triggered_reason and open_trades:
                 logger.warning(
@@ -464,6 +503,9 @@ async def _paper_tick() -> None:
                     triggered_reason, total_unrealized,
                 )
                 await _close_all_paper(open_trades, mark_prices, triggered_reason)
+                # Reset portfolio trail state so the cycle can restart cleanly
+                _portfolio_trail_armed = False
+                _peak_portfolio_pnl    = 0.0
 
         except Exception as exc:
             logger.error("paper_tick error: %s", exc)
