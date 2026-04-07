@@ -1957,6 +1957,7 @@ const CFG_FIELDS = [
     fields: [
       { key: 'PORTFOLIO_STOP_LOSS_USDT',   label: 'Portfolio Stop-Loss (USDT)',    type: 'number', step: '1', hint: 'Close ALL positions if total unrealized PnL ≤ this (e.g. -50). 0 = disabled.' },
       { key: 'PORTFOLIO_TAKE_PROFIT_USDT', label: 'Portfolio Take-Profit (USDT)',  type: 'number', step: '1', hint: 'Close ALL positions if total unrealized PnL ≥ this (e.g. 100). 0 = disabled.' },
+      { key: 'SYMBOL_COOLDOWN_MINUTES',    label: 'Symbol Re-entry Cooldown (min)', type: 'number', step: '5', hint: 'After any close (SL, trail, manual), block re-entry on that symbol for this many minutes. 0 = disabled.' },
     ],
   },
   {

@@ -160,6 +160,22 @@ class OrderManager:
             logger.info("Signal %s %s skipped — position already open", symbol, direction)
             return False
 
+        # Per-symbol cooldown — block re-entry for SYMBOL_COOLDOWN_MINUTES after
+        # any close (SL, trail, portfolio stop, manual).  close_time is written
+        # by update_trade_close() on all close paths so no explicit write needed.
+        cooldown_min = config.SYMBOL_COOLDOWN_MINUTES
+        if cooldown_min > 0:
+            last_close_ms = await db.get_last_close_time(symbol)
+            if last_close_ms is not None:
+                elapsed_min = (time.time() * 1000 - last_close_ms) / 60_000
+                if elapsed_min < cooldown_min:
+                    remaining = int(cooldown_min - elapsed_min)
+                    logger.info(
+                        "Signal %s %s skipped — cooldown active (%dm remaining)",
+                        symbol, direction, remaining,
+                    )
+                    return False
+
         # Calculate qty and leverage
         step      = bc.get_step_size(symbol)
         atr       = signal.get("atr",       abs(entry - sl) / 1.5)

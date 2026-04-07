@@ -83,6 +83,10 @@ USE_STOP_LOSS: bool = _bool("USE_STOP_LOSS", True)
 # USE_TAKE_PROFIT: True = place a TP/trailing-stop order when entering a trade.
 # False = no TP or trail order is placed; exit manually or via portfolio stop.
 USE_TAKE_PROFIT: bool = _bool("USE_TAKE_PROFIT", True)
+# SYMBOL_COOLDOWN_MINUTES: minimum minutes between trades on the same symbol.
+# After any close (SL, trail, portfolio stop, manual), that symbol is blocked
+# from re-entry until this many minutes have elapsed.  0 = disabled.
+SYMBOL_COOLDOWN_MINUTES: int = _int("SYMBOL_COOLDOWN_MINUTES", 60)
 
 # ── Portfolio-level stops ─────────────────────────────────────────────────────
 # If total unrealized PnL across all open positions reaches either threshold,
@@ -117,6 +121,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "USE_TRAILING":              bool,
     "USE_STOP_LOSS":             bool,
     "USE_TAKE_PROFIT":           bool,
+    "SYMBOL_COOLDOWN_MINUTES":   int,
     "PORTFOLIO_STOP_LOSS_USDT":  float,
     "PORTFOLIO_TAKE_PROFIT_USDT":float,
     "LOG_LEVEL":                 str,

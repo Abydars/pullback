@@ -213,6 +213,20 @@ async def get_all_stats() -> dict:
         }
 
 
+async def get_last_close_time(symbol: str) -> Optional[float]:
+    """
+    Return the close_time (unix ms) of the most recently closed trade for
+    symbol, or None if no closed trade exists.  Used for per-symbol cooldown.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT MAX(close_time) FROM trades WHERE symbol=? AND status='CLOSED'",
+            (symbol,),
+        )
+        row = await cursor.fetchone()
+        return float(row[0]) if row and row[0] is not None else None
+
+
 async def get_realized_pnl() -> float:
     """Sum of pnl_usdt across all closed trades (negative = net loss)."""
     async with aiosqlite.connect(DB_PATH) as db:
