@@ -278,6 +278,18 @@ canvas.sparkline { display: block; border-radius: 2px; }
   justify-content: center; color: var(--muted); font-size: 11px;
   pointer-events: none; z-index: 1;
 }
+#pos-pnl-overlay {
+  position: absolute; top: 10px; left: 58px; z-index: 10;
+  pointer-events: none; line-height: 1;
+}
+#pos-pnl-overlay .pnl-val {
+  font-size: 26px; font-weight: 700; font-family: var(--font);
+  letter-spacing: -0.5px;
+}
+#pos-pnl-overlay .pnl-label {
+  font-size: 10px; font-weight: 500; color: var(--muted);
+  letter-spacing: .06em; margin-top: 2px;
+}
 
 /* History pane */
 #hist-pane { overflow: auto; }
@@ -700,6 +712,10 @@ canvas.sparkline { display: block; border-radius: 2px; }
       <div id="pos-chart-pane">
         <div id="pos-chart-container">
           <div class="pos-chart-empty-state" id="pos-chart-empty">No open positions</div>
+          <div id="pos-pnl-overlay" style="display:none">
+            <div class="pnl-val" id="pos-pnl-val">—</div>
+            <div class="pnl-label">UNREALIZED PNL</div>
+          </div>
         </div>
       </div>
 
@@ -1093,6 +1109,17 @@ function clearPosChartLines() {
   pcEntryLine = pcSlLine = pcArmLine = pcTrailLine = null;
 }
 
+function _updatePnlOverlay(pnl) {
+  const overlay = document.getElementById('pos-pnl-overlay');
+  const valEl   = document.getElementById('pos-pnl-val');
+  if (!overlay || !valEl) return;
+  if (pnl === null) { overlay.style.display = 'none'; return; }
+  const isPos  = pnl >= 0;
+  valEl.textContent  = (isPos ? '+' : '') + fmtUsdt(pnl);
+  valEl.style.color  = isPos ? 'var(--green)' : 'var(--red)';
+  overlay.style.display = 'block';
+}
+
 function updatePosChart(positions) {
   if (!posChart) return;
   const empty = document.getElementById('pos-chart-empty');
@@ -1101,9 +1128,9 @@ function updatePosChart(positions) {
     clearPosChartLines();
     _pnlHistory = [];
     if (pnlSeries) pnlSeries.setData([]);
-    // Show empty state
     if (posChartPriceAnchor) posChartPriceAnchor.setData([]);
     if (empty) empty.style.display = 'flex';
+    _updatePnlOverlay(null);
     return;
   }
   if (empty) empty.style.display = 'none';
@@ -1199,6 +1226,9 @@ function updatePosChart(positions) {
   pnlSeries.applyOptions({ color: totalPnl >= 0 ? '#22c55e' : '#ef4444' });
   pnlSeries.setData(_pnlHistory);
   posChart.timeScale().scrollToRealTime();
+
+  // Update top-left overlay
+  _updatePnlOverlay(totalPnl);
 }
 
 // ============================================================
