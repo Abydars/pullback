@@ -1185,8 +1185,8 @@ async function updatePosChart(positions) {
   posChart.timeScale().scrollToRealTime();
 
   // ── Fit vertical range to include all reference lines ────────────────────
-  // LightweightCharts autoScale only tracks series data, not price lines.
-  // Manually widen the visible range so target/floor/zero are always in view.
+  // IPriceScale has no setVisibleRange. Use autoscaleInfoProvider on the
+  // series to extend the autoScale range to cover zero, target, and floor.
   const refPrices = [0];
   if (minTpUsdt !== 0) refPrices.push(minTpUsdt);
   if (_portfolioTrailArmed && _portfolioTrailPeak > minTpUsdt) {
@@ -1197,7 +1197,11 @@ async function updatePosChart(positions) {
   const lo = Math.min(...allVals);
   const hi = Math.max(...allVals);
   const pad = Math.max((hi - lo) * 0.12, 0.5);
-  posChart.priceScale('left').setVisibleRange({ from: lo - pad, to: hi + pad });
+  pnlSeries.applyOptions({
+    autoscaleInfoProvider: () => ({
+      priceRange: { minValue: lo - pad, maxValue: hi + pad },
+    }),
+  });
 
   // Update top-left overlay
   _updatePnlOverlay(totalPnl);
