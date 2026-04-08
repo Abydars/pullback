@@ -1512,6 +1512,7 @@ function onTradeClosed(trade) {
     TP2:           { type: 't-green',  icon: '🏆', label: 'TP2 hit' },
     MANUAL:        { type: 't-indigo', icon: '✋', label: 'closed manually' },
     PORTFOLIO_SL:  { type: 't-red',   icon: '🛑', label: 'portfolio SL' },
+    SMART_PORT_SL: { type: 't-red',   icon: '🛑', label: 'smart portfolio SL' },
     PORTFOLIO_TP:  { type: 't-green', icon: '🏆', label: 'portfolio TP' },
     PORT_TP_TRAIL: { type: 't-amber', icon: '🎯', label: 'portfolio trail floor' },
   }[reason] ?? { type: pnl >= 0 ? 't-green' : 't-red', icon: '📋', label: reason };
@@ -1529,6 +1530,8 @@ function onPortfolioStop(data) {
   let cls, icon, title;
   if (reason === 'PORTFOLIO_SL') {
     cls = 't-red'; icon = '🛑'; title = 'Portfolio stop-loss triggered';
+  } else if (reason === 'SMART_PORT_SL') {
+    cls = 't-red'; icon = '🛑'; title = 'Smart portfolio stop triggered';
   } else if (reason === 'PORT_TP_TRAIL') {
     cls = 't-amber'; icon = '🎯'; title = 'Portfolio trailing floor hit';
   } else {
@@ -1962,6 +1965,7 @@ function renderHistory() {
       TP:            { cls: 'hr-tp',    label: 'TP' },
       MANUAL:        { cls: 'hr-manual',label: 'MANUAL' },
       PORTFOLIO_SL:  { cls: 'hr-pf-sl', label: 'PORT SL' },
+      SMART_PORT_SL: { cls: 'hr-pf-sl', label: 'SMART SL' },
       PORTFOLIO_TP:  { cls: 'hr-pf-tp', label: 'PORT TP' },
       PORT_TP_TRAIL: { cls: 'hr-pf-tp', label: 'PORT TP TRAIL' },
       FILLED:        { cls: 'hr-other', label: 'FILLED' },
@@ -2255,6 +2259,12 @@ const CFG_FIELDS = [
     fields: [
       { key: 'PORTFOLIO_STOP_LOSS_USDT', label: 'Portfolio Stop-Loss (USDT)', type: 'number', step: '1',
         hint: 'Close ALL positions if total unrealized PnL ≤ this (e.g. -50). 0 = disabled.' },
+      { key: 'SMART_PORT_SL_ENABLED', label: 'Smart Portfolio SL', type: 'select', options: ['true', 'false'],
+        hint: 'Automatically close all positions when majority are losing and recovery is unlikely. Works alongside fixed PORT SL — whichever triggers first wins.' },
+      { key: 'SMART_PORT_SL_NEG_RATIO', label: 'Smart SL: Negative Trade Ratio', type: 'number', step: '0.05',
+        hint: 'Fraction of open trades that must be negative to consider recovery unlikely. 0.65 = 65% losing.' },
+      { key: 'SMART_PORT_SL_MULTIPLIER', label: 'Smart SL: Loss Depth Multiplier', type: 'number', step: '0.1',
+        hint: 'Total unrealized must be below -(MIN_TP × multiplier) to trigger. 0.8 with MIN_TP=$5 = triggers at -$4.' },
       { key: 'PORTFOLIO_TP_MODE', label: 'Portfolio TP Mode', type: 'select',
         options: [
           { value: 'trailing', label: 'Trailing Floor' },

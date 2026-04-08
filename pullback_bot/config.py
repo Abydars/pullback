@@ -147,6 +147,13 @@ PORTFOLIO_TP_MODE: str = _get("PORTFOLIO_TP_MODE", "trailing")
 # 0.5 = trail 50 % of gains above target; 0.0 = lock floor at target;
 # 1.0 = never trail below peak.
 PORTFOLIO_TRAIL_FACTOR: float = _float("PORTFOLIO_TRAIL_FACTOR", 0.5)
+# SMART_PORT_SL: closes all positions when a majority are losing AND the total
+# loss is deep enough AND gradual building has already stopped — all three
+# conditions must hold simultaneously.  Works alongside the fixed PORT SL;
+# whichever fires first wins.
+SMART_PORT_SL_ENABLED:    bool  = _bool("SMART_PORT_SL_ENABLED",   True)
+SMART_PORT_SL_NEG_RATIO:  float = _float("SMART_PORT_SL_NEG_RATIO",  0.65)
+SMART_PORT_SL_MULTIPLIER: float = _float("SMART_PORT_SL_MULTIPLIER", 0.8)
 
 # ── Server ────────────────────────────────────────────────────────────────────
 PORT: int = _int("PORT", 8080)
@@ -183,6 +190,9 @@ EDITABLE_KEYS: dict[str, type] = {
     "PORTFOLIO_MIN_TP_USDT":     float,
     "PORTFOLIO_TP_MODE":         str,
     "PORTFOLIO_TRAIL_FACTOR":    float,
+    "SMART_PORT_SL_ENABLED":     bool,
+    "SMART_PORT_SL_NEG_RATIO":   float,
+    "SMART_PORT_SL_MULTIPLIER":  float,
     "LOG_LEVEL":                 str,
     "MODE":                      str,
 }
@@ -256,6 +266,10 @@ async def update(key: str, raw_value: str) -> None:
         raise ValueError("PORTFOLIO_TP_MODE must be 'trailing' or 'normal'")
     if key == "PORTFOLIO_TRAIL_FACTOR" and not (0.0 <= value <= 1.0):
         raise ValueError("PORTFOLIO_TRAIL_FACTOR must be 0.0–1.0")
+    if key == "SMART_PORT_SL_NEG_RATIO" and not (0.1 <= value <= 1.0):
+        raise ValueError("SMART_PORT_SL_NEG_RATIO must be 0.1–1.0")
+    if key == "SMART_PORT_SL_MULTIPLIER" and not (0.1 <= value <= 5.0):
+        raise ValueError("SMART_PORT_SL_MULTIPLIER must be 0.1–5.0")
     if key == "BTC_BREAKOUT_ROC" and not (0.001 <= value <= 0.05):
         raise ValueError("BTC_BREAKOUT_ROC must be between 0.001 and 0.05")
 

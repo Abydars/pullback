@@ -282,6 +282,52 @@ async def _close_all_paper(
     )
 
 
+def _should_smart_port_sl_trigger(
+    open_trades: list[dict],
+    paper_unrealized: dict,
+    total_unrealized: float,
+) -> bool:
+    """
+    Pure function — no side effects, no awaits, no globals modified.
+
+    Returns True only when ALL three conditions hold simultaneously:
+
+    1. Majority of open trades are negative
+       (negative_count / total >= SMART_PORT_SL_NEG_RATIO)
+
+    2. Total loss is deep enough to matter
+       (total_unrealized <= -(PORTFOLIO_MIN_TP_USDT * SMART_PORT_SL_MULTIPLIER))
+
+    3. Gradual building has stopped
+       (total_unrealized < -(PORTFOLIO_MIN_TP_USDT / 2))
+       — same threshold used by the scanner to halt new entries
+
+    Requires at least 2 open trades — a single losing trade cannot trigger.
+    """
+    if len(open_trades) < 2:
+        return False
+
+    # Condition 1 — majority negative
+    negative_count = sum(
+        1 for t in open_trades
+        if paper_unrealized.get(t["id"], 0.0) < 0
+    )
+    if negative_count / len(open_trades) < config.SMART_PORT_SL_NEG_RATIO:
+        return False
+
+    # Condition 2 — loss deep enough
+    threshold = -(config.PORTFOLIO_MIN_TP_USDT * config.SMART_PORT_SL_MULTIPLIER)
+    if threshold == 0.0 or total_unrealized > threshold:
+        return False
+
+    # Condition 3 — building has stopped (scanner already halted new entries)
+    half_target = config.PORTFOLIO_MIN_TP_USDT / 2
+    if half_target <= 0 or total_unrealized >= -half_target:
+        return False
+
+    return True
+
+
 async def _paper_tick() -> None:
     """
     Process open paper trades against the latest mark prices:
@@ -465,7 +511,15 @@ async def _paper_tick() -> None:
             if stop_loss_limit != 0.0 and total_unrealized <= stop_loss_limit:
                 triggered_reason = "PORTFOLIO_SL"
 
-            elif min_tp_usdt != 0.0:
+            # Smart Portfolio SL — multi-condition holistic check
+            if (triggered_reason is None
+                    and config.SMART_PORT_SL_ENABLED
+                    and _should_smart_port_sl_trigger(
+                        open_trades, paper_unrealized, total_unrealized
+                    )):
+                triggered_reason = "SMART_PORT_SL"
+
+            if triggered_reason is None and min_tp_usdt != 0.0:
                 if config.PORTFOLIO_TP_MODE == "normal":
                     # Normal mode — close immediately when PnL reaches the threshold
                     if total_unrealized >= min_tp_usdt:
