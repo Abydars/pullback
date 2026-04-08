@@ -437,6 +437,10 @@ canvas.sparkline { display: block; border-radius: 2px; }
   0%, 100% { opacity: 1; }
   50%       { opacity: .45; }
 }
+.prox-badge {
+  font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 2px;
+  letter-spacing: .06em; border: 1px solid;
+}
 .pos-card-pnl  { font-size: 13px; font-weight: 700; text-align: right; }
 .pos-card-roe  { font-size: 10px; text-align: right; }
 .pos-card-grid {
@@ -1736,6 +1740,32 @@ function renderPositions() {
     const trailStopPct    = (trailStop    && entry) ? fromEntry(trailStop)    : null;
     const trailExtremePct = (trailExtreme && entry) ? fromEntry(trailExtreme) : null;
 
+    // ── PnL if price reaches SL / arm / trail stop ────────────────────────
+    const qty = parseFloat(t.qty) || 0;
+    const pnlAt = (price) => (price && qty) ? (isLong ? (price - entry) * qty : (entry - price) * qty) : null;
+    const slPnlUsdt        = t.sl_price ? pnlAt(t.sl_price) : null;
+    const armPnlUsdt       = trailArm   ? pnlAt(trailArm)   : null;
+    const trailStopPnlUsdt = trailStop  ? pnlAt(trailStop)  : null;
+
+    // ── Proximity badge: % from mark to nearest critical level ────────────
+    const stopLevel  = (trailActive && trailStop) ? trailStop : (t.use_stop_loss  !== false ? t.sl_price  : null);
+    const tpLevel    = (!trailActive && t.use_take_profit !== false) ? trailArm : null;
+    const distToStop = (mark && stopLevel) ? Math.abs(mark - stopLevel) / mark * 100 : null;
+    const distToTp   = (mark && tpLevel)   ? Math.abs(tpLevel - mark)   / mark * 100 : null;
+    let proxBadge = '';
+    if (distToStop !== null && (distToTp === null || distToStop <= distToTp)) {
+      const lbl = trailActive ? 'Trail' : 'SL';
+      const clr = trailActive ? 'var(--amber)' : 'var(--red)';
+      const bg  = trailActive ? 'rgba(245,158,11,.15)' : 'rgba(239,68,68,.15)';
+      const bdr = trailActive ? 'rgba(245,158,11,.35)' : 'rgba(239,68,68,.35)';
+      proxBadge = `<span class="prox-badge" style="color:${clr};background:${bg};border-color:${bdr}">${isLong ? '▼' : '▲'} ${distToStop.toFixed(1)}% ${lbl}</span>`;
+    } else if (distToTp !== null) {
+      const clr = t.use_trailing !== false ? 'var(--amber)' : 'var(--green)';
+      const bg  = t.use_trailing !== false ? 'rgba(245,158,11,.15)' : 'rgba(34,197,94,.15)';
+      const bdr = t.use_trailing !== false ? 'rgba(245,158,11,.35)' : 'rgba(34,197,94,.35)';
+      proxBadge = `<span class="prox-badge" style="color:${clr};background:${bg};border-color:${bdr}">${isLong ? '▲' : '▼'} ${distToTp.toFixed(1)}% TP</span>`;
+    }
+
     // Trail arm badge
     const armBadge = trailActive ? `<span class="trail-badge">⟳ TRAILING</span>` : '';
 
@@ -1745,6 +1775,7 @@ function renderPositions() {
           <span class="pos-card-sym">${t.symbol.replace('USDT','')}<span style="font-size:9px;color:var(--muted)">/USDT</span></span>
           <span class="pos-card-dir ${isLong ? 'pos-dir-long' : 'pos-dir-short'}">${isLong ? 'LONG' : 'SHORT'}</span>
           ${armBadge}
+          ${proxBadge}
         </div>
         <div style="text-align:right;">
           <div class="pos-card-pnl ${pnlCls}${blink}">${fmtUsdt(pnl)}</div>
@@ -1767,7 +1798,8 @@ function renderPositions() {
           ${t.use_stop_loss === false
             ? `<span class="v" style="color:var(--muted);font-style:italic">Disabled</span>`
             : `<span class="v" style="color:var(--red)">${fmtPrice(t.sl_price)}</span>
-               ${slPct !== null ? fmtPct(slPct, 'var(--red)') : ''}`
+               ${slPct !== null ? fmtPct(slPct, 'var(--red)') : ''}
+               ${slPnlUsdt !== null ? `<span class="pct" style="color:var(--red)">${fmtUsdt(slPnlUsdt)}</span>` : ''}`
           }
         </div>` : ''}
         <div class="pos-kv">
@@ -1775,7 +1807,8 @@ function renderPositions() {
           ${t.use_take_profit === false
             ? `<span class="v" style="color:var(--muted);font-style:italic">Disabled</span>`
             : `<span class="v" style="color:${t.use_trailing === false ? 'var(--green)' : 'var(--amber)'}">${fmtPrice(trailArm)}</span>
-               ${armPct !== null ? fmtPct(armPct, t.use_trailing === false ? 'var(--green)' : 'var(--amber)') : ''}`
+               ${armPct !== null ? fmtPct(armPct, t.use_trailing === false ? 'var(--green)' : 'var(--amber)') : ''}
+               ${armPnlUsdt !== null ? `<span class="pct" style="color:${t.use_trailing === false ? 'var(--green)' : 'var(--amber)'}">${fmtUsdt(armPnlUsdt)}</span>` : ''}`
           }
         </div>
         ${trailActive && trailExtreme !== null ? `
@@ -1789,6 +1822,7 @@ function renderPositions() {
           <span class="k">Trail Stop</span>
           <span class="v" style="color:var(--amber);font-weight:700">${fmtPrice(trailStop)}</span>
           ${trailStopPct !== null ? fmtPct(trailStopPct, 'var(--amber)') : ''}
+          ${trailStopPnlUsdt !== null ? `<span class="pct" style="color:var(--amber)">${fmtUsdt(trailStopPnlUsdt)}</span>` : ''}
         </div>` : ''}
         <div class="pos-kv">
           <span class="k">Liq</span>
