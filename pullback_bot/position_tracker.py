@@ -572,21 +572,34 @@ async def _paper_tick() -> None:
                 # Close the active session
                 import order_manager as _om  # deferred — avoids circular at module level
                 if _om._active_session_id is not None:
-                    session_trades = await db.get_trades_by_session(_om._active_session_id)
-                    net_pnl = sum(t["pnl_usdt"] or 0.0 for t in session_trades)
-                    await db.close_session(
-                        session_id  = _om._active_session_id,
-                        ended_at    = int(time.time() * 1000),
-                        exit_reason = triggered_reason,
-                        net_pnl     = round(net_pnl, 4),
-                        trade_count = len(session_trades),
-                    )
-                    logger.info(
-                        "Session closed: %s reason=%s trades=%d net_pnl=%.4f",
-                        _om._active_session_id, triggered_reason,
-                        len(session_trades), net_pnl,
-                    )
-                    await _om.reset_session()
+                    try:
+                        session_trades = await db.get_trades_by_session(_om._active_session_id)
+                        logger.info(
+                            "Session %s: %d trade(s) found for PnL calculation",
+                            _om._active_session_id, len(session_trades),
+                        )
+                        net_pnl = sum(t["pnl_usdt"] or 0.0 for t in session_trades)
+                        await db.close_session(
+                            session_id  = _om._active_session_id,
+                            ended_at    = int(time.time() * 1000),
+                            exit_reason = triggered_reason,
+                            net_pnl     = round(net_pnl, 4),
+                            trade_count = len(session_trades),
+                        )
+                        logger.info(
+                            "Session closed: %s reason=%s trades=%d net_pnl=%.4f",
+                            _om._active_session_id, triggered_reason,
+                            len(session_trades), net_pnl,
+                        )
+                    except Exception as sess_exc:
+                        logger.error(
+                            "Failed to close session %s: %s",
+                            _om._active_session_id, sess_exc, exc_info=True,
+                        )
+                    finally:
+                        # Always reset so the next cycle gets a fresh session,
+                        # even if DB write failed.
+                        await _om.reset_session()
 
                 # Reset portfolio trail state so the cycle can restart cleanly
                 _portfolio_trail_armed = False
