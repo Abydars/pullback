@@ -55,10 +55,22 @@ CREATE TABLE IF NOT EXISTS config (
 );
 """
 
+CREATE_SESSIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS sessions (
+    id          TEXT    PRIMARY KEY,  -- uuid4 hex
+    started_at  INTEGER NOT NULL,     -- unix ms of first trade open
+    ended_at    INTEGER,              -- unix ms of portfolio exit
+    exit_reason TEXT,                 -- PORT_TP_TRAIL | SMART_PORT_SL | PORTFOLIO_SL | PORTFOLIO_TP
+    net_pnl     REAL,                 -- sum of all trade pnl_usdt in session
+    trade_count INTEGER               -- number of trades in session
+);
+"""
+
 CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);",
     "CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);",
     "CREATE INDEX IF NOT EXISTS idx_scanner_log_ts ON scanner_log(timestamp);",
+    "CREATE INDEX IF NOT EXISTS idx_trades_session ON trades(session_id);",
 ]
 
 
@@ -68,6 +80,7 @@ async def init_db() -> None:
         await db.execute(CREATE_TRADES_TABLE)
         await db.execute(CREATE_SCANNER_LOG_TABLE)
         await db.execute(CREATE_CONFIG_TABLE)
+        await db.execute(CREATE_SESSIONS_TABLE)
         for idx in CREATE_INDEXES:
             await db.execute(idx)
         # Migrations: add columns that didn't exist in earlier schema versions
@@ -75,6 +88,7 @@ async def init_db() -> None:
             "ALTER TABLE trades ADD COLUMN close_reason TEXT",
             "ALTER TABLE trades ADD COLUMN leverage INTEGER",
             "ALTER TABLE trades ADD COLUMN signal_type TEXT",
+            "ALTER TABLE trades ADD COLUMN session_id TEXT",
         ]:
             try:
                 await db.execute(col_sql)
@@ -101,6 +115,7 @@ async def insert_trade(
     leverage: Optional[int] = None,
     binance_order_id: Optional[str] = None,
     signal_type: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> int:
     """Insert a new trade and return its id."""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -109,12 +124,12 @@ async def insert_trade(
             INSERT INTO trades
                 (symbol, direction, entry_price, sl_price, tp1_price, tp2_price,
                  qty, mode, entry_time, signal_score, leverage, binance_order_id,
-                 signal_type)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 signal_type, session_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (symbol, direction, entry_price, sl_price, tp1_price, tp2_price,
              qty, mode, entry_time, signal_score, leverage, binance_order_id,
-             signal_type),
+             signal_type, session_id),
         )
         await db.commit()
         return cursor.lastrowid
@@ -332,3 +347,83 @@ async def delete_config(key: str) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM config WHERE key=?", (key,))
         await db.commit()
+
+
+# ── Session helpers ────────────────────────────────────────────────────────────
+
+async def create_session(session_id: str, started_at: int) -> None:
+    """Insert a new session row (started, no exit yet)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO sessions (id, started_at) VALUES (?,?)",
+            (session_id, started_at),
+        )
+        await db.commit()
+
+
+async def close_session(
+    session_id: str,
+    ended_at: int,
+    exit_reason: str,
+    net_pnl: float,
+    trade_count: int,
+) -> None:
+    """Fill in the exit fields for a completed session."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE sessions
+            SET ended_at=?, exit_reason=?, net_pnl=?, trade_count=?
+            WHERE id=?
+            """,
+            (ended_at, exit_reason, net_pnl, trade_count, session_id),
+        )
+        await db.commit()
+
+
+async def get_trades_by_session(session_id: str) -> list[dict]:
+    """Return all trades (any status) belonging to a session, oldest first."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM trades WHERE session_id=? ORDER BY entry_time ASC",
+            (session_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_sessions(limit: int = 50) -> list[dict]:
+    """
+    Return completed sessions (ended_at IS NOT NULL), newest first.
+    Each session dict has a 'trades' key with the list of its trade dicts.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT * FROM sessions
+            WHERE ended_at IS NOT NULL
+            ORDER BY started_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        sessions = [dict(r) for r in await cursor.fetchall()]
+        if not sessions:
+            return []
+        # Batch-fetch all trades for these sessions in one query
+        session_ids = [s["id"] for s in sessions]
+        placeholders = ",".join("?" * len(session_ids))
+        cursor = await db.execute(
+            f"SELECT * FROM trades WHERE session_id IN ({placeholders}) ORDER BY entry_time ASC",
+            session_ids,
+        )
+        trades = [dict(r) for r in await cursor.fetchall()]
+        # Group by session_id
+        by_session: dict[str, list] = {}
+        for t in trades:
+            by_session.setdefault(t["session_id"], []).append(t)
+        for s in sessions:
+            s["trades"] = by_session.get(s["id"], [])
+        return sessions

@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from typing import Optional
 
 import binance_client as bc
@@ -26,6 +27,14 @@ import db
 from ws_order_api import ws_order_api
 
 logger = logging.getLogger(__name__)
+
+# ── Session tracking ─────────────────────────────────────────────────────────
+# A session spans from the first trade open until a portfolio-level exit
+# (PORT_TP_TRAIL, PORTFOLIO_TP, PORTFOLIO_SL, SMART_PORT_SL).
+# reset_session() is called by position_tracker after _close_all_paper.
+_active_session_id:      Optional[str] = None
+_active_session_started: int           = 0
+
 
 # Per-symbol in-flight guard — symbols currently being opened.
 # Replaces the old global _open_lock so concurrent signals don't
@@ -215,16 +224,26 @@ class OrderManager:
         # ── 6. Register in-flight, then open (no lock held across I/O) ───────
         _opening.add(symbol)
         try:
+            # ── Session start ────────────────────────────────────────────────
+            global _active_session_id, _active_session_started
+            if _active_session_id is None:
+                _active_session_id      = uuid.uuid4().hex
+                _active_session_started = int(time.time() * 1000)
+                await db.create_session(_active_session_id, _active_session_started)
+                logger.info("Session started: %s", _active_session_id)
+
             if config.MODE == "paper":
                 return await self._paper_open(
                     symbol, direction, entry, sl, tp1, tp2,
                     qty, leverage, now_ms, score, signal_type,
+                    session_id=_active_session_id,
                 )
             else:
                 return await self._live_open(
                     symbol, direction, entry, sl, tp1, tp2,
                     qty, leverage, now_ms, score, signal_type,
                     atr=atr,
+                    session_id=_active_session_id,
                 )
         finally:
             _opening.discard(symbol)
@@ -244,6 +263,7 @@ class OrderManager:
         now_ms: int,
         score: int,
         signal_type: str = "PULLBACK",
+        session_id: Optional[str] = None,
     ) -> bool:
         trade_id = await db.insert_trade(
             symbol=symbol,
@@ -258,6 +278,7 @@ class OrderManager:
             signal_score=score,
             leverage=leverage,
             signal_type=signal_type,
+            session_id=session_id,
         )
         notional = entry * qty
         logger.info(
@@ -284,6 +305,7 @@ class OrderManager:
         score: int,
         signal_type: str = "PULLBACK",
         atr: float = 0.0,
+        session_id: Optional[str] = None,
     ) -> bool:
         try:
             tick = bc.get_tick_size(symbol)
@@ -341,6 +363,7 @@ class OrderManager:
                 leverage=leverage,
                 binance_order_id=binance_order_id,
                 signal_type=signal_type,
+                session_id=session_id,
             )
             logger.info(
                 "Live trade opened: #%d %s %s entry=%.6f leverage=%dx order=%s",
@@ -351,6 +374,13 @@ class OrderManager:
         except Exception as exc:
             logger.error("Live order failed for %s: %s", symbol, exc)
             return False
+
+
+async def reset_session() -> None:
+    """Clear active session state after a portfolio exit. Idempotent."""
+    global _active_session_id, _active_session_started
+    _active_session_id      = None
+    _active_session_started = 0
 
 
 # Module-level singleton

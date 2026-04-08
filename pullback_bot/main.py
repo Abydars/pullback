@@ -473,6 +473,13 @@ async def api_watchlist() -> JSONResponse:
     return JSONResponse({"symbols": scanner.active_watchlist, "count": len(scanner.active_watchlist)})
 
 
+@app.get("/api/sessions")
+async def api_sessions() -> JSONResponse:
+    """Return completed sessions (ended_at IS NOT NULL), newest first, with their trades."""
+    sessions = await db.get_sessions(50)
+    return JSONResponse(sessions)
+
+
 @app.get("/api/config")
 async def api_config_get() -> JSONResponse:
     """Return all editable config values."""

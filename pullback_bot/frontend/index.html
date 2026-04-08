@@ -340,6 +340,38 @@ canvas.sparkline { display: block; border-radius: 2px; }
 }
 .hist-table tbody tr:hover .btn-del-row { color: var(--muted); border-color: var(--border); }
 .btn-del-row:hover { color: var(--red) !important; border-color: var(--red) !important; }
+
+/* ── Session-grouped trade history ──────────────────────────────────────── */
+#sessions-container { display: flex; flex-direction: column; flex-shrink: 0; }
+.sess-block { border-bottom: 1px solid var(--border); }
+.sess-hdr {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; cursor: pointer; user-select: none;
+}
+.sess-hdr:hover { background: #181818; }
+.sess-arrow { font-size: 9px; color: var(--muted); transition: transform .15s;
+              display: inline-block; min-width: 12px; }
+.sess-arrow.open { transform: rotate(90deg); }
+.sess-num  { font-size: 11px; font-weight: 700; color: var(--text); min-width: 76px; }
+.sess-time { font-size: 10px; color: var(--muted); flex: 1; }
+.sess-tc   { font-size: 10px; color: var(--muted); }
+.sess-exit-badge { border-radius: 3px; padding: 1px 5px; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.sess-exit-trail { background: rgba(245,158,11,.15); color: var(--amber); }
+.sess-exit-sl    { background: rgba(239,68,68,.15);  color: var(--red); }
+.sess-exit-tp    { background: rgba(34,197,94,.15);  color: var(--green); }
+.sess-pnl-pos { color: var(--green); font-weight: 700; font-size: 12px; }
+.sess-pnl-neg { color: var(--red);   font-weight: 700; font-size: 12px; }
+.sess-trades { overflow: hidden; }
+.sess-trade-tbl { width: 100%; border-collapse: collapse; }
+.sess-trade-tbl td { padding: 4px 10px; font-size: 11px; border-bottom: 1px solid #0d0d0d; }
+.sess-trade-tbl tr:last-child td { border-bottom: none; }
+.sess-trade-tbl tr:hover td { background: #181818; }
+.sess-trade-tbl td:first-child { padding-left: 28px; }
+#ungrouped-section { margin-top: 8px; }
+.ungrouped-label { padding: 6px 10px; font-size: 10px; color: var(--muted);
+                   text-transform: uppercase; letter-spacing: .05em;
+                   border-bottom: 1px solid var(--border); }
+
 #chart-symbol { font-size: 14px; font-weight: 700; }
 #chart-price  { font-size: 14px; font-weight: 700; color: var(--green); }
 #chart-change { font-size: 11px; }
@@ -736,31 +768,37 @@ canvas.sparkline { display: block; border-radius: 2px; }
           <span id="hist-summary"></span>
           <button id="btn-del-all" onclick="deleteAllTrades()" title="Delete all trade history">🗑 Delete All</button>
         </div>
-        <table class="hist-table">
-          <thead>
-            <tr>
-              <th data-col="symbol">Symbol</th>
-              <th data-col="direction">Dir</th>
-              <th data-col="entry_time">Entry Time</th>
-              <th data-col="close_time">Exit Time</th>
-              <th data-col="entry_price">Entry $</th>
-              <th data-col="close_price">Close $</th>
-              <th data-col="qty">Qty</th>
-              <th data-col="leverage">Lev</th>
-              <th data-col="margin">Capital</th>
-              <th data-col="signal_type">Strategy</th>
-              <th data-col="signal_score">Score</th>
-              <th data-col="duration">Duration</th>
-              <th data-col="close_reason">Reason</th>
-              <th data-col="fee">Fee</th>
-              <th data-col="pnl_usdt">PnL</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="hist-body">
-            <tr><td colspan="15" class="empty">No closed trades yet</td></tr>
-          </tbody>
-        </table>
+        <!-- Session-grouped view (populated by renderSessions) -->
+        <div id="sessions-container"></div>
+        <!-- Ungrouped fallback: old trades without a session_id -->
+        <div id="ungrouped-section" style="display:none">
+          <div class="ungrouped-label">Previous trades (ungrouped)</div>
+          <table class="hist-table">
+            <thead>
+              <tr>
+                <th data-col="symbol">Symbol</th>
+                <th data-col="direction">Dir</th>
+                <th data-col="entry_time">Entry Time</th>
+                <th data-col="close_time">Exit Time</th>
+                <th data-col="entry_price">Entry $</th>
+                <th data-col="close_price">Close $</th>
+                <th data-col="qty">Qty</th>
+                <th data-col="leverage">Lev</th>
+                <th data-col="margin">Capital</th>
+                <th data-col="signal_type">Strategy</th>
+                <th data-col="signal_score">Score</th>
+                <th data-col="duration">Duration</th>
+                <th data-col="close_reason">Reason</th>
+                <th data-col="fee">Fee</th>
+                <th data-col="pnl_usdt">PnL</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="hist-body">
+              <tr><td colspan="15" class="empty">No closed trades yet</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
     </div>
@@ -816,7 +854,8 @@ const state = {
   watchlist: [],
   scannerRows: {},       // symbol -> {score, direction, lastSignal}
   openTrades: {},        // id -> trade object
-  histTrades: [],        // array of closed trades (last 50)
+  histTrades: [],        // array of closed trades (last 500)
+  sessions:   [],        // completed session objects from /api/sessions
   selectedSymbol: null,
   selectedInterval: '15m',
   lastMarkPrice: null,    // latest mark price for selected symbol
@@ -1393,6 +1432,7 @@ function onInit(data) {
   state.histTrades = data.recent_trades || [];
   _updateSortHeaders();
   renderHistory();
+  loadSessions();
 
   // Stats
   if (data.stats) updateStats(data.stats);
@@ -1538,6 +1578,7 @@ function onPortfolioStop(data) {
     cls = 't-green'; icon = '🏆'; title = 'Portfolio take-profit triggered';
   }
   toast(cls, icon, title, `${data.count} position(s) closed · Total PnL: ${pnlStr}`, 10000);
+  setTimeout(loadSessions, 800);
 }
 
 function onPortfolioTrailArmed(data) {
@@ -1910,99 +1951,186 @@ async function closeAllPositions() {
   }
 }
 
+function _reasonCfg(closeReason) {
+  const reason = (closeReason || '').toUpperCase();
+  return {
+    SL:            { cls: 'hr-sl',    label: 'SL' },
+    TRAIL:         { cls: 'hr-trail', label: 'TRAIL' },
+    TP:            { cls: 'hr-tp',    label: 'TP' },
+    MANUAL:        { cls: 'hr-manual',label: 'MANUAL' },
+    PORTFOLIO_SL:  { cls: 'hr-pf-sl', label: 'PORT SL' },
+    SMART_PORT_SL: { cls: 'hr-pf-sl', label: 'SMART SL' },
+    PORTFOLIO_TP:  { cls: 'hr-pf-tp', label: 'PORT TP' },
+    PORT_TP_TRAIL: { cls: 'hr-pf-tp', label: 'TRAIL TP' },
+    FILLED:        { cls: 'hr-other', label: 'FILLED' },
+    RECONCILED:    { cls: 'hr-other', label: 'RECONCILED' },
+  }[reason] ?? { cls: 'hr-other', label: reason || '—' };
+}
+
 function renderHistory() {
-  const tbody  = document.getElementById('hist-body');
   const trades = state.histTrades;
 
   document.getElementById('hist-count').textContent = trades.length ? `(${trades.length})` : '';
 
-  // Sort
-  const sorted = _sortTrades(trades);
-
-  // Summary line
-  const winCount = sorted.filter(t => (t.pnl_usdt ?? 0) > 0).length;
-  const totalPnl = sorted.reduce((s, t) => s + (t.pnl_usdt ?? 0), 0);
+  // Summary line (all histTrades)
+  const winCount = trades.filter(t => (t.pnl_usdt ?? 0) > 0).length;
+  const totalPnl = trades.reduce((s, t) => s + (t.pnl_usdt ?? 0), 0);
   document.getElementById('hist-summary').textContent =
-    sorted.length
-      ? `${sorted.length} trades · ${winCount}W / ${sorted.length - winCount}L · PnL: ${fmtUsdt(totalPnl)}`
+    trades.length
+      ? `${trades.length} trades · ${winCount}W / ${trades.length - winCount}L · PnL: ${fmtUsdt(totalPnl)}`
       : '';
 
-  if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="15" class="empty">No closed trades yet</td></tr>';
+  // Render session groups
+  renderSessions();
+
+  // Ungrouped: trades with no session_id (legacy) OR whose session hasn't
+  // closed yet (active session — will move to session view when it completes).
+  const completedSessionIds = new Set(state.sessions.map(s => s.id));
+  const ugSection = document.getElementById('ungrouped-section');
+  const tbody     = document.getElementById('hist-body');
+  const ungrouped = trades.filter(t => !t.session_id || !completedSessionIds.has(t.session_id));
+
+  if (ungrouped.length > 0) {
+    ugSection.style.display = '';
+    const sorted = _sortTrades(ungrouped);
+    tbody.innerHTML = '';
+    sorted.forEach(t => {
+      const pnl    = t.pnl_usdt ?? 0;
+      const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+      const isLong = t.direction === 'LONG';
+      const entryDt  = t.entry_time ? _fmtTs(t.entry_time) : '—';
+      const exitDt   = t.close_time ? _fmtTs(t.close_time) : '—';
+      const durS     = t.close_time && t.entry_time ? Math.round((t.close_time - t.entry_time) / 1000) : null;
+      const durStr   = durS !== null ? _fmtDurS(durS) : '—';
+      const lev      = t.leverage ?? '—';
+      const notional = t.entry_price && t.qty ? t.entry_price * t.qty : null;
+      const margin   = notional && t.leverage ? (notional / t.leverage) : null;
+      const marginStr = margin != null ? `$${margin.toFixed(2)}` : '—';
+      const TAKER    = 0.0004;
+      const fee      = (t.entry_price && t.close_price && t.qty) ? (t.entry_price + t.close_price) * t.qty * TAKER : null;
+      const feeStr   = fee != null ? `$${fee.toFixed(4)}` : '—';
+      const rc = _reasonCfg(t.close_reason);
+
+      const tr = document.createElement('tr');
+      tr.style.animation = 'slideIn .2s ease';
+      tr.innerHTML = `
+        <td style="font-weight:600">${t.symbol.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span></td>
+        <td><span class="hist-dir ${isLong ? 'long' : 'short'}">${isLong ? 'LONG' : 'SHORT'}</span></td>
+        <td style="color:var(--muted);white-space:nowrap">${entryDt}</td>
+        <td style="color:var(--muted);white-space:nowrap">${exitDt}</td>
+        <td style="color:var(--muted)">${fmtPrice(t.entry_price)}</td>
+        <td>${fmtPrice(t.close_price)}</td>
+        <td style="color:var(--muted)">${t.qty}</td>
+        <td style="color:var(--muted)">${lev}×</td>
+        <td style="color:var(--muted)">${marginStr}</td>
+        <td style="color:var(--muted);font-size:10px">${t.signal_type ?? 'PULLBACK'}</td>
+        <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
+        <td style="color:var(--muted)">${durStr}</td>
+        <td><span class="hist-reason ${rc.cls}">${rc.label}</span></td>
+        <td style="color:var(--red);opacity:.7">${feeStr}</td>
+        <td class="${pnlCls}" style="font-weight:600">${fmtUsdt(pnl)}</td>
+        <td><button class="btn-del-row" title="Delete this trade">🗑</button></td>
+      `;
+      tr.querySelectorAll('td:not(:last-child)').forEach(td =>
+        td.addEventListener('click', () => selectSymbol(t.symbol))
+      );
+      tr.querySelector('.btn-del-row').addEventListener('click', e => {
+        e.stopPropagation();
+        deleteTrade(t.id, tr);
+      });
+      tbody.appendChild(tr);
+    });
+  } else {
+    ugSection.style.display = 'none';
+    tbody.innerHTML = '';
+  }
+
+  // Empty state (no sessions, no ungrouped trades)
+  if (!state.sessions.length && !trades.length) {
+    document.getElementById('sessions-container').innerHTML =
+      '<p style="padding:20px;text-align:center;color:var(--muted);margin:0">No closed trades yet</p>';
+  }
+}
+
+function renderSessions() {
+  const container = document.getElementById('sessions-container');
+  if (!state.sessions.length) {
+    container.innerHTML = '';
     return;
   }
 
-  tbody.innerHTML = '';
-  sorted.forEach(t => {
-    const pnl    = t.pnl_usdt ?? 0;
-    const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
-    const isLong = t.direction === 'LONG';
+  const total = state.sessions.length;
+  container.innerHTML = '';
 
-    // Timestamps
-    const entryDt = t.entry_time ? _fmtTs(t.entry_time) : '—';
-    const exitDt  = t.close_time ? _fmtTs(t.close_time) : '—';
+  state.sessions.forEach((sess, idx) => {
+    const sessNum   = total - idx;  // newest = highest number
+    const startedStr = _fmtTs(sess.started_at);
+    const pnl       = sess.net_pnl ?? 0;
+    const pnlCls    = pnl >= 0 ? 'sess-pnl-pos' : 'sess-pnl-neg';
+    const exitReason = (sess.exit_reason || '').toUpperCase();
 
-    // Duration
-    const durS = t.close_time && t.entry_time
-      ? Math.round((t.close_time - t.entry_time) / 1000) : null;
-    const durStr = durS !== null ? _fmtDurS(durS) : '—';
+    const badgeCls = {
+      PORT_TP_TRAIL: 'sess-exit-trail',
+      PORTFOLIO_TP:  'sess-exit-tp',
+      PORTFOLIO_SL:  'sess-exit-sl',
+      SMART_PORT_SL: 'sess-exit-sl',
+    }[exitReason] || 'sess-exit-sl';
+    const badgeLabel = {
+      PORT_TP_TRAIL: 'TRAIL TP',
+      PORTFOLIO_TP:  'PORT TP',
+      PORTFOLIO_SL:  'PORT SL',
+      SMART_PORT_SL: 'SMART SL',
+    }[exitReason] || exitReason;
 
-    // Leverage, margin & fees
-    const lev  = t.leverage ?? '—';
-    const notional = t.entry_price && t.qty ? t.entry_price * t.qty : null;
-    const margin   = notional && t.leverage ? (notional / t.leverage) : null;
-    const marginStr = margin != null ? `$${margin.toFixed(2)}` : '—';
-    const TAKER = 0.0004;
-    const fee = (t.entry_price && t.close_price && t.qty)
-      ? (t.entry_price + t.close_price) * t.qty * TAKER : null;
-    const feeStr = fee != null ? `$${fee.toFixed(4)}` : '—';
+    const isFirst = idx === 0;  // newest session: expanded by default
+    const tradesHtml = (sess.trades || []).map(t => {
+      const tPnl    = t.pnl_usdt ?? 0;
+      const tPnlCls = tPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+      const isLong  = t.direction === 'LONG';
+      const rc      = _reasonCfg(t.close_reason);
+      return `<tr>
+        <td style="font-weight:600">${t.symbol.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span></td>
+        <td><span class="hist-dir ${isLong ? 'long' : 'short'}">${isLong ? 'LONG' : 'SHORT'}</span></td>
+        <td style="color:var(--muted)">${t.signal_type ?? 'PULLBACK'}</td>
+        <td><span class="hist-reason ${rc.cls}">${rc.label}</span></td>
+        <td class="${tPnlCls}" style="font-weight:600">${fmtUsdt(tPnl)}</td>
+      </tr>`;
+    }).join('');
 
-    // Reason badge
-    const reason = (t.close_reason || '').toUpperCase();
-    const reasonCfg = {
-      SL:            { cls: 'hr-sl',    label: 'SL' },
-      TRAIL:         { cls: 'hr-trail', label: 'TRAIL' },
-      TP:            { cls: 'hr-tp',    label: 'TP' },
-      MANUAL:        { cls: 'hr-manual',label: 'MANUAL' },
-      PORTFOLIO_SL:  { cls: 'hr-pf-sl', label: 'PORT SL' },
-      SMART_PORT_SL: { cls: 'hr-pf-sl', label: 'SMART SL' },
-      PORTFOLIO_TP:  { cls: 'hr-pf-tp', label: 'PORT TP' },
-      PORT_TP_TRAIL: { cls: 'hr-pf-tp', label: 'PORT TP TRAIL' },
-      FILLED:        { cls: 'hr-other', label: 'FILLED' },
-      RECONCILED:    { cls: 'hr-other', label: 'RECONCILED' },
-    }[reason] ?? { cls: 'hr-other', label: reason || '—' };
-
-    const tr = document.createElement('tr');
-    tr.style.animation = 'slideIn .2s ease';
-    tr.innerHTML = `
-      <td style="font-weight:600">${t.symbol.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span></td>
-      <td><span class="hist-dir ${isLong ? 'long' : 'short'}">${isLong ? 'LONG' : 'SHORT'}</span></td>
-      <td style="color:var(--muted);white-space:nowrap">${entryDt}</td>
-      <td style="color:var(--muted);white-space:nowrap">${exitDt}</td>
-      <td style="color:var(--muted)">${fmtPrice(t.entry_price)}</td>
-      <td>${fmtPrice(t.close_price)}</td>
-      <td style="color:var(--muted)">${t.qty}</td>
-      <td style="color:var(--muted)">${lev}×</td>
-      <td style="color:var(--muted)">${marginStr}</td>
-      <td style="color:var(--muted);font-size:10px">${t.signal_type ?? 'PULLBACK'}</td>
-      <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
-      <td style="color:var(--muted)">${durStr}</td>
-      <td><span class="hist-reason ${reasonCfg.cls}">${reasonCfg.label}</span></td>
-      <td style="color:var(--red);opacity:.7">${feeStr}</td>
-      <td class="${pnlCls}" style="font-weight:600">${fmtUsdt(pnl)}</td>
-      <td><button class="btn-del-row" title="Delete this trade">🗑</button></td>
+    const block = document.createElement('div');
+    block.className = 'sess-block';
+    block.innerHTML = `
+      <div class="sess-hdr">
+        <span class="sess-arrow${isFirst ? ' open' : ''}">▶</span>
+        <span class="sess-num">Session ${sessNum}</span>
+        <span class="sess-time">${startedStr}</span>
+        <span class="sess-exit-badge ${badgeCls}">${badgeLabel}</span>
+        <span class="sess-tc">${sess.trade_count ?? (sess.trades || []).length} trades</span>
+        <span class="${pnlCls}">${fmtUsdt(pnl)}</span>
+      </div>
+      <div class="sess-trades"${isFirst ? '' : ' style="display:none"'}>
+        <table class="sess-trade-tbl"><tbody>${tradesHtml}</tbody></table>
+      </div>
     `;
-    // Row cells → select symbol on chart
-    tr.querySelectorAll('td:not(:last-child)').forEach(td =>
-      td.addEventListener('click', () => selectSymbol(t.symbol))
-    );
-    // Delete button
-    tr.querySelector('.btn-del-row').addEventListener('click', e => {
-      e.stopPropagation();
-      deleteTrade(t.id, tr);
+    block.querySelector('.sess-hdr').addEventListener('click', () => {
+      const arrow  = block.querySelector('.sess-arrow');
+      const trades = block.querySelector('.sess-trades');
+      const isOpen = arrow.classList.contains('open');
+      arrow.classList.toggle('open', !isOpen);
+      trades.style.display = isOpen ? 'none' : '';
     });
-    tbody.appendChild(tr);
+    container.appendChild(block);
   });
+}
+
+async function loadSessions() {
+  try {
+    const resp = await fetch('/api/sessions');
+    if (resp.ok) {
+      state.sessions = await resp.json();
+      renderHistory();
+    }
+  } catch (_) {}
 }
 
 // ============================================================
@@ -2068,11 +2196,12 @@ async function deleteAllTrades() {
 
 function onTradeDeleted(data) {
   state.histTrades = state.histTrades.filter(t => t.id !== data.id);
-  renderHistory();
+  loadSessions();  // refresh session trade lists too
 }
 
 function onTradesCleared() {
   state.histTrades = [];
+  state.sessions   = [];
   renderHistory();
 }
 
