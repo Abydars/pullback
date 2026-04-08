@@ -394,6 +394,24 @@ async def _flush_pending_signals() -> None:
             acted_on=False,
         )
 
+    # ── Gradual build cap ─────────────────────────────────────────────────────
+    # Limit how many new trades open in a single scan.  admitted is already
+    # sorted highest-score first so the best signals are always taken.
+    # Deferred signals are not logged — they re-appear next scan if the
+    # setup is still valid on the new candle.
+    current_open  = len(open_trades)
+    available_slots = config.MAX_OPEN_TRADES - current_open
+    scan_limit    = min(config.INITIAL_BATCH_SIZE, available_slots)
+    this_scan  = admitted[:scan_limit]
+    deferred   = admitted[scan_limit:]
+
+    if deferred:
+        logger.info(
+            "Gradual build: %d opening this scan, %d deferred "
+            "(open=%d, limit=%d)",
+            len(this_scan), len(deferred), current_open, scan_limit,
+        )
+
     async def _act(sig: dict) -> None:
         acted = await _order_manager.handle_signal(sig) if _order_manager else False
         await db.insert_scanner_log(
@@ -404,8 +422,8 @@ async def _flush_pending_signals() -> None:
             acted_on=acted,
         )
 
-    if admitted:
-        await asyncio.gather(*[asyncio.create_task(_act(sig)) for sig in admitted])
+    if this_scan:
+        await asyncio.gather(*[asyncio.create_task(_act(sig)) for sig in this_scan])
 
 
 # ── Mark-price WebSocket (for paper PnL) ─────────────────────────────────────

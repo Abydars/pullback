@@ -107,6 +107,11 @@ MAX_OPEN_TRADES: int = _int("MAX_OPEN_TRADES", 5)
 # Prevents N correlated bets when a broad market move fires N same-direction
 # signals simultaneously.  Default 3; must be ≤ MAX_OPEN_TRADES.
 MAX_SAME_DIRECTION: int = _int("MAX_SAME_DIRECTION", 3)
+# INITIAL_BATCH_SIZE: maximum number of new trades to open in a single
+# 15m candle scan. Signals beyond this limit are deferred — they are not
+# logged or dropped, just not acted on this scan.  Builds positions
+# gradually across multiple candles rather than all at once.  Default 2.
+INITIAL_BATCH_SIZE: int = _int("INITIAL_BATCH_SIZE", 2)
 # MAX_LEVERAGE: absolute ceiling on leverage regardless of ATR tier.
 MAX_LEVERAGE: int = _int("MAX_LEVERAGE", 20)
 # USE_TRAILING: True = trail arm activates a trailing stop.
@@ -168,6 +173,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "RISK_PCT":                  float,
     "MAX_OPEN_TRADES":           int,
     "MAX_SAME_DIRECTION":        int,
+    "INITIAL_BATCH_SIZE":        int,
     "MAX_LEVERAGE":              int,
     "USE_TRAILING":              bool,
     "USE_STOP_LOSS":             bool,
@@ -244,6 +250,8 @@ async def update(key: str, raw_value: str) -> None:
         raise ValueError("RISK_PCT must be 0.1–100")
     if key == "MAX_SAME_DIRECTION" and not (1 <= value <= max(10, globals().get("MAX_OPEN_TRADES", 10))):
         raise ValueError("MAX_SAME_DIRECTION must be between 1 and MAX_OPEN_TRADES")
+    if key == "INITIAL_BATCH_SIZE" and not (1 <= value <= max(10, globals().get("MAX_OPEN_TRADES", 10))):
+        raise ValueError("INITIAL_BATCH_SIZE must be between 1 and MAX_OPEN_TRADES")
     if key == "PORTFOLIO_TP_MODE" and value not in ("trailing", "normal"):
         raise ValueError("PORTFOLIO_TP_MODE must be 'trailing' or 'normal'")
     if key == "PORTFOLIO_TRAIL_FACTOR" and not (0.0 <= value <= 1.0):
