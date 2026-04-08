@@ -385,14 +385,10 @@ async def restore_session() -> None:
     global _active_session_id, _active_session_started
 
     open_trades = await db.get_open_trades()
-    print(f"DEBUG restore_session: found {len(open_trades)} open trades")
-    for t in open_trades:
-        print(f"DEBUG  trade {t['id']} session_id={t.get('session_id')}")
     session_ids = list(set(
         t["session_id"] for t in open_trades
         if t.get("session_id")
     ))
-    print(f"DEBUG session_ids={session_ids}")
 
     if not session_ids:
         return
