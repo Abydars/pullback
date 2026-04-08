@@ -140,6 +140,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             "recent_trades": closed_trades,
             "stats": {**today_stats, **all_stats},
             "watchlist": scanner.active_watchlist,
+            "btc_regime": scanner._last_btc_regime,
         })
 
         # Listen for client messages (e.g. subscribe_chart)

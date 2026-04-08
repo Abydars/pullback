@@ -1397,6 +1397,7 @@ function onInit(data) {
   // Stats
   if (data.stats) updateStats(data.stats);
   updateUnrealizedStat();
+  onBtcRegime({ regime: data.btc_regime ?? 'NEUTRAL' });
 
   // Auto-load first symbol chart
   if (!state.selectedSymbol && data.watchlist && data.watchlist.length) {
