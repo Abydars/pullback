@@ -99,6 +99,40 @@ def _swing_lows(series: pd.Series, window: int = 5) -> pd.Series:
     )
 
 
+# ── BTC Regime ─────────────────────────────────────────────────────────────────
+
+def get_btc_regime(klines_15m: list[dict]) -> str:
+    """
+    Classify the current BTC market regime using a 3-candle (45-minute)
+    rate-of-change on the 15m timeframe.
+
+    15m single-candle noise on BTC ≈ 0.3–0.5%.  A sustained 3-candle move
+    of ≥ 0.8% (BTC_BREAKOUT_ROC default) is a genuine breakout, not noise.
+
+    Returns
+    -------
+    "BULL_BREAKOUT"  — BTC moved up ≥ threshold in the last 45 min
+    "BEAR_BREAKDOWN" — BTC moved down ≥ threshold in the last 45 min
+    "NEUTRAL"        — within normal noise, or filter is disabled
+    """
+    try:
+        if not config.BTC_REGIME_FILTER:
+            return "NEUTRAL"
+        if len(klines_15m) < 5:
+            return "NEUTRAL"
+        closes = [float(c["close"]) for c in klines_15m]
+        btc_roc = (closes[-1] - closes[-4]) / closes[-4]
+        threshold = config.BTC_BREAKOUT_ROC
+        if btc_roc > threshold:
+            return "BULL_BREAKOUT"
+        elif btc_roc < -threshold:
+            return "BEAR_BREAKDOWN"
+        else:
+            return "NEUTRAL"
+    except Exception:
+        return "NEUTRAL"
+
+
 # ── Signal Engine ──────────────────────────────────────────────────────────────
 
 def check_pullback(

@@ -54,6 +54,9 @@ _BATCH_WINDOW_S = 3.0  # seconds to wait for stragglers after first signal
 # reference to order_manager (set by main.py to avoid circular import)
 _order_manager = None
 
+# BTC regime — tracks last broadcast value to avoid spamming
+_last_btc_regime: str = "NEUTRAL"
+
 
 def set_order_manager(om) -> None:
     global _order_manager
@@ -255,20 +258,41 @@ async def _evaluate_symbol(symbol: str) -> None:
         # k15[-1] is the candle that just closed; k5[-1] may still be forming.
         # Pass confirmed candles only: exclude the currently-forming 5m candle.
         mode = config.SIGNAL_MODE
+
+        # ── BTC Regime Filter — computed once per evaluation call ─────────────
+        global _last_btc_regime
+        btc_k15 = _kline_buffers.get("BTCUSDT", {}).get("15m", [])
+        regime = signal_engine.get_btc_regime(btc_k15)
+        if regime != _last_btc_regime:
+            _last_btc_regime = regime
+            await wsb.broadcaster.broadcast("btc_regime", {"regime": regime})
+
+        def _regime_blocks(sig: dict) -> bool:
+            """Return True if this signal should be suppressed by the regime filter."""
+            if symbol == "BTCUSDT":
+                return False   # never block BTC itself
+            if regime == "BULL_BREAKOUT" and sig["direction"] == "SHORT":
+                logger.debug("BTC BULL_BREAKOUT — blocking SHORT %s", symbol)
+                return True
+            if regime == "BEAR_BREAKDOWN" and sig["direction"] == "LONG":
+                logger.debug("BTC BEAR_BREAKDOWN — blocking LONG %s", symbol)
+                return True
+            return False
+
         candidates: list[dict] = []
 
         if mode in ("pullback", "both"):
             s = await asyncio.to_thread(
                 signal_engine.check_pullback, symbol, k15[:], k5[:-1]
             )
-            if s:
+            if s and not _regime_blocks(s):
                 candidates.append(s)
 
         if mode in ("breakout", "both"):
             s = await asyncio.to_thread(
                 signal_engine.check_breakout, symbol, k15[:], k5[:-1]
             )
-            if s:
+            if s and not _regime_blocks(s):
                 candidates.append(s)
 
         if not candidates:

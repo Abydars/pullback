@@ -83,6 +83,16 @@ WATCHLIST_REFRESH_MINUTES: int = _int("WATCHLIST_REFRESH_MINUTES", 15)
 SIGNAL_MODE: str = _get("SIGNAL_MODE", "pullback")
 SIGNAL_SCORE_THRESHOLD: int = _int("SIGNAL_SCORE_THRESHOLD", 70)
 
+# ── BTC Regime Filter ─────────────────────────────────────────────────────────
+# When enabled, the scanner blocks alt-coin signals that trade against the
+# current BTC 15m momentum: SHORT signals are suppressed during a BTC bull
+# breakout; LONG signals are suppressed during a BTC bear breakdown.
+# BTC_BREAKOUT_ROC: 3-candle (45 min) rate-of-change threshold.
+#   15m single-candle noise ≈ 0.3–0.5%; a 3-candle sustained move of 0.8%
+#   is a genuine regime shift, not random noise.
+BTC_REGIME_FILTER: bool  = _bool("BTC_REGIME_FILTER", True)
+BTC_BREAKOUT_ROC:  float = _float("BTC_BREAKOUT_ROC", 0.008)
+
 # ── Risk / Order Settings ─────────────────────────────────────────────────────
 # CAPITAL: total account equity in USDT.
 # Per-trade margin = CAPITAL / MAX_OPEN_TRADES.
@@ -152,6 +162,8 @@ EDITABLE_KEYS: dict[str, type] = {
     "WATCHLIST_REFRESH_MINUTES": int,
     "SIGNAL_MODE":               str,
     "SIGNAL_SCORE_THRESHOLD":    int,
+    "BTC_REGIME_FILTER":         bool,
+    "BTC_BREAKOUT_ROC":          float,
     "CAPITAL":                   float,
     "RISK_PCT":                  float,
     "MAX_OPEN_TRADES":           int,
@@ -236,6 +248,8 @@ async def update(key: str, raw_value: str) -> None:
         raise ValueError("PORTFOLIO_TP_MODE must be 'trailing' or 'normal'")
     if key == "PORTFOLIO_TRAIL_FACTOR" and not (0.0 <= value <= 1.0):
         raise ValueError("PORTFOLIO_TRAIL_FACTOR must be 0.0–1.0")
+    if key == "BTC_BREAKOUT_ROC" and not (0.001 <= value <= 0.05):
+        raise ValueError("BTC_BREAKOUT_ROC must be between 0.001 and 0.05")
 
     # Apply in-memory
     globals()[key] = value

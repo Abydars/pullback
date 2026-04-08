@@ -42,6 +42,12 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 .mode-paper { background: rgba(99,102,241,.25); color: var(--indigo); border: 1px solid var(--indigo); }
 .mode-live  { background: rgba(239,68,68,.25);  color: var(--red);    border: 1px solid var(--red); }
+.regime-badge {
+  padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 700; letter-spacing: .08em;
+}
+.regime-neutral { color: var(--muted); }
+.regime-bull    { color: var(--green); background: rgba(34,197,94,0.15); }
+.regime-bear    { color: var(--red);   background: rgba(239,68,68,0.15); }
 #conn-dot {
   width: 8px; height: 8px; border-radius: 50%; background: var(--red);
   transition: background .3s;
@@ -584,6 +590,7 @@ canvas.sparkline { display: block; border-radius: 2px; }
   <div id="header">
     <span class="logo">⬡ PULLBACK BOT</span>
     <span id="mode-badge" class="mode-badge mode-paper">PAPER</span>
+    <span id="btc-regime-badge" class="regime-badge regime-neutral">BTC –</span>
     <div id="conn-dot" title="WebSocket connection"></div>
     <span class="stat-pill">Positions: <span id="h-open">0</span></span>
     <span class="stat-pill">Watchlist: <span id="h-watch">0</span></span>
@@ -1366,6 +1373,7 @@ function handleMessage(type, data) {
     case 'kline_update':             onKlineUpdate(data);           break;
     case 'kline_history':            onKlineHistory(data);          break;
     case 'system_status':            onSystemStatus(data);          break;
+    case 'btc_regime':               onBtcRegime(data);             break;
   }
 }
 
@@ -1585,6 +1593,19 @@ function onSystemStatus(data) {
   document.getElementById('h-clients').textContent = data.ws_clients ?? 0;
   document.getElementById('st-open').textContent   = data.open_positions ?? 0;
   // Server time — overwritten by the live clock interval immediately after
+}
+
+function onBtcRegime(data) {
+  const el = document.getElementById('btc-regime-badge');
+  if (!el) return;
+  const map = {
+    NEUTRAL:        ['regime-neutral', 'BTC –'],
+    BULL_BREAKOUT:  ['regime-bull',    'BTC ▲ BULL'],
+    BEAR_BREAKDOWN: ['regime-bear',    'BTC ▼ BEAR'],
+  };
+  const [cls, text] = map[data.regime] ?? map['NEUTRAL'];
+  el.className  = 'regime-badge ' + cls;
+  el.textContent = text;
 }
 
 // ============================================================
@@ -2199,6 +2220,10 @@ const CFG_FIELDS = [
         options: ['pullback', 'breakout', 'both'],
         hint: 'pullback = reversion to EMA50/swing · breakout = close outside 20-bar range · both = run all, trade highest score' },
       { key: 'SIGNAL_SCORE_THRESHOLD', label: 'Min Signal Score (0–100)', type: 'number', hint: 'Lower = more entries, higher = stricter' },
+      { key: 'BTC_REGIME_FILTER', label: 'BTC Regime Filter', type: 'select', options: ['true', 'false'],
+        hint: 'Block alt shorts during BTC bull breakout and alt longs during BTC bear breakdown. Prevents trading against the market boss on 15m timeframe.' },
+      { key: 'BTC_BREAKOUT_ROC', label: 'BTC Breakout ROC Threshold', type: 'number', step: '0.001',
+        hint: 'BTC 3-candle (45 min) rate of change to detect breakout. 0.008 = 0.8% move in 45 minutes. Lower = more sensitive.' },
     ],
   },
   {
