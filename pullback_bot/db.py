@@ -70,6 +70,10 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);",
     "CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);",
     "CREATE INDEX IF NOT EXISTS idx_scanner_log_ts ON scanner_log(timestamp);",
+]
+
+# Indexes that depend on migrated columns — created AFTER the migration loop.
+CREATE_INDEXES_POST_MIGRATION = [
     "CREATE INDEX IF NOT EXISTS idx_trades_session ON trades(session_id);",
 ]
 
@@ -95,6 +99,9 @@ async def init_db() -> None:
                 logger.info("Migration applied: %s", col_sql)
             except Exception:
                 pass  # column already exists
+        # Indexes on migrated columns — must run after the migration loop
+        for idx in CREATE_INDEXES_POST_MIGRATION:
+            await db.execute(idx)
         await db.commit()
     logger.info("Database initialised at %s", DB_PATH)
 
