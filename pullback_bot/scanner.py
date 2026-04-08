@@ -394,22 +394,45 @@ async def _flush_pending_signals() -> None:
             acted_on=False,
         )
 
-    # ── Gradual build cap ─────────────────────────────────────────────────────
+    # ── Gradual build cap (PnL-aware) ────────────────────────────────────────
     # Limit how many new trades open in a single scan.  admitted is already
     # sorted highest-score first so the best signals are always taken.
     # Deferred signals are not logged — they re-appear next scan if the
     # setup is still valid on the new candle.
-    current_open  = len(open_trades)
+    #
+    # When existing positions are losing, adding more trades increases
+    # correlated exposure.  Scale back the per-scan limit based on how
+    # negative total unrealized PnL is relative to PORTFOLIO_MIN_TP_USDT/2:
+    #   >= 0          → full INITIAL_BATCH_SIZE (market cooperating)
+    #   > -half_target → 1 (cautious)
+    #   <= -half_target → 0 (deeply negative, stop building)
+    # When current_open == 0 always use INITIAL_BATCH_SIZE (fresh cycle).
+    import position_tracker as _pt
+    total_unrealized = sum(_pt.paper_unrealized.values()) if _pt.paper_unrealized else 0.0
+
+    current_open    = len(open_trades)
     available_slots = config.MAX_OPEN_TRADES - current_open
-    scan_limit    = min(config.INITIAL_BATCH_SIZE, available_slots)
+
+    if current_open == 0:
+        pnl_limit = config.INITIAL_BATCH_SIZE
+    else:
+        half_target = config.PORTFOLIO_MIN_TP_USDT / 2
+        if total_unrealized >= 0:
+            pnl_limit = config.INITIAL_BATCH_SIZE
+        elif half_target > 0 and total_unrealized > -half_target:
+            pnl_limit = 1
+        else:
+            pnl_limit = 0
+
+    scan_limit = min(pnl_limit, available_slots)
     this_scan  = admitted[:scan_limit]
     deferred   = admitted[scan_limit:]
 
     if deferred:
         logger.info(
-            "Gradual build: %d opening this scan, %d deferred "
-            "(open=%d, limit=%d)",
-            len(this_scan), len(deferred), current_open, scan_limit,
+            "Gradual build: %d opening this scan, %d deferred — "
+            "open=%d, unrealized=%.2f, limit=%d",
+            len(this_scan), len(deferred), current_open, total_unrealized, scan_limit,
         )
 
     async def _act(sig: dict) -> None:
