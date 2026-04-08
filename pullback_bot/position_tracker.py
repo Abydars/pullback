@@ -551,7 +551,19 @@ async def _paper_tick() -> None:
                         floor = min_tp_usdt + (_peak_portfolio_pnl - min_tp_usdt) * trail_factor
 
                         if _peak_portfolio_pnl > min_tp_usdt and total_unrealized <= floor:
-                            triggered_reason = "PORT_TP_TRAIL"
+                            if total_unrealized >= min_tp_usdt:
+                                # PnL is between floor and min_tp — close with guaranteed profit
+                                triggered_reason = "PORT_TP_TRAIL"
+                            else:
+                                # PnL dropped below min_tp — disarm without closing;
+                                # wait for recovery back to min_tp before re-arming.
+                                _portfolio_trail_armed = False
+                                _peak_portfolio_pnl    = 0.0
+                                logger.info(
+                                    "Portfolio trail disarmed — PnL %.4f dropped below "
+                                    "min target %.4f, will re-arm on recovery",
+                                    total_unrealized, min_tp_usdt,
+                                )
                         elif total_unrealized < 0:
                             # Phase 3 — disarm: portfolio went negative → reset so
                             # the trail can re-arm when PnL recovers to the target.
