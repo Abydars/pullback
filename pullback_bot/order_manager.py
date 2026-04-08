@@ -376,6 +376,36 @@ class OrderManager:
             return False
 
 
+async def restore_session() -> None:
+    """
+    On server restart, if open trades already carry a session_id, resume
+    that session instead of creating a new one for the next signal.
+    Called once from main.py startup before the scanner starts.
+    """
+    global _active_session_id, _active_session_started
+
+    open_trades = await db.get_open_trades()
+    session_ids = list(set(
+        t["session_id"] for t in open_trades
+        if t.get("session_id")
+    ))
+
+    if not session_ids:
+        return
+
+    if len(session_ids) > 1:
+        logger.warning(
+            "restore_session: multiple session IDs in open trades %s — using most recent",
+            session_ids,
+        )
+
+    _active_session_id = session_ids[-1]
+    logger.info(
+        "Session restored after restart: %s (%d open trade(s))",
+        _active_session_id, len(open_trades),
+    )
+
+
 async def reset_session() -> None:
     """Clear active session state after a portfolio exit. Idempotent."""
     global _active_session_id, _active_session_started

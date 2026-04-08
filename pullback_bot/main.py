@@ -77,6 +77,9 @@ async def on_startup() -> None:
         await user_data_stream.start()
         logger.info("Live mode: WS order API and user data stream started")
 
+    # 3b. Restore active session if open trades already have a session_id
+    await om.restore_session()
+
     # 4. Scanner
     await scanner.start(order_manager=om.order_manager)
 
