@@ -302,9 +302,11 @@ def _should_smart_port_sl_trigger(
        (total_unrealized < -(PORTFOLIO_MIN_TP_USDT / 2))
        — same threshold used by the scanner to halt new entries
 
-    Requires at least 2 open trades — a single losing trade cannot trigger.
+    Requires at least INITIAL_BATCH_SIZE + 1 open trades — prevents triggering
+    on the first batch alone before recovery slots have opened.
     """
-    if len(open_trades) < 2:
+    min_trades = config.INITIAL_BATCH_SIZE + 1
+    if len(open_trades) < min_trades:
         return False
 
     # Condition 1 — majority negative
