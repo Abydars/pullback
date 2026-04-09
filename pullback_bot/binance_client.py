@@ -128,6 +128,10 @@ async def get_mark_price(symbol: str) -> float:
     data = await _get("/fapi/v1/premiumIndex", params={"symbol": symbol})
     return float(data["markPrice"])
 
+async def get_all_premium_indices() -> list[dict]:
+    """Return the premium index (including lastFundingRate) for all symbols."""
+    return await _get("/fapi/v1/premiumIndex")
+
 
 async def get_positions() -> list[dict]:
     """Get all open positions (signed)."""

@@ -14,6 +14,7 @@ Responsibilities:
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 import time
@@ -268,8 +269,8 @@ def _update_buffer(symbol: str, interval: str, candle: dict, is_closed: bool) ->
         buf.append(candle)
         # Keep only what we need (500 for 15m — EMA200 needs ~2.5× period for
         # stable burn-in; 60 for 5m; 10 for 1m which is only used for mark-price
-        # freshness checks)
-        limit = {"15m": 500, "5m": 60, "1m": 10}.get(interval, 60)
+        # stable burn-in; 60 for 5m; 60 for 1m (for micro-scalp history)
+        limit = {"15m": 500, "5m": 60, "1m": 60}.get(interval, 60)
         if len(buf) > limit:
             _kline_buffers[symbol][interval] = buf[-limit:]
 
@@ -314,11 +315,12 @@ async def _run_kline_ws() -> None:
                     if parsed:
                         sym, interval, candle, is_closed = parsed
                         _update_buffer(sym, interval, candle, is_closed)
-                        # Fire signal check immediately on confirmed 5m close to catch breakouts early
-                        if interval == "5m" and is_closed:
-                            asyncio.create_task(
-                                _evaluate_symbol(sym), name=f"eval_{sym}"
-                            )
+                        # Route the signal engine hook dynamically based on active mode
+                        if is_closed:
+                            if config.SIGNAL_MODE == "micro_scalp" and interval == "1m":
+                                asyncio.create_task(_evaluate_symbol(sym), name=f"eval_{sym}")
+                            elif config.SIGNAL_MODE != "micro_scalp" and interval == "5m":
+                                asyncio.create_task(_evaluate_symbol(sym), name=f"eval_{sym}")
                         # Broadcast to any UI client subscribed to this symbol/interval
                         buf = _kline_buffers[sym][interval]
                         ema50 = _compute_ema_tail(buf, 50) if len(buf) >= 50 else 0.0
@@ -353,7 +355,10 @@ async def _evaluate_symbol(symbol: str) -> None:
     try:
         k15 = _kline_buffers[symbol]["15m"]
         k5  = _kline_buffers[symbol]["5m"]
-        if len(k15) < 210 or len(k5) < 50:
+        k1m = _kline_buffers[symbol]["1m"]
+        if config.SIGNAL_MODE != "micro_scalp" and (len(k15) < 210 or len(k5) < 50):
+            return
+        if config.SIGNAL_MODE == "micro_scalp" and len(k1m) < 20:
             return
 
         # Cooldown — avoid spamming signals for the same symbol
@@ -407,6 +412,13 @@ async def _evaluate_symbol(symbol: str) -> None:
         if mode in ("pullback", "both"):
             s = await asyncio.to_thread(
                 signal_engine.check_pullback, symbol, k15[:], k5[:]
+            )
+            if s and not _regime_blocks(s):
+                candidates.append(s)
+                
+        if mode == "micro_scalp":
+            s = await asyncio.to_thread(
+                signal_engine.check_micro_scalp, symbol, k1m[:]
             )
             if s and not _regime_blocks(s):
                 candidates.append(s)
@@ -634,6 +646,9 @@ async def start(order_manager=None) -> None:
     if order_manager:
         set_order_manager(order_manager)
 
+    # Boot temporal clock strategy
+    asyncio.create_task(_run_funding_predator_clock(), name="funding_predator")
+
     # Initial watchlist
     active_watchlist = await build_watchlist()
     await wsb.broadcaster.broadcast(
@@ -657,3 +672,58 @@ async def start(order_manager=None) -> None:
     asyncio.create_task(_run_mark_price_ws(), name="mark_price_ws")
     asyncio.create_task(refresh_watchlist_loop(), name="watchlist_refresh")
     logger.info("Scanner started — evaluation driven by 15m candle close events.")
+
+async def _run_funding_predator_clock() -> None:
+    """
+    Dedicated clock loop for the Funding Predator.
+    Executes purely on UTC temporal checks bypassing the websocket queue entirely.
+    """
+    import binance_client as bc
+    import signal_engine
+    import order_manager as om
+    
+    target_tick_hours = {0, 8, 16}
+    target_hour_pre = {7, 15, 23}
+    
+    last_ambush_hour = -1
+    
+    while True:
+        await asyncio.sleep(1)
+        if config.SIGNAL_MODE != "funding_predator":
+            continue
+            
+        now = datetime.datetime.utcnow()
+        if now.hour in target_hour_pre and now.minute == 55 and now.second == 0 and last_ambush_hour != now.hour:
+            last_ambush_hour = now.hour
+            logger.info("Funding Predator: 5 minutes to tick. Scanning /premiumIndex...")
+            try:
+                rates = await bc.get_all_premium_indices()
+                candidates = []
+                for r in rates:
+                    fr = float(r.get("lastFundingRate", 0))
+                    if fr >= config.FUNDING_PREDATOR_THRESHOLD:
+                        candidates.append((r["symbol"], fr, float(r.get("markPrice", 0))))
+                
+                if not candidates:
+                    logger.info("Funding Predator: No severe rates found. Aborting ambush.")
+                    continue
+                    
+                candidates.sort(key=lambda x: x[1], reverse=True)
+                best_target_sym, best_rate, best_mark = candidates[0]
+                
+                logger.info(f"Funding Predator: Target locked on {best_target_sym} at {best_rate*100}%. Waiting for tick...")
+                
+                # Dynamic ultra-fast sleep loop waiting for the 08:00:01 squeeze event 
+                while True:
+                    await asyncio.sleep(0.1)
+                    now_inner = datetime.datetime.utcnow()
+                    if now_inner.hour in target_tick_hours and now_inner.minute == 0 and now_inner.second == 1:
+                        logger.warning(f"Funding Predator: ZERO HOUR TICK EXECUTING FIRE ON {best_target_sym}")
+                        signal = signal_engine.check_funding_predator(best_target_sym, best_rate, best_mark)
+                        if signal:
+                            # Direct payload bypass injection to order manager (circumventing score batches)
+                            await om.order_manager.handle_signal(signal)
+                        break
+                        
+            except Exception as e:
+                logger.error(f"Funding Predator Error: {e}")

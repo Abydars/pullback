@@ -495,3 +495,143 @@ def check_breakout(
         symbol, direction, score, sl_price, trail_arm, atr15, reasons,
     )
     return signal
+
+def check_micro_scalp(
+    symbol: str, 
+    k1: list[dict],
+) -> dict | None:
+    """
+    V2 MICRO_SCALP HFT ENGINE (1m timeframe)
+    Strict Volatility requirements:
+      1) Explosive Volume Spike: The 1m closed candle has > 400% volume over SMA14.
+      2) Shaved Momentum: Candle closed in the top/bottom 20% of its range (0 wick fade).
+      3) Aggressive SL: The stop-loss is placed strictly beneath/above the impulse candle low/high.
+    """
+    if len(k1) < 20:
+        return None
+
+    c = k1[-1]
+    closes = [float(x["close"]) for x in k1]
+    vols = [float(x["volume"]) for x in k1]
+    
+    # 1. Volume Delta Spike (>400% over SMA14)
+    vol_sma_14 = sum(vols[-15:-1]) / 14 if len(vols) >= 15 else sum(vols[:-1]) / len(vols[:-1])
+    if vol_sma_14 <= 0:
+        return None
+    
+    current_vol = vols[-1]
+    vol_ratio = current_vol / vol_sma_14
+    if vol_ratio < 4.0:
+        return None
+        
+    # 2. Shaved Momentum Logic
+    c_open = c["open"]
+    c_close = c["close"]
+    c_high = c["high"]
+    c_low = c["low"]
+    
+    c_range = c_high - c_low
+    if c_range == 0:
+        return None
+        
+    direction = "LONG" if c_close > c_open else "SHORT"
+    
+    if direction == "LONG":
+        close_pos = (c_close - c_low) / c_range
+        if close_pos < 0.80:
+            return None  # Needs to close in top 20%, massive conviction
+            
+        sl_price = round(c_low * 0.9995, 8)  # Stop loss tightly hugging the bottom of the impulse + 0.05% safety
+        trail_arm = round(c_close + c_range * 1.5, 8)  # Aggressive 1.5R 
+        
+    else:  # SHORT
+        close_pos = (c_high - c_close) / c_range
+        if close_pos < 0.80:
+            return None  # Needs to close in bottom 20%
+            
+        sl_price = round(c_high * 1.0005, 8) 
+        trail_arm = round(c_close - c_range * 1.5, 8)
+        
+    # Score is 100 for micro-scalps as they are hard boolean logic grids.
+    score = 100
+    atr1 = c_range  # Local ATR proxy
+    atr_ratio = 1.0
+    
+    reasons = [
+        f"VolSpike:{vol_ratio:.1f}x",
+        f"ShavedConviction:{close_pos:.2f}",
+        "1m_HFT"
+    ]
+    
+    signal = {
+        "symbol":       symbol,
+        "direction":    direction,
+        "score":        score,
+        "entry_price":  round(c_close, 8),
+        "sl_price":     sl_price,
+        "tp1_price":    trail_arm,
+        "tp2_price":    trail_arm,
+        "atr":          round(atr1, 8),
+        "atr_ratio":    atr_ratio,
+        "timeframe":    "1m",
+        "timestamp":    int(time.time()),
+        "reasons":      reasons,
+        "signal_type":  "MICRO_SCALP",
+    }
+    
+    logger.info(
+        "V2 Micro-Scalp Signal: %s %s score=%d sl=%.6f arm=%.6f reasons=%s",
+        symbol, direction, score, sl_price, trail_arm, reasons,
+    )
+    return signal
+
+def check_funding_predator(
+    symbol: str, 
+    funding_rate: float,
+    mark_price: float,
+) -> dict | None:
+    """
+    V2 FUNDING_PREDATOR HFT SQUEEZE ENGINE (Temporal Payload)
+    Generates a LONG signal strictly exploiting the post-funding short-squeeze.
+    Triggered natively by the chronological cron scanner at exactly 00:00:01, 08:00:01, 16:00:01 UTC.
+    """
+    direction = "LONG"
+    
+    # Aggressively tight SL because the squeeze must be instantaneous. If it slips downward natively, abort immediately.
+    sl_price = round(mark_price * 0.995, 8)  # 0.5% Hard Stop
+    # Target 1% bounce immediately trailing upward
+    trail_arm = round(mark_price * 1.01, 8) 
+    
+    score = 100
+    atr1 = mark_price * 0.005 # Baseline standard representation
+    
+    reasons = [
+        f"FundingSqueeze",
+        f"Yield:{funding_rate*100:.2f}%",
+        "08H_Tick_Predator"
+    ]
+    
+    import time
+    signal = {
+        "symbol":       symbol,
+        "direction":    direction,
+        "score":        score,
+        "entry_price":  round(mark_price, 8),
+        "sl_price":     sl_price,
+        "tp1_price":    trail_arm,
+        "tp2_price":    trail_arm,
+        "atr":          round(atr1, 8),
+        "atr_ratio":    1.0,
+        "timeframe":    "tick",
+        "timestamp":    int(time.time()),
+        "reasons":      reasons,
+        "signal_type":  "FUNDING_PREDATOR",
+    }
+    
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "V2 FUNDING PREDATOR EXECUTED: %s %s score=%d sl=%.6f arm=%.6f reasons=%s",
+        symbol, direction, score, sl_price, trail_arm, reasons,
+    )
+    return signal

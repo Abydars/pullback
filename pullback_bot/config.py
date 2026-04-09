@@ -76,11 +76,13 @@ MIN_PRICE_CHANGE_PCT: float = _float("MIN_PRICE_CHANGE_PCT", 0.5)
 WATCHLIST_REFRESH_MINUTES: int = _int("WATCHLIST_REFRESH_MINUTES", 15)
 
 # ── Signal Settings ───────────────────────────────────────────────────────────
-# SIGNAL_MODE controls which strategy the scanner runs on each 15m candle close:
-#   pullback  — trend-following reversion to EMA50/swing zone (default)
-#   breakout  — close outside 20-candle consolidation range with volume
-#   both      — run both; trade whichever fires first (cooldown applies per symbol)
+#   pullback         — trend-following reversion to EMA50/swing zone (default)
+#   breakout         — close outside 20-candle consolidation range with volume
+#   micro_scalp      — HFT 1-minute orderflow hunter targeting massive PA anomalies
+#   funding_predator — Chronological arbitrage executing on exactly 8-hour payout ticks
+#   both             — run pullback & breakout concurrently
 SIGNAL_MODE: str = _get("SIGNAL_MODE", "pullback")
+FUNDING_PREDATOR_THRESHOLD: float = _float("FUNDING_PREDATOR_THRESHOLD", 0.015)
 SIGNAL_SCORE_THRESHOLD: int = _int("SIGNAL_SCORE_THRESHOLD", 70)
 # SIGNAL_BATCH_WINDOW_S: seconds to wait after the first signal fires before
 # ranking the batch by score.  0.0 = immediate entry on first signal (fastest).
@@ -183,6 +185,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "MIN_PRICE_CHANGE_PCT":      float,
     "WATCHLIST_REFRESH_MINUTES": int,
     "SIGNAL_MODE":               str,
+    "FUNDING_PREDATOR_THRESHOLD":float,
     "SIGNAL_SCORE_THRESHOLD":    int,
     "SIGNAL_BATCH_WINDOW_S":     float,
     "BTC_REGIME_FILTER":         bool,
