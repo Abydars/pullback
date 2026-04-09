@@ -204,6 +204,27 @@ async def get_closed_trades(limit: int = 500) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+async def get_analytics_trades(start_ms: Optional[int] = None, end_ms: Optional[int] = None) -> list[dict]:
+    """Return all closed trades, optionally filtered by date range."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = "SELECT * FROM trades WHERE status='CLOSED'"
+        params = []
+        
+        if start_ms is not None:
+            query += " AND close_time >= ?"
+            params.append(start_ms)
+        if end_ms is not None:
+            query += " AND close_time <= ?"
+            params.append(end_ms)
+            
+        query += " ORDER BY close_time ASC"
+        
+        cursor = await db.execute(query, params)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
 async def delete_trade(trade_id: int) -> bool:
     """Hard-delete a single closed trade. Returns True if a row was deleted."""
     async with aiosqlite.connect(DB_PATH) as db:

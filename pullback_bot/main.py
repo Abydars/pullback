@@ -30,6 +30,7 @@ from fastapi.responses import FileResponse, JSONResponse
 import binance_client as bc
 import config
 import db
+import analytics
 import order_manager as om
 import position_tracker
 import scanner
@@ -479,6 +480,14 @@ async def api_sessions() -> JSONResponse:
     """Return completed sessions (ended_at IS NOT NULL), newest first, with their trades."""
     sessions = await db.get_sessions(50)
     return JSONResponse(sessions)
+
+
+@app.get("/api/analytics")
+async def api_analytics(start: int = None, end: int = None) -> JSONResponse:
+    """Return comprehensive computed analytics payload."""
+    trades = await db.get_analytics_trades(start_ms=start, end_ms=end)
+    stats = analytics.compute_analytics(trades)
+    return JSONResponse(stats)
 
 
 @app.get("/api/config")
