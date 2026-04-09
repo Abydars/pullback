@@ -1813,7 +1813,14 @@ function renderPositions() {
 
     // ── PnL if price reaches SL / arm / trail stop ────────────────────────
     const qty = parseFloat(t.qty) || 0;
-    const pnlAt = (price) => (price && qty) ? (isLong ? (price - entry) * qty : (entry - price) * qty) : null;
+    // Net of round-trip taker fees (0.04% × 2) — matches backend _net_pnl so
+    // these figures are consistent with the unrealized PnL shown in the header.
+    const pnlAt = (price) => {
+      if (!price || !qty) return null;
+      const gross = isLong ? (price - entry) * qty : (entry - price) * qty;
+      const fees  = (entry + price) * qty * 0.0004;
+      return gross - fees;
+    };
     const slPnlUsdt        = t.sl_price ? pnlAt(t.sl_price) : null;
     const armPnlUsdt       = trailArm   ? pnlAt(trailArm)   : null;
     const trailStopPnlUsdt = trailStop  ? pnlAt(trailStop)  : null;
