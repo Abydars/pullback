@@ -125,7 +125,7 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     top_10 = sorted(sym_list, key=lambda x: x["pnl"], reverse=True)[:10]
     bottom_10 = sorted(sym_list, key=lambda x: x["pnl"])[:10]
 
-    return {
+    stats = {
         "summary": {
             "total_trades": total_trades,
             "win_rate": (wins / total_trades * 100) if total_trades else 0.0,
@@ -141,6 +141,9 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "exit_reasons": dict(reasons),
         "symbols": {"top_10": top_10, "bottom_10": bottom_10}
     }
+    
+    stats["insights"] = generate_insights(stats)
+    return stats
 
 def empty_analytics() -> Dict[str, Any]:
     return {
@@ -152,5 +155,70 @@ def empty_analytics() -> Dict[str, Any]:
         "hour_of_day": {},
         "score_buckets": {},
         "exit_reasons": {},
-        "symbols": {"top_10": [], "bottom_10": []}
+        "symbols": {"top_10": [], "bottom_10": []},
+        "insights": []
     }
+
+def generate_insights(stats: Dict[str, Any]) -> List[Dict[str, str]]:
+    insights = []
+    summary = stats["summary"]
+    if summary["total_trades"] < 5:
+        insights.append({"type": "info", "message": "Not enough trade history to generate reliable statistical recommendations. Accumulate at least 5 trades to unlock the Health Check system."})
+        return insights
+        
+    # ── Strategy Discrepancy ──
+    strat = stats["strategy"]
+    pb = strat.get("PULLBACK", {})
+    br = strat.get("BREAKOUT", {})
+    pb_wr = (pb.get("wins", 0) / pb.get("trades", 1) * 100) if pb.get("trades", 0) > 0 else 0
+    br_wr = (br.get("wins", 0) / br.get("trades", 1) * 100) if br.get("trades", 0) > 0 else 0
+    
+    if pb.get("trades", 0) >= 3 and br.get("trades", 0) >= 3:
+        if pb_wr > br_wr + 15:
+            insights.append({"type": "warning", "message": f"Strategy Deviation: Pullback severely outperforms Breakout ({pb_wr:.0f}% vs {br_wr:.0f}% win rate). Consider disabling Breakouts entirely or demanding a higher score threshold."})
+        elif br_wr > pb_wr + 15:
+            insights.append({"type": "warning", "message": f"Strategy Deviation: Breakout severely outperforms Pullback ({br_wr:.0f}% vs {pb_wr:.0f}% win rate). Consider disabling Pullback entirely or demanding a higher score threshold."})
+
+    # ── Score Calibration Check ──
+    scores = stats["score_buckets"]
+    low = scores.get("60-65", {})
+    high = scores.get("80+", {})
+    
+    low_wr = (low.get("wins", 0) / low.get("trades", 1) * 100) if low.get("trades", 0) > 0 else 0
+    high_wr = (high.get("wins", 0) / high.get("trades", 1) * 100) if high.get("trades", 0) > 0 else 0
+    
+    if low.get("trades", 0) >= 3 and high.get("trades", 0) >= 3:
+        if high_wr > low_wr + 10 and summary["total_pnl"] < 0:
+            insights.append({"type": "warning", "message": f"Score Calibration: Filtering logic detects that high scoring signals (80+) win significantly more often ({high_wr:.0f}%) than 60-65 signals ({low_wr:.0f}%). You are bleeding capital due to low-score noise. Increase your SIGNAL_SCORE_THRESHOLD to >70."})
+        elif low_wr > high_wr:
+            insights.append({"type": "info", "message": "Score Correlation: High scoring signals are currently underperforming low scoring ones. The algorithm's structural rating system indicates trend noise is overriding mathematical setups."})
+
+    # ── Bleeding Assets ──
+    bot = stats["symbols"]["bottom_10"]
+    if bot and bot[0]["pnl"] < -10.0:
+        worst_sym = bot[0]["symbol"]
+        insights.append({"type": "danger", "message": f"Bleeder Detected: Significant capital has been lost ({bot[0]['pnl']:.2f}) purely trailing {worst_sym}. Strongly recommend adding this pair to your Blocklist."})
+
+    # ── Timezone Hazard ──
+    sessions = stats["sessions"]
+    worst_session = None
+    worst_pnl = 0.0
+    for s_name, s_data in sessions.items():
+        if s_data.get("trades", 0) >= 3 and s_data.get("pnl", 0.0) < worst_pnl:
+            worst_pnl = s_data["pnl"]
+            worst_session = s_name
+    
+    if worst_session and worst_pnl < -15.0:
+        insights.append({"type": "warning", "message": f"Timezone Bleed: The {worst_session} session destroys capital systematically ({worst_pnl:.2f} total loss). Turn the bot off dynamically during this window."})
+
+    # ── Risk:Reward Macro Profile ──
+    wr = summary["win_rate"]
+    pnl = summary["total_pnl"]
+    if pnl > 0 and wr >= 55:
+        insights.append({"type": "success", "message": "System Health is excellent. You are profitable with a dominant win rate. Stick to the methodology without adjustments."})
+    elif pnl > 0 and wr < 50:
+        insights.append({"type": "success", "message": "System is highly resilient. You are profitable despite a sub-50% win rate due to exceptionally cut losses and fat trailing profit arms. Macro structure is doing the heavy lifting."})
+    elif pnl < 0 and wr >= 50:
+        insights.append({"type": "danger", "message": "Fat-Tail Risk Detected: System loses capital systematically despite winning most of the trades! Your losses are far larger than your wins. Dramatically tighten your absolute Stop Losses immediately."})
+
+    return insights

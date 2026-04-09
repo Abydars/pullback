@@ -565,6 +565,13 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
 .an-sym-item { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid var(--border); }
 .an-sym-item:last-child { border-bottom: none; }
 
+
+.an-insight-item { padding: 12px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; line-height: 1.5; border-left: 4px solid transparent; }
+.an-insight-item.success { background: rgba(16, 185, 129, 0.1); border-left-color: var(--green); color: var(--green); }
+.an-insight-item.warning { background: rgba(245, 158, 11, 0.1); border-left-color: var(--amber); color: var(--amber); }
+.an-insight-item.danger  { background: rgba(239, 68, 68, 0.1); border-left-color: var(--red); color: var(--red); }
+.an-insight-item.info    { background: rgba(59, 130, 246, 0.1); border-left-color: #3b82f6; color: #60a5fa; }
+
 </style>
 </head>
 <body>
@@ -769,7 +776,10 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
           <div id="an-loader" style="padding: 24px; color: var(--text-dim); text-align: center;">Loading analytics...</div>
           
           <div id="an-dash" style="display:none">
-            <div id="an-summary-grid">
+            
+          <div id="an-insights-container" style="margin-bottom: 24px;"></div>
+          
+          <div id="an-summary-grid">
               <div class="an-card"><div class="an-title">Trades</div><div class="an-val" id="an-val-trades">0</div></div>
               <div class="an-card"><div class="an-title">Win Rate</div><div class="an-val" id="an-val-wr">0.0%</div></div>
               <div class="an-card"><div class="an-title">Total PnL</div><div class="an-val" id="an-val-pnl">$0.00</div></div>
@@ -2009,6 +2019,15 @@ function renderHistory() {
 
   document.getElementById('hist-count').textContent = trades.length ? `(${trades.length})` : '';
 
+
+  // Insights
+  const insCont = document.getElementById('an-insights-container');
+  if (d.insights && d.insights.length > 0) {
+    insCont.innerHTML = d.insights.map(i => `<div class="an-insight-item ${i.type}"><b>Heuristic Scan:</b> ${i.message}</div>`).join('');
+  } else {
+    insCont.innerHTML = `<div class="an-insight-item info">Playbook scanning... requires more trades to generate statistical insights.</div>`;
+  }
+
   // Summary line (all histTrades)
   const winCount = trades.filter(t => (t.pnl_usdt ?? 0) > 0).length;
   const totalPnl = trades.reduce((s, t) => s + (t.pnl_usdt ?? 0), 0);
@@ -3159,6 +3178,15 @@ function _buildBarRow(label, stats, maxPnl) {
 }
 
 function renderAnalytics(d) {
+
+  // Insights
+  const insCont = document.getElementById('an-insights-container');
+  if (d.insights && d.insights.length > 0) {
+    insCont.innerHTML = d.insights.map(i => `<div class="an-insight-item ${i.type}"><b>Heuristic Scan:</b> ${i.message}</div>`).join('');
+  } else {
+    insCont.innerHTML = `<div class="an-insight-item info">Playbook scanning... requires more trades to generate statistical insights.</div>`;
+  }
+
   // Summary
   document.getElementById('an-val-trades').textContent = d.summary.total_trades;
   document.getElementById('an-val-wr').textContent = d.summary.win_rate.toFixed(1) + '%';
