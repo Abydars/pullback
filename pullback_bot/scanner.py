@@ -407,9 +407,10 @@ async def _flush_pending_signals() -> None:
     #   <= -half_target → 0 (deeply negative, stop building)
     # When current_open == 0 always use INITIAL_BATCH_SIZE (fresh cycle).
     import position_tracker as _pt
+    import order_manager as _om
     total_unrealized = sum(_pt.paper_unrealized.values()) if _pt.paper_unrealized else 0.0
 
-    current_open    = len(open_trades)
+    current_open    = len(open_trades) + len(_om._opening)  # include in-flight trades
     available_slots = config.MAX_OPEN_TRADES - current_open
 
     if current_open == 0:
