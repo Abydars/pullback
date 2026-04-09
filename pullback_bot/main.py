@@ -113,6 +113,7 @@ async def _status_broadcast_loop() -> None:
                 "open_positions": open_count,
                 "watchlist_count": len(scanner.active_watchlist),
                 "ws_clients": wsb.broadcaster.client_count,
+                "btc_regime": scanner._last_btc_regime,
             })
         except Exception as exc:
             logger.debug("status_broadcast error: %s", exc)

@@ -1642,6 +1642,7 @@ function onSystemStatus(data) {
   document.getElementById('h-clients').textContent = data.ws_clients ?? 0;
   document.getElementById('st-open').textContent   = data.open_positions ?? 0;
   // Server time — overwritten by the live clock interval immediately after
+  if (data.btc_regime) onBtcRegime({ regime: data.btc_regime });
 }
 
 function onBtcRegime(data) {
