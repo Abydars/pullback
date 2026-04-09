@@ -361,8 +361,12 @@ canvas.sparkline { display: block; border-radius: 2px; }
 .sess-exit-tp    { background: rgba(34,197,94,.15);  color: var(--green); }
 .sess-pnl-pos { color: var(--green); font-weight: 700; font-size: 12px; }
 .sess-pnl-neg { color: var(--red);   font-weight: 700; font-size: 12px; }
-.sess-trades { overflow: hidden; }
-.sess-trade-tbl { width: 100%; border-collapse: collapse; }
+.sess-trades { overflow-x: auto; }
+.sess-trade-tbl { width: max-content; min-width: 100%; border-collapse: collapse; }
+.sess-trade-tbl th { padding: 4px 10px; font-size: 10px; font-weight: 600; color: var(--muted);
+                     text-transform: uppercase; letter-spacing: .04em; white-space: nowrap;
+                     border-bottom: 1px solid var(--border); background: #111; text-align: left; }
+.sess-trade-tbl th:first-child { padding-left: 28px; }
 .sess-trade-tbl td { padding: 4px 10px; font-size: 11px; border-bottom: 1px solid #0d0d0d; }
 .sess-trade-tbl tr:last-child td { border-bottom: none; }
 .sess-trade-tbl tr:hover td { background: #181818; }
@@ -2083,16 +2087,38 @@ function renderSessions() {
     }[exitReason] || exitReason;
 
     const isFirst = idx === 0;  // newest session: expanded by default
+    const TAKER = 0.0004;
     const tradesHtml = (sess.trades || []).map(t => {
-      const tPnl    = t.pnl_usdt ?? 0;
-      const tPnlCls = tPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
-      const isLong  = t.direction === 'LONG';
-      const rc      = _reasonCfg(t.close_reason);
+      const tPnl     = t.pnl_usdt ?? 0;
+      const tPnlCls  = tPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+      const isLong   = t.direction === 'LONG';
+      const rc       = _reasonCfg(t.close_reason);
+      const entryDt  = t.entry_time ? _fmtTs(t.entry_time) : '—';
+      const exitDt   = t.close_time ? _fmtTs(t.close_time) : '—';
+      const durS     = t.close_time && t.entry_time ? Math.round((t.close_time - t.entry_time) / 1000) : null;
+      const durStr   = durS !== null ? _fmtDurS(durS) : '—';
+      const lev      = t.leverage ?? '—';
+      const notional = t.entry_price && t.qty ? t.entry_price * t.qty : null;
+      const margin   = notional && t.leverage ? notional / t.leverage : null;
+      const marginStr = margin != null ? `$${margin.toFixed(2)}` : '—';
+      const fee      = t.entry_price && t.close_price && t.qty
+        ? (t.entry_price + t.close_price) * t.qty * TAKER : null;
+      const feeStr   = fee != null ? `$${fee.toFixed(4)}` : '—';
       return `<tr>
         <td style="font-weight:600">${t.symbol.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span></td>
         <td><span class="hist-dir ${isLong ? 'long' : 'short'}">${isLong ? 'LONG' : 'SHORT'}</span></td>
-        <td style="color:var(--muted)">${t.signal_type ?? 'PULLBACK'}</td>
+        <td style="color:var(--muted);white-space:nowrap">${entryDt}</td>
+        <td style="color:var(--muted);white-space:nowrap">${exitDt}</td>
+        <td style="color:var(--muted)">${fmtPrice(t.entry_price)}</td>
+        <td>${fmtPrice(t.close_price)}</td>
+        <td style="color:var(--muted)">${t.qty}</td>
+        <td style="color:var(--muted)">${lev}×</td>
+        <td style="color:var(--muted)">${marginStr}</td>
+        <td style="color:var(--muted);font-size:10px">${t.signal_type ?? 'PULLBACK'}</td>
+        <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
+        <td style="color:var(--muted)">${durStr}</td>
         <td><span class="hist-reason ${rc.cls}">${rc.label}</span></td>
+        <td style="color:var(--red);opacity:.7">${feeStr}</td>
         <td class="${tPnlCls}" style="font-weight:600">${fmtUsdt(tPnl)}</td>
       </tr>`;
     }).join('');
@@ -2109,7 +2135,15 @@ function renderSessions() {
         <span class="${pnlCls}">${fmtUsdt(pnl)}</span>
       </div>
       <div class="sess-trades"${isFirst ? '' : ' style="display:none"'}>
-        <table class="sess-trade-tbl"><tbody>${tradesHtml}</tbody></table>
+        <table class="sess-trade-tbl">
+          <thead><tr>
+            <th>Symbol</th><th>Dir</th><th>Entry Time</th><th>Exit Time</th>
+            <th>Entry $</th><th>Close $</th><th>Qty</th><th>Lev</th>
+            <th>Capital</th><th>Strategy</th><th>Score</th><th>Duration</th>
+            <th>Reason</th><th>Fee</th><th>PnL</th>
+          </tr></thead>
+          <tbody>${tradesHtml}</tbody>
+        </table>
       </div>
     `;
     block.querySelector('.sess-hdr').addEventListener('click', () => {
