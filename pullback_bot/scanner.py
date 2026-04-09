@@ -192,10 +192,11 @@ async def _seed_klines(symbol: str) -> None:
             raw = await bc.get_klines(symbol, interval, limit)
             candles = [
                 {
-                    "open": float(c[1]),
-                    "high": float(c[2]),
-                    "low": float(c[3]),
-                    "close": float(c[4]),
+                    "time":   int(c[0]) // 1000,   # ms → seconds, matches WS candle format
+                    "open":   float(c[1]),
+                    "high":   float(c[2]),
+                    "low":    float(c[3]),
+                    "close":  float(c[4]),
                     "volume": float(c[5]),
                 }
                 for c in raw
