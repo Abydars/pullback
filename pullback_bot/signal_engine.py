@@ -245,9 +245,15 @@ def check_pullback(
     vol15 = df15["volume"]
     avg_vol = vol15.iloc[-21:-1].mean()
     last_vol = vol15.iloc[-1]
-    if avg_vol > 0 and last_vol > avg_vol * 1.5:
-        score += 15
-        reasons.append("volume_spike")
+    if avg_vol > 0:
+        if last_vol > avg_vol * 1.5:
+            score += 15
+            reasons.append("volume_spike")
+        elif len(klines_5m) > 1:
+            recent_5m_vol = max(float(klines_5m[-1]["volume"]), float(klines_5m[-2]["volume"]))
+            if recent_5m_vol > (avg_vol / 3) * 1.5:
+                score += 15
+                reasons.append("volume_spike")
 
     # ── Score gate ────────────────────────────────────────────────────────────
     if score < config.SIGNAL_SCORE_THRESHOLD:
@@ -364,9 +370,15 @@ def check_breakout(
         return None   # no breakout on this candle
 
     # ── Volume surge ──────────────────────────────────────────────────────────
-    if avg_vol > 0 and last_vol > avg_vol * 1.5:
-        score += 25
-        reasons.append("volume_surge")
+    if avg_vol > 0:
+        if last_vol > avg_vol * 1.5:
+            score += 25
+            reasons.append("volume_surge")
+        elif len(klines_5m) > 1:
+            recent_5m_vol = max(float(klines_5m[-1]["volume"]), float(klines_5m[-2]["volume"]))
+            if recent_5m_vol > (avg_vol / 3) * 1.5:
+                score += 25
+                reasons.append("volume_surge")
 
     # ── Candle-body strength ──────────────────────────────────────────────────
     candle_range = last_high - last_low
@@ -402,6 +414,13 @@ def check_breakout(
 
     # ── Score gate ────────────────────────────────────────────────────────────
     if score < config.SIGNAL_SCORE_THRESHOLD:
+        return None
+
+    # ── Early Distance Cap (Reject overextended late breakouts) ───────────────
+    # Reject the trade if price has already traveled more than 1.0 ATR from the breakout line
+    distance = (last_close - resistance) if direction == "LONG" else (support - last_close)
+    if distance > atr15 * 1.0:
+        logger.info("Breakout signal rejected: %s %s is overextended (dist: %.5f, atr: %.5f)", symbol, direction, distance, atr15)
         return None
 
     # ── Entry / SL / Trail Arm ────────────────────────────────────────────────

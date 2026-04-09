@@ -314,8 +314,8 @@ async def _run_kline_ws() -> None:
                     if parsed:
                         sym, interval, candle, is_closed = parsed
                         _update_buffer(sym, interval, candle, is_closed)
-                        # Fire signal check immediately on confirmed 15m close
-                        if interval == "15m" and is_closed:
+                        # Fire signal check immediately on confirmed 5m close to catch breakouts early
+                        if interval == "5m" and is_closed:
                             asyncio.create_task(
                                 _evaluate_symbol(sym), name=f"eval_{sym}"
                             )
@@ -361,8 +361,9 @@ async def _evaluate_symbol(symbol: str) -> None:
         if now - _last_signal_ts.get(symbol, 0) < _SIGNAL_COOLDOWN_S:
             return
 
-        # k15[-1] is the candle that just closed; k5[-1] may still be forming.
-        # Pass confirmed candles only: exclude the currently-forming 5m candle.
+        # This function is now triggered precisely on a 5m candle close.
+        # Both k15[-1] (which may still be forming) and k5[-1] (just closed) 
+        # are valid snapshots for evaluation.
         mode = config.SIGNAL_MODE
 
         # ── BTC Regime Filter — computed once per evaluation call ─────────────
@@ -405,14 +406,14 @@ async def _evaluate_symbol(symbol: str) -> None:
 
         if mode in ("pullback", "both"):
             s = await asyncio.to_thread(
-                signal_engine.check_pullback, symbol, k15[:], k5[:-1]
+                signal_engine.check_pullback, symbol, k15[:], k5[:]
             )
             if s and not _regime_blocks(s):
                 candidates.append(s)
 
         if mode in ("breakout", "both"):
             s = await asyncio.to_thread(
-                signal_engine.check_breakout, symbol, k15[:], k5[:-1]
+                signal_engine.check_breakout, symbol, k15[:], k5[:]
             )
             if s and not _regime_blocks(s):
                 candidates.append(s)
