@@ -97,6 +97,10 @@ SIGNAL_BATCH_WINDOW_S: float = _float("SIGNAL_BATCH_WINDOW_S", 3.0)
 #   is a genuine regime shift, not random noise.
 BTC_REGIME_FILTER: bool  = _bool("BTC_REGIME_FILTER", True)
 BTC_BREAKOUT_ROC:  float = _float("BTC_BREAKOUT_ROC", 0.008)
+# BTC_CORR_THRESHOLD: minimum Pearson correlation for the regime filter to
+# apply to a symbol.  0.0 = never block (filter off for all symbols),
+# 0.5 = only block symbols that move 50%+ with BTC, 1.0 = block all (old behavior).
+BTC_CORR_THRESHOLD: float = _float("BTC_CORR_THRESHOLD", 0.5)
 
 # ── Risk / Order Settings ─────────────────────────────────────────────────────
 # CAPITAL: total account equity in USDT.
@@ -183,6 +187,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "SIGNAL_BATCH_WINDOW_S":     float,
     "BTC_REGIME_FILTER":         bool,
     "BTC_BREAKOUT_ROC":          float,
+    "BTC_CORR_THRESHOLD":        float,
     "CAPITAL":                   float,
     "RISK_PCT":                  float,
     "MAX_OPEN_TRADES":           int,
@@ -284,6 +289,8 @@ async def update(key: str, raw_value: str) -> None:
         raise ValueError("SMART_PORT_SL_MIN_AGE_MINUTES must be 0–60")
     if key == "BTC_BREAKOUT_ROC" and not (0.001 <= value <= 0.05):
         raise ValueError("BTC_BREAKOUT_ROC must be between 0.001 and 0.05")
+    if key == "BTC_CORR_THRESHOLD" and not (0.0 <= value <= 1.0):
+        raise ValueError("BTC_CORR_THRESHOLD must be 0.0–1.0")
 
     # Apply in-memory
     globals()[key] = value

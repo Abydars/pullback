@@ -20,6 +20,8 @@ import time
 from collections import defaultdict
 from typing import Optional
 
+import numpy as np
+
 import websockets
 
 import binance_client as bc
@@ -270,6 +272,22 @@ async def _evaluate_symbol(symbol: str) -> None:
             """Return True if this signal should be suppressed by the regime filter."""
             if symbol == "BTCUSDT":
                 return False   # never block BTC itself
+            if regime in ("BULL_BREAKOUT", "BEAR_BREAKDOWN"):
+                # Skip blocking if the symbol is not sufficiently correlated with BTC
+                threshold = config.BTC_CORR_THRESHOLD
+                if threshold > 0.0 and len(btc_k15) >= 20 and len(k15) >= 20:
+                    btc_closes = [float(c["close"]) for c in btc_k15[-20:]]
+                    sym_closes = [float(c["close"]) for c in k15[-20:]]
+                    try:
+                        corr = float(np.corrcoef(btc_closes, sym_closes)[0][1])
+                    except Exception:
+                        corr = 1.0  # assume correlated on error — safe default
+                    if abs(corr) < threshold:
+                        logger.debug(
+                            "BTC %s — %s correlation=%.2f < threshold=%.2f, NOT blocking",
+                            regime, symbol, corr, threshold,
+                        )
+                        return False  # not correlated enough — allow signal
             if regime == "BULL_BREAKOUT" and sig["direction"] == "SHORT":
                 logger.debug("BTC BULL_BREAKOUT — blocking SHORT %s", symbol)
                 return True

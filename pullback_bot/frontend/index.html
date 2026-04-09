@@ -2404,6 +2404,8 @@ const CFG_FIELDS = [
         hint: 'Block alt shorts during BTC bull breakout and alt longs during BTC bear breakdown. Prevents trading against the market boss on 15m timeframe.' },
       { key: 'BTC_BREAKOUT_ROC', label: 'BTC Breakout ROC Threshold', type: 'number', step: '0.001',
         hint: 'BTC 3-candle (45 min) rate of change to detect breakout. 0.008 = 0.8% move in 45 minutes. Lower = more sensitive.' },
+      { key: 'BTC_CORR_THRESHOLD', label: 'BTC Correlation Threshold', type: 'number', step: '0.05',
+        hint: 'Minimum BTC correlation for regime filter to apply. Symbols below this threshold are not blocked even during BTC breakout/breakdown. 0.5 = only block symbols that move 50%+ with BTC. Uses last 20 candles.' },
     ],
   },
   {
