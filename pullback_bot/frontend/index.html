@@ -123,6 +123,22 @@ html, body {
   border-radius: 0 0 10px 10px;
 }
 
+/* ── Trade Modal ──────────────────────────────────────────────────────────── */
+.trade-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.trade-field label { font-size: 11px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.trade-field input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 13px; }
+.trade-field input:focus { border-color: var(--amber); outline: none; box-shadow: 0 0 0 2px rgba(245,158,11,0.2); }
+.trade-field input[readonly] { color: var(--muted); background: rgba(0,0,0,0.2); border-color: transparent; }
+.field-hint { font-size: 10px; color: var(--muted); line-height: 1.4; margin-top: 2px; }
+#trade-msg { font-size: 11px; font-weight: 500; text-align: right; margin-left: auto; }
+#trade-msg.err { color: var(--red); }
+#trade-submit {
+  background: var(--bg-hover); border: 1px solid var(--border); color: var(--text); 
+  font-weight: 600; padding: 6px 14px; border-radius: 6px; cursor: pointer; transition: all .2s;
+}
+#trade-submit:hover { background: var(--amber); border-color: var(--amber); color: #000; box-shadow: 0 4px 12px rgba(245,158,11,0.3); }
+#trade-submit:disabled { opacity: 0.5; background: var(--border); border-color: var(--border); color: var(--muted); cursor: not-allowed; box-shadow: none; pointer-events: none; }
+
 /* ── Sizing modal ─────────────────────────────────────────────────────────── */
 .modal-wide { max-width: 680px; width: 95%; }
 .sz-summary { display: flex; gap: 1.2rem; padding: .4rem 0 .6rem; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin-bottom: .6rem; }
@@ -491,7 +507,8 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
   #chart-panel   { display: none; height: 60vh; min-height: 360px; }
   #right-panel   { display: none; min-height: 50vh; }
   #scanner-panel.mob-active, #chart-panel.mob-active, #right-panel.mob-active { display: flex; }
-  #header { gap: 8px; padding: 6px 12px; flex-wrap: wrap; height: auto; min-height: 44px; }
+  #header { gap: 10px; padding: 10px 12px; flex-wrap: wrap; justify-content: space-between; align-items: center; height: auto; min-height: 44px; }
+  #header > * { flex-shrink: 0; }
   #server-time { display: none; }
   #stats-bar { flex-wrap: wrap; gap: 8px 16px; padding: 8px 12px; height: auto; line-height: 1.5; }
   #chart-header { flex-wrap: wrap; gap: 6px 10px; padding: 10px 12px; position: static; }
