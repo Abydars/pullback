@@ -82,6 +82,22 @@ async def build_watchlist() -> list[str]:
     """
     logger.info("Building watchlist...")
     try:
+        if config.SIGNAL_MODE == "funding_predator":
+            rates = await bc.get_all_premium_indices()
+            candidates = []
+            for r in rates:
+                fr = float(r.get("lastFundingRate", 0))
+                if fr >= config.FUNDING_PREDATOR_THRESHOLD:
+                    candidates.append((r["symbol"], fr))
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            watchlist = [c[0] for c in candidates]
+            # Fallback for UI if no assets mathematically breach the custom extreme threshold right now
+            if not watchlist:
+                 all_rates = sorted(rates, key=lambda x: float(x.get("lastFundingRate", 0)), reverse=True)
+                 watchlist = [r["symbol"] for r in all_rates[:15]]
+            logger.info("Funding Predator Watchlist built: %d symbols", len(watchlist))
+            return watchlist
+            
         perpetuals = await bc.get_active_perpetual_symbols()
         perp_set = {s["symbol"] for s in perpetuals}
 
