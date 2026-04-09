@@ -136,7 +136,8 @@ async def _handle_order_update(event: dict) -> None:
 
     # Look up our trade by binance_order_id
     open_trades = await db.get_open_trades()
-    for trade in open_trades:
+    sym_trades = [t for t in open_trades if t.get("symbol") == symbol]
+    for trade in sym_trades:
         if trade.get("binance_order_id") == binance_id:
             if status == "FILLED":
                 close_price = float(order.get("ap", trade["entry_price"]))

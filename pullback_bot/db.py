@@ -97,8 +97,9 @@ async def init_db() -> None:
             try:
                 await db.execute(col_sql)
                 logger.info("Migration applied: %s", col_sql)
-            except Exception:
-                pass  # column already exists
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    logger.warning("Migration warning: %s — %s", col_sql, exc)
         # Indexes on migrated columns — must run after the migration loop
         for idx in CREATE_INDEXES_POST_MIGRATION:
             await db.execute(idx)

@@ -99,7 +99,25 @@ async def refresh_watchlist_loop() -> None:
     """Refresh the active_watchlist every WATCHLIST_REFRESH_MINUTES."""
     global active_watchlist
     while True:
-        active_watchlist = await build_watchlist()
+        new_watchlist = await build_watchlist()
+
+        # Clean up buffers for symbols that dropped off the watchlist.
+        # BTCUSDT is always excluded from cleanup — its kline buffer is
+        # required for BTC regime detection regardless of watchlist state.
+        old_set = set(active_watchlist)
+        new_set = set(new_watchlist)
+        dropped = (old_set - new_set) - {"BTCUSDT"}
+        for sym in dropped:
+            _kline_buffers.pop(sym, None)
+            _last_signal_ts.pop(sym, None)
+            mark_prices.pop(sym, None)
+        if dropped:
+            logger.debug(
+                "Watchlist cleanup: removed %d dropped symbol(s) from buffers",
+                len(dropped),
+            )
+
+        active_watchlist = new_watchlist
         await wsb.broadcaster.broadcast(
             "scanner_watchlist",
             {"symbols": active_watchlist, "count": len(active_watchlist)},
