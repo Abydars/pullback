@@ -187,7 +187,7 @@ async def refresh_watchlist_loop() -> None:
 
 async def _seed_klines(symbol: str) -> None:
     """Pre-fill kline buffers from REST API for a symbol."""
-    for interval, limit in [("15m", 220), ("5m", 60), ("1m", 10)]:
+    for interval, limit in [("15m", 500), ("5m", 60), ("1m", 10)]:
         try:
             raw = await bc.get_klines(symbol, interval, limit)
             candles = [
@@ -265,8 +265,10 @@ def _update_buffer(symbol: str, interval: str, candle: dict, is_closed: bool) ->
         buf[-1] = candle
     else:
         buf.append(candle)
-        # Keep only what we need (220 for 15m, 60 for 5m, 10 for 1m)
-        limit = {"15m": 220, "5m": 60, "1m": 10}.get(interval, 60)
+        # Keep only what we need (500 for 15m — EMA200 needs ~2.5× period for
+        # stable burn-in; 60 for 5m; 10 for 1m which is only used for mark-price
+        # freshness checks)
+        limit = {"15m": 500, "5m": 60, "1m": 10}.get(interval, 60)
         if len(buf) > limit:
             _kline_buffers[symbol][interval] = buf[-limit:]
 

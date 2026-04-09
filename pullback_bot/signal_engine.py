@@ -86,19 +86,6 @@ def _macd(
     return macd_line, signal_line, histogram
 
 
-def _swing_highs(series: pd.Series, window: int = 5) -> pd.Series:
-    """Boolean series: True where value is local max over window."""
-    return (series == series.rolling(window, center=True).max()) & (
-        series.shift(1) < series
-    )
-
-
-def _swing_lows(series: pd.Series, window: int = 5) -> pd.Series:
-    return (series == series.rolling(window, center=True).min()) & (
-        series.shift(1) > series
-    )
-
-
 # ── BTC Regime ─────────────────────────────────────────────────────────────────
 
 def get_btc_regime(klines_15m: list[dict]) -> str:
@@ -420,13 +407,16 @@ def check_breakout(
     # ── Entry / SL / Trail Arm ────────────────────────────────────────────────
     entry_price = last_close
 
-    # SL: 1.5×ATR from entry — consistent with pullback strategy.
-    # Trail arm: 1×ATR from entry.
+    # Structural SL: just beyond the broken level (resistance for LONG,
+    # support for SHORT), capped at 1.5×ATR so risk stays bounded when the
+    # breakout candle travelled far from the consolidation range.
+    #   LONG  : max(resistance - 0.3×ATR,  entry - 1.5×ATR)  → closer to entry
+    #   SHORT : min(support   + 0.3×ATR,   entry + 1.5×ATR)  → closer to entry
     if direction == "LONG":
-        sl_price  = round(entry_price - atr15 * 1.5, 8)
+        sl_price  = round(max(resistance - atr15 * 0.3, entry_price - atr15 * 1.5), 8)
         trail_arm = round(entry_price + atr15 * 1.0, 8)
     else:
-        sl_price  = round(entry_price + atr15 * 1.5, 8)
+        sl_price  = round(min(support + atr15 * 0.3, entry_price + atr15 * 1.5), 8)
         trail_arm = round(entry_price - atr15 * 1.0, 8)
 
     if sl_price <= 0:
