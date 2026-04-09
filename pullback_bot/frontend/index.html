@@ -2121,6 +2121,7 @@ function renderSessions() {
         <td><span class="hist-reason ${rc.cls}">${rc.label}</span></td>
         <td style="color:var(--red);opacity:.7">${feeStr}</td>
         <td class="${tPnlCls}" style="font-weight:600">${fmtUsdt(tPnl)}</td>
+        <td><button class="btn-del-row" title="Delete this trade">🗑</button></td>
       </tr>`;
     }).join('');
 
@@ -2141,7 +2142,7 @@ function renderSessions() {
             <th>Symbol</th><th>Dir</th><th>Entry Time</th><th>Exit Time</th>
             <th>Entry $</th><th>Close $</th><th>Qty</th><th>Lev</th>
             <th>Capital</th><th>Strategy</th><th>Score</th><th>Duration</th>
-            <th>Reason</th><th>Fee</th><th>PnL</th>
+            <th>Reason</th><th>Fee</th><th>PnL</th><th></th>
           </tr></thead>
           <tbody>${tradesHtml}</tbody>
         </table>
@@ -2153,6 +2154,14 @@ function renderSessions() {
       const isOpen = arrow.classList.contains('open');
       arrow.classList.toggle('open', !isOpen);
       trades.style.display = isOpen ? 'none' : '';
+    });
+    block.querySelectorAll('.sess-trade-tbl .btn-del-row').forEach((btn, i) => {
+      const t = (sess.trades || [])[i];
+      if (!t) return;
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        deleteTrade(t.id, btn.closest('tr'));
+      });
     });
     container.appendChild(block);
   });
