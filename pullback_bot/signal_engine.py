@@ -339,30 +339,10 @@ def check_breakout(
     klines_5m: list[dict],
 ) -> Optional[dict]:
     """
-    Breakout / Breakdown detector.
+    V2 Structural Breakout / Breakdown detector.
 
-    Looks for a 15m candle that closes outside the prior 20-candle range
-    (above resistance for LONG, below support for SHORT) with volume and
-    candle-strength confirmation.
-
-    Scoring (max ~115):
-      +50  price breaks out of 20-candle consolidation range
-      +25  volume surge (last candle > 1.5 × 20-bar average)
-      +20  strong candle body (close within top/bottom 40 % of range)
-      +15  squeeze (20-candle range < 3.5 × avg ATR — genuine compression)
-      +5   EMA200 alignment (above for LONG, below for SHORT)
-
-    Squeeze rationale: over 20 candles a random walk produces an expected
-    high-to-low range of √20 × ATR ≈ 4.5 × ATR.  A range below 3.5 × ATR
-    is meaningfully tighter than random noise — price was coiling — making
-    the breakout more likely to be sustained.  At the default threshold of
-    70, base+squeeze alone scores 65 (does not fire), so the bonus rewards
-    already-valid breakouts rather than creating new ones from nothing.
-
-    SL placement:
-      LONG  : max(resistance - 0.3 × ATR,  entry - 1.5 × ATR)
-      SHORT : min(support   + 0.3 × ATR,   entry + 1.5 × ATR)
-      → SL sits just beyond the broken level, capped at 1.5 ATR.
+    Scans for explosive momentum breaking out of a proven consolidation Box,
+    aligned explicitly with macro-trend flow, printing shaved-head block candles.
     """
     if len(klines_15m) < 50:
         return None
@@ -374,6 +354,7 @@ def check_breakout(
     last_high   = float(last["high"])
     last_low    = float(last["low"])
     last_vol    = float(last["volume"])
+    last_open   = float(last["open"])
 
     # 20 confirmed candles before the breakout candle
     lookback = df15.iloc[-21:-1]
@@ -386,6 +367,7 @@ def check_breakout(
     atr_ratio   = atr15 / _atr_avg20 if _atr_avg20 > 0 else 1.0
     avg_vol = float(df15["volume"].iloc[-21:-1].mean())
 
+    ema50_val = float(_ema(df15["close"], 50).iloc[-1]) if len(df15) >= 50 else None
     ema200_val = float(_ema(df15["close"], 200).iloc[-1]) if len(df15) >= 200 else None
     rsi_val    = float(_rsi(df15["close"], 14).iloc[-1]) if len(df15) >= 14 else 50.0
 
@@ -393,23 +375,44 @@ def check_breakout(
     reasons: list[str] = []
     direction: Optional[str] = None
 
-    # ── Determine breakout direction ──
+    # ── 1. The Box Mandate (Consolidation Filter) ───────────────────────────
+    range_size = resistance - support
+    if range_size > (_atr_avg20 * 3.5):
+        # Range was too wide and noisy; not a coiled spring.
+        logger.info("Breakout rejected: %s range too wide (%f vs %f max)", symbol, range_size, _atr_avg20 * 3.5)
+        return None
+    else:
+        score += 30
+        reasons.append("structural_consolidation")
+
+    # ── Determine breakout direction ─────────────────────────────────────────
     if last_close > resistance:
         if rsi_val > 70.0:
             logger.info("Breakout rejected: %s LONG fakeout risk (RSI=%.1f)", symbol, rsi_val)
             return None
         direction = "LONG"
-        score += 50
+        score += 30
         reasons.append("breakout")
     elif last_close < support:
         if rsi_val < 30.0:
             logger.info("Breakdown rejected: %s SHORT fakeout risk (RSI=%.1f)", symbol, rsi_val)
             return None
         direction = "SHORT"
-        score += 50
+        score += 30
         reasons.append("breakdown")
     else:
         return None   # no breakout on this candle
+
+    # ── 2. Macro-Trend Cohesion ──────────────────────────────────────────────
+    if ema50_val and ema200_val:
+        if direction == "LONG":
+            if last_close < ema50_val or last_close < ema200_val:
+                # Fighting down-trend
+                return None
+        else:
+            if last_close > ema50_val or last_close > ema200_val:
+                # Fighting up-trend
+                return None
 
     # ── Volume surge mandate ──
     if avg_vol > 0:
@@ -422,43 +425,31 @@ def check_breakout(
                 has_volume = True
                 
         if has_volume:
-            score += 25
+            score += 20
             reasons.append("volume_surge")
         else:
             score -= 20
             reasons.append("low_volume_penalty")
 
-    # ── Candle-body strength ──────────────────────────────────────────────────
+    # ── 3. Ultra-Strict Close Conviction ─────────────────────────────────────
     candle_range = last_high - last_low
     if candle_range > 0:
         if direction == "LONG":
             close_position = (last_close - last_low) / candle_range
-            if close_position >= 0.6:        # closes in upper 40 % of candle
+            if close_position >= 0.8:        # closes in extreme upper 20%
                 score += 20
-                reasons.append("strong_close")
+                reasons.append("shaved_conviction")
+            else:
+                # Wick rejected resistance; fail trade.
+                return None
         else:
             close_position = (last_high - last_close) / candle_range
-            if close_position >= 0.6:        # closes in lower 40 % of candle
+            if close_position >= 0.8:        # closes in extreme lower 20%
                 score += 20
-                reasons.append("strong_close")
-
-    # ── EMA200 alignment ──────────────────────────────────────────────────────
-    if ema200_val is not None:
-        if direction == "LONG" and last_close > ema200_val:
-            score += 5
-            reasons.append("above_ema200")
-        elif direction == "SHORT" and last_close < ema200_val:
-            score += 5
-            reasons.append("below_ema200")
-
-    # ── Squeeze bonus ─────────────────────────────────────────────────────────
-    # A 20-candle range smaller than 3.5 × avg ATR is below the ~4.5 × ATR
-    # expected from random noise, indicating genuine price compression.
-    # Breakouts from tight ranges tend to be stronger and more sustained.
-    range_size = resistance - support
-    if range_size < _atr_avg20 * 3.5:
-        score += 15
-        reasons.append("squeeze")
+                reasons.append("shaved_conviction")
+            else:
+                # Wick rejected support; fail trade.
+                return None
 
     # ── Score gate ────────────────────────────────────────────────────────────
     if score < config.SIGNAL_SCORE_THRESHOLD:
@@ -474,11 +465,6 @@ def check_breakout(
     # ── Entry / SL / Trail Arm ────────────────────────────────────────────────
     entry_price = last_close
 
-    # Structural SL: just beyond the broken level (resistance for LONG,
-    # support for SHORT), capped at 1.5×ATR so risk stays bounded when the
-    # breakout candle travelled far from the consolidation range.
-    #   LONG  : max(resistance - 0.3×ATR,  entry - 1.5×ATR)  → closer to entry
-    #   SHORT : min(support   + 0.3×ATR,   entry + 1.5×ATR)  → closer to entry
     if direction == "LONG":
         sl_price  = round(max(resistance - atr15 * 0.3, entry_price - atr15 * 1.5), 8)
         trail_arm = round(entry_price + atr15 * 1.0, 8)
@@ -505,7 +491,7 @@ def check_breakout(
         "signal_type":  "BREAKOUT",
     }
     logger.info(
-        "Breakout signal: %s %s score=%d sl=%.6f arm=%.6f atr=%.6f reasons=%s",
+        "V2 Breakout Signal: %s %s score=%d sl=%.6f arm=%.6f atr=%.6f reasons=%s",
         symbol, direction, score, sl_price, trail_arm, atr15, reasons,
     )
     return signal
