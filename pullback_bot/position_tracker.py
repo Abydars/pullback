@@ -270,6 +270,26 @@ async def _paper_tick() -> None:
         try:
             open_trades = await db.get_open_trades()
             if not open_trades:
+                import order_manager as _om
+                if getattr(_om, "_active_session_id", None) is not None and len(getattr(_om, "_opening", set())) == 0:
+                    try:
+                        session_trades = await db.get_trades_by_session(_om._active_session_id)
+                        net_pnl = sum(t["pnl_usdt"] or 0.0 for t in session_trades)
+                        await db.close_session(
+                            session_id  = _om._active_session_id,
+                            ended_at    = int(time.time() * 1000),
+                            exit_reason = "NATURAL_FLAT",
+                            net_pnl     = round(net_pnl, 4),
+                            trade_count = len(session_trades),
+                        )
+                        logger.info(
+                            "Session closed naturally (0 open trades): %s trades=%d net_pnl=%.4f",
+                            _om._active_session_id, len(session_trades), net_pnl
+                        )
+                    except Exception as sess_exc:
+                        logger.error("Failed to naturally close session %s: %s", _om._active_session_id, sess_exc)
+                    finally:
+                        await _om.reset_session()
                 return
 
             positions_payload: list[dict] = []
