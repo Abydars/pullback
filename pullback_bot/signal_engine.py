@@ -352,33 +352,46 @@ def check_breakout(
     avg_vol = float(df15["volume"].iloc[-21:-1].mean())
 
     ema200_val = float(_ema(df15["close"], 200).iloc[-1]) if len(df15) >= 200 else None
+    rsi_val    = float(_rsi(df15["close"], 14).iloc[-1]) if len(df15) >= 14 else 50.0
 
     score: int = 0
     reasons: list[str] = []
     direction: Optional[str] = None
 
-    # ── Determine breakout direction ──────────────────────────────────────────
+    # ── Determine breakout direction ──
     if last_close > resistance:
+        if rsi_val > 70.0:
+            logger.info("Breakout rejected: %s LONG fakeout risk (RSI=%.1f)", symbol, rsi_val)
+            return None
         direction = "LONG"
         score += 50
         reasons.append("breakout")
     elif last_close < support:
+        if rsi_val < 30.0:
+            logger.info("Breakdown rejected: %s SHORT fakeout risk (RSI=%.1f)", symbol, rsi_val)
+            return None
         direction = "SHORT"
         score += 50
         reasons.append("breakdown")
     else:
         return None   # no breakout on this candle
 
-    # ── Volume surge ──────────────────────────────────────────────────────────
+    # ── Volume surge mandate ──
     if avg_vol > 0:
+        has_volume = False
         if last_vol > avg_vol * 1.5:
-            score += 25
-            reasons.append("volume_surge")
+            has_volume = True
         elif len(klines_5m) > 1:
             recent_5m_vol = max(float(klines_5m[-1]["volume"]), float(klines_5m[-2]["volume"]))
             if recent_5m_vol > (avg_vol / 3) * 1.5:
-                score += 25
-                reasons.append("volume_surge")
+                has_volume = True
+                
+        if has_volume:
+            score += 25
+            reasons.append("volume_surge")
+        else:
+            score -= 20
+            reasons.append("low_volume_penalty")
 
     # ── Candle-body strength ──────────────────────────────────────────────────
     candle_range = last_high - last_low
