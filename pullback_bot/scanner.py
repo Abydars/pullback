@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 # active_watchlist: list of symbol strings currently being scanned
 active_watchlist: list[str] = []
 
+# Task handle for the kline WS — kept so refresh_watchlist_loop can cancel
+# and restart it when the symbol set changes.
+_kline_ws_task: Optional[asyncio.Task] = None
+
+# Binance hard limit: 1024 streams per WS connection; we use 3 per symbol
+# (1m/5m/15m), so we must never exceed 341 symbols on a single connection.
+_MAX_WS_SYMBOLS = 1024 // 3  # 341
+
 # kline buffers: symbol -> interval -> list[candle_dict]
 # Each candle dict: {open, high, low, close, volume}
 _kline_buffers: dict[str, dict[str, list[dict]]] = defaultdict(
@@ -87,6 +95,19 @@ async def build_watchlist() -> list[str]:
             if vol >= config.MIN_VOLUME_24H and chg >= config.MIN_PRICE_CHANGE_PCT:
                 watchlist.append(sym)
 
+        # Guard against Binance's 1024-stream-per-connection limit.
+        # Keep the highest-volume symbols when we'd otherwise exceed it.
+        if len(watchlist) > _MAX_WS_SYMBOLS:
+            original = len(watchlist)
+            vol_map = {t["symbol"]: float(t.get("quoteVolume", 0)) for t in tickers}
+            watchlist.sort(key=lambda s: vol_map.get(s, 0), reverse=True)
+            watchlist = watchlist[:_MAX_WS_SYMBOLS]
+            logger.warning(
+                "Watchlist trimmed from %d to %d symbols to stay within "
+                "the Binance 1024-stream-per-connection limit",
+                original, _MAX_WS_SYMBOLS,
+            )
+
         watchlist.sort()
         logger.info("Watchlist built: %d symbols", len(watchlist))
         return watchlist
@@ -97,16 +118,18 @@ async def build_watchlist() -> list[str]:
 
 async def refresh_watchlist_loop() -> None:
     """Refresh the active_watchlist every WATCHLIST_REFRESH_MINUTES."""
-    global active_watchlist
+    global active_watchlist, _kline_ws_task
     while True:
         new_watchlist = await build_watchlist()
 
-        # Clean up buffers for symbols that dropped off the watchlist.
-        # BTCUSDT is always excluded from cleanup — its kline buffer is
-        # required for BTC regime detection regardless of watchlist state.
         old_set = set(active_watchlist)
         new_set = set(new_watchlist)
+
+        # Clean up buffers for symbols that dropped off the watchlist.
+        # BTCUSDT is always excluded — its kline buffer is required for
+        # BTC regime detection regardless of watchlist state.
         dropped = (old_set - new_set) - {"BTCUSDT"}
+        added   = new_set - old_set
         for sym in dropped:
             _kline_buffers.pop(sym, None)
             _last_signal_ts.pop(sym, None)
@@ -117,11 +140,46 @@ async def refresh_watchlist_loop() -> None:
                 len(dropped),
             )
 
+        # Update module-level list before seeding so _run_kline_ws reads the
+        # fresh set on its next iteration.
         active_watchlist = new_watchlist
         await wsb.broadcaster.broadcast(
             "scanner_watchlist",
             {"symbols": active_watchlist, "count": len(active_watchlist)},
         )
+
+        # Seed historical klines for genuinely new symbols so signal_engine
+        # has enough candle history immediately.
+        if added:
+            added_list = sorted(added)
+            logger.info(
+                "New watchlist symbols (%d): seeding klines — %s%s",
+                len(added_list),
+                ", ".join(added_list[:10]),
+                f" … +{len(added_list) - 10}" if len(added_list) > 10 else "",
+            )
+            for i in range(0, len(added_list), 10):
+                batch = added_list[i : i + 10]
+                await asyncio.gather(*[_seed_klines(sym) for sym in batch])
+                await asyncio.sleep(0.5)
+
+        # If the symbol set changed, restart the kline WS so it subscribes
+        # to the updated stream URL.  The new task reads active_watchlist
+        # directly and will not re-seed (added symbols were just seeded above).
+        if added or dropped:
+            if _kline_ws_task and not _kline_ws_task.done():
+                _kline_ws_task.cancel()
+                try:
+                    await _kline_ws_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            _kline_ws_task = asyncio.create_task(_run_kline_ws(), name="kline_ws")
+            logger.info(
+                "Kline WS restarted for updated watchlist "
+                "(%d added, %d dropped, %d total)",
+                len(added), len(dropped), len(active_watchlist),
+            )
+
         await asyncio.sleep(config.WATCHLIST_REFRESH_MINUTES * 60)
 
 
@@ -213,17 +271,37 @@ def _update_buffer(symbol: str, interval: str, candle: dict, is_closed: bool) ->
             _kline_buffers[symbol][interval] = buf[-limit:]
 
 
-async def _run_kline_ws(symbols: list[str]) -> None:
+async def _run_kline_ws() -> None:
     """
-    Subscribe to kline WebSocket for given symbols.
-    Auto-reconnects with exponential backoff.
+    Subscribe to kline WebSocket for the current active_watchlist.
+    Reads active_watchlist on every (re)connect so watchlist refreshes
+    are picked up without restarting the whole process.
+    Re-seeds kline buffers after unexpected disconnects to patch any
+    candles missed during the gap.
     Broadcasts kline_update (with EMA values) to subscribed UI clients.
     """
     backoff = 1
+    needs_reseed = False   # True only after an unexpected disconnect
     while True:
-        url = _make_stream_url(symbols)
-        logger.info("Connecting kline WS (%d symbols)...", len(symbols))
         try:
+            symbols = list(active_watchlist)
+
+            # After an unexpected disconnect, re-seed to fill any candle
+            # gaps that accumulated while the WS was down.
+            if needs_reseed and symbols:
+                logger.info(
+                    "Kline WS reconnect: re-seeding %d symbols to patch gap...",
+                    len(symbols),
+                )
+                for i in range(0, len(symbols), 10):
+                    batch = symbols[i : i + 10]
+                    await asyncio.gather(*[_seed_klines(sym) for sym in batch])
+                    await asyncio.sleep(0.5)
+                needs_reseed = False
+
+            url = _make_stream_url(symbols)
+            logger.info("Connecting kline WS (%d symbols)...", len(symbols))
+
             async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
                 backoff = 1
                 logger.info("Kline WS connected")
@@ -257,6 +335,7 @@ async def _run_kline_ws(symbols: list[str]) -> None:
             break
         except Exception as exc:
             logger.warning("Kline WS error: %s — reconnect in %ds", exc, backoff)
+            needs_reseed = True
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
 
@@ -475,6 +554,17 @@ async def _flush_pending_signals() -> None:
             "open=%d, unrealized=%.2f, limit=%d",
             len(this_scan), len(deferred), current_open, total_unrealized, scan_limit,
         )
+        # Log deferred signals so they appear in scanner history / UI.
+        # acted_on=False because no trade was opened this scan; the signal
+        # may re-fire on the next candle if the setup remains valid.
+        for sig in deferred:
+            await db.insert_scanner_log(
+                symbol=sig["symbol"],
+                score=sig["score"],
+                direction=sig["direction"],
+                timestamp=sig["timestamp"],
+                acted_on=False,
+            )
 
     async def _act(sig: dict) -> None:
         acted = await _order_manager.handle_signal(sig) if _order_manager else False
@@ -495,8 +585,11 @@ async def _flush_pending_signals() -> None:
 mark_prices: dict[str, float] = {}
 
 
-async def _run_mark_price_ws(symbols: list[str]) -> None:
-    """Subscribe to !markPrice@arr to get mark prices for all symbols."""
+async def _run_mark_price_ws() -> None:
+    """Subscribe to !markPrice@arr to get mark prices for all symbols.
+    Filters against the live active_watchlist so additions and removals
+    are reflected without restarting this task.
+    """
     url = f"{config.BINANCE_WS_BASE}/ws/!markPrice@arr@1s"
     backoff = 1
     while True:
@@ -507,9 +600,10 @@ async def _run_mark_price_ws(symbols: list[str]) -> None:
                 async for raw in ws:
                     data = json.loads(raw)
                     if isinstance(data, list):
+                        current_set = set(active_watchlist)
                         for item in data:
                             s = item.get("s", "")
-                            if s in symbols:
+                            if s in current_set:
                                 mark_prices[s] = float(item.get("p", 0))
                         # Trigger position tracker immediately — no event indirection,
                         # so trail/SL checks run within the same event-loop cycle.
@@ -554,7 +648,8 @@ async def start(order_manager=None) -> None:
     # Start background tasks (fire and forget)
     # scanner_loop removed — evaluation is now triggered directly by the
     # kline WS whenever a 15m candle closes (zero-latency, no polling)
-    asyncio.create_task(_run_kline_ws(active_watchlist), name="kline_ws")
-    asyncio.create_task(_run_mark_price_ws(active_watchlist), name="mark_price_ws")
+    global _kline_ws_task
+    _kline_ws_task = asyncio.create_task(_run_kline_ws(), name="kline_ws")
+    asyncio.create_task(_run_mark_price_ws(), name="mark_price_ws")
     asyncio.create_task(refresh_watchlist_loop(), name="watchlist_refresh")
     logger.info("Scanner started — evaluation driven by 15m candle close events.")
