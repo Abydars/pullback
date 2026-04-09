@@ -13,6 +13,21 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     wins = 0
     total_pnl = 0.0
 
+    # Advanced metrics tracking
+    pnl_series = []
+    
+    win_duration_ms = 0
+    los_duration_ms = 0
+    real_losers = 0
+    real_wins = 0
+
+    current_drawdown = 0.0
+    max_drawdown = 0.0
+    peak_pnl = 0.0
+    
+    current_loss_streak = 0
+    max_loss_streak = 0
+
     # Static Buckets
     strategy_stats = {"PULLBACK": {"trades": 0, "wins": 0, "pnl": 0.0}, "BREAKOUT": {"trades": 0, "wins": 0, "pnl": 0.0}}
     dir_stats = {"LONG": {"trades": 0, "wins": 0, "pnl": 0.0}, "SHORT": {"trades": 0, "wins": 0, "pnl": 0.0}}
@@ -29,17 +44,50 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     score_stats = {b: {"trades": 0, "wins": 0, "pnl": 0.0} for b in score_bands}
     
     reasons = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0})
-    sym_pnls = defaultdict(float)
+    
+    # Store multi-dimensional symbol stats => {"trades": N, "wins": N, "pnl": N}
+    sym_stats = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0})
 
-    for t in trades:
+    # Chronologically sort to enforce exact visual curve and streak logic
+    trades_sorted = sorted(trades, key=lambda x: int(x.get("entry_time") or 0))
+
+    for t in trades_sorted:
         pnl = float(t.get("pnl_usdt") or 0.0)
         is_win = pnl > 0
+        
+        # PnL & Series Flow
         total_pnl += pnl
+        pnl_series.append(total_pnl)
+        
+        # Drawdown logic
+        if total_pnl > peak_pnl:
+            peak_pnl = total_pnl
+            current_drawdown = 0.0
+        else:
+            current_drawdown = peak_pnl - total_pnl
+            if current_drawdown > max_drawdown:
+                max_drawdown = current_drawdown
+        
+        # Win / Streak Logic
         if is_win:
             wins += 1
+            real_wins += 1
+            current_loss_streak = 0
+        else:
+            real_losers += 1
+            current_loss_streak += 1
+            if current_loss_streak > max_loss_streak:
+                max_loss_streak = current_loss_streak
+
+        # Hold Duration Logic
+        entry_ms = int(t.get("entry_time") or 0)
+        close_ms = int(t.get("close_time") or 0)
+        if close_ms > entry_ms:
+            dur = close_ms - entry_ms
+            if is_win: win_duration_ms += dur
+            else:      los_duration_ms += dur
 
         score = float(t.get("score") or 0.0)
-        entry_ms = int(t.get("entry_time") or 0)
         dt = datetime.fromtimestamp(entry_ms / 1000.0, tz=timezone.utc)
         
         # Exit Reason
@@ -50,7 +98,9 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         # Symbol
         sym = t.get("symbol", "UNKNOWN")
-        sym_pnls[sym] += pnl
+        sym_stats[sym]["trades"] += 1
+        sym_stats[sym]["pnl"] += pnl
+        if is_win: sym_stats[sym]["wins"] += 1
 
         # Strategy
         stype = t.get("signal_type", "UNKNOWN")
@@ -119,11 +169,23 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         score_stats[b]["pnl"] += pnl
         if is_win: score_stats[b]["wins"] += 1
 
-    # Format Leaders/Bleeders
-    sym_list = [{"symbol": k, "pnl": v} for k, v in sym_pnls.items()]
+    # Format Leaders/Bleeders Matrix
+    sym_list = []
+    for k, v in sym_stats.items():
+        wr = (v["wins"]/v["trades"])*100 if v["trades"]>0 else 0
+        sym_list.append({
+            "symbol": k,
+            "pnl": v["pnl"],
+            "trades": v["trades"],
+            "win_rate": wr
+        })
     
     top_10 = sorted(sym_list, key=lambda x: x["pnl"], reverse=True)[:10]
     bottom_10 = sorted(sym_list, key=lambda x: x["pnl"])[:10]
+
+    # Duration calculations (seconds)
+    avg_win_s = (win_duration_ms / real_wins / 1000) if real_wins > 0 else 0
+    avg_los_s = (los_duration_ms / real_losers / 1000) if real_losers > 0 else 0
 
     stats = {
         "summary": {
@@ -131,7 +193,12 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
             "win_rate": (wins / total_trades * 100) if total_trades else 0.0,
             "total_pnl": total_pnl,
             "avg_pnl": total_pnl / total_trades if total_trades else 0.0,
+            "max_drawdown": max_drawdown,
+            "max_loss_streak": max_loss_streak,
+            "avg_winner_duration_s": avg_win_s,
+            "avg_loser_duration_s": avg_los_s
         },
+        "pnl_series": pnl_series,
         "strategy": strategy_stats,
         "direction": dir_stats,
         "sessions": sessions,
@@ -147,7 +214,17 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def empty_analytics() -> Dict[str, Any]:
     return {
-        "summary": {"total_trades": 0, "win_rate": 0.0, "total_pnl": 0.0, "avg_pnl": 0.0},
+        "summary": {
+            "total_trades": 0, 
+            "win_rate": 0.0, 
+            "total_pnl": 0.0, 
+            "avg_pnl": 0.0,
+            "max_drawdown": 0.0,
+            "max_loss_streak": 0,
+            "avg_winner_duration_s": 0.0,
+            "avg_loser_duration_s": 0.0
+        },
+        "pnl_series": [],
         "strategy": {},
         "direction": {},
         "sessions": {},
@@ -193,11 +270,15 @@ def generate_insights(stats: Dict[str, Any]) -> List[Dict[str, str]]:
         elif low_wr > high_wr:
             insights.append({"type": "info", "message": "Score Correlation: High scoring signals are currently underperforming low scoring ones. The algorithm's structural rating system indicates trend noise is overriding mathematical setups."})
 
-    # ── Bleeding Assets ──
+    # ── Specific Target Bleeders V2 (Using Matrix logic) ──
     bot = stats["symbols"]["bottom_10"]
-    if bot and bot[0]["pnl"] < -10.0:
-        worst_sym = bot[0]["symbol"]
-        insights.append({"type": "danger", "message": f"Bleeder Detected: Significant capital has been lost ({bot[0]['pnl']:.2f}) purely trailing {worst_sym}. Strongly recommend adding this pair to your Blocklist."})
+    for sym_dat in bot:
+        if sym_dat["pnl"] < -10.0 and sym_dat["win_rate"] < 30.0 and sym_dat["trades"] >= 3:
+            insights.append({
+                "type": "danger", 
+                "message": f"Bleeder Detected: {sym_dat['symbol']} has an abysmal {sym_dat['win_rate']:.0f}% win-rate over {sym_dat['trades']} trades resulting in {sym_dat['pnl']:.2f} USDT loss. Strongly recommend adding this pair to your Blocklist."
+            })
+            break # Only alert the absolute worst one so we don't spam 
 
     # ── Timezone Hazard ──
     sessions = stats["sessions"]
@@ -210,6 +291,10 @@ def generate_insights(stats: Dict[str, Any]) -> List[Dict[str, str]]:
     
     if worst_session and worst_pnl < -15.0:
         insights.append({"type": "warning", "message": f"Timezone Bleed: The {worst_session} session destroys capital systematically ({worst_pnl:.2f} total loss). Turn the bot off dynamically during this window."})
+
+    # ── Duration Reversal Logic ──
+    if summary["avg_loser_duration_s"] > summary["avg_winner_duration_s"] * 1.5 and summary["avg_loser_duration_s"] > 3600:
+        insights.append({"type": "warning", "message": f"Hold-Time Inversion: You are holding losers {(summary['avg_loser_duration_s']/60):.0f} minutes on average vs winners at {(summary['avg_winner_duration_s']/60):.0f} minutes. The bot is acting as a bag-holder. Tighten structural sl_price math."})
 
     # ── Risk:Reward Macro Profile ──
     wr = summary["win_rate"]

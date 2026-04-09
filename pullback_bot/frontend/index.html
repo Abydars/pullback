@@ -784,7 +784,15 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
               <div class="an-card"><div class="an-title">Win Rate</div><div class="an-val" id="an-val-wr">0.0%</div></div>
               <div class="an-card"><div class="an-title">Total PnL</div><div class="an-val" id="an-val-pnl">$0.00</div></div>
               <div class="an-card"><div class="an-title">Avg PnL</div><div class="an-val" id="an-val-avg">$0.00</div></div>
-            </div>
+          </div>
+          
+          <div id="an-advanced-metrics" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 24px; margin-top: 12px;">
+              <!-- Inject V2 metrics here -->
+          </div>
+          
+          <div id="an-equity-curve" style="margin-bottom: 24px; padding: 16px; background: var(--bg-hover); border-radius: 6px; position:relative;">
+              <!-- Inject SVG here -->
+          </div>
 
             <div class="an-collapsible">
               <button class="an-toggle active">Strategy Performance</button>
@@ -3169,8 +3177,21 @@ function _buildBarRow(label, stats, maxPnl) {
   `;
 }
 
-function renderAnalytics(d) {
+function ptc(y, h, range, pnl_arr) {
+  // SVG coordinates generator
+  let out = [];
+  const minV = Math.min(...pnl_arr, 0); // Include 0 baseline
+  const maxV = Math.max(...pnl_arr, 0);
+  const diff = (maxV - minV) || 1; // prevent div by zero
+  for(let i=0; i<pnl_arr.length; i++) {
+    let px = (i / (pnl_arr.length - 1 || 1)) * 100;
+    let py = h - ((pnl_arr[i] - minV) / diff) * h;
+    out.push(`${px},${py}`);
+  }
+  return out.join(' ');
+}
 
+function renderAnalytics(d) {
   // Insights
   const insCont = document.getElementById('an-insights-container');
   if (d.insights && d.insights.length > 0) {
@@ -3179,12 +3200,43 @@ function renderAnalytics(d) {
     insCont.innerHTML = `<div class="an-insight-item info">Playbook scanning... requires more trades to generate statistical insights.</div>`;
   }
 
-
   // Summary
   document.getElementById('an-val-trades').textContent = d.summary.total_trades;
   document.getElementById('an-val-wr').textContent = d.summary.win_rate.toFixed(1) + '%';
   document.getElementById('an-val-pnl').innerHTML = _fmtAnPnl(d.summary.total_pnl);
   document.getElementById('an-val-avg').innerHTML = _fmtAnPnl(d.summary.avg_pnl);
+
+  // Advanced V2 Metrics Container mapping
+  const amCont = document.getElementById('an-advanced-metrics');
+  if(amCont) {
+      let winMins = (d.summary.avg_winner_duration_s / 60).toFixed(0);
+      let losMins = (d.summary.avg_loser_duration_s / 60).toFixed(0);
+      amCont.innerHTML = `
+        <div class="an-card"><div class="an-title">Max Drawdown</div><div class="an-val" style="color:var(--red);opacity:0.8">${_fmtAnPnl(-d.summary.max_drawdown)}</div></div>
+        <div class="an-card"><div class="an-title">Max Losing Streak</div><div class="an-val" style="color:var(--text-dim);">${d.summary.max_loss_streak}</div></div>
+        <div class="an-card"><div class="an-title">Avg Winner Hold</div><div class="an-val" style="color:var(--text-dim);">${winMins}m</div></div>
+        <div class="an-card"><div class="an-title">Avg Loser Hold</div><div class="an-val" style="color:var(--text-dim);">${losMins}m</div></div>
+      `;
+  }
+
+  // Draw Equity Curve SVG
+  const eqCont = document.getElementById('an-equity-curve');
+  if(eqCont && d.pnl_series && d.pnl_series.length > 0) {
+      const arr = d.pnl_series;
+      const pts = ptc(0, 100, 100, arr);
+      const isProfitable = arr[arr.length - 1] >= 0;
+      const strokeColor = isProfitable ? 'var(--green)' : 'var(--red)';
+      eqCont.innerHTML = `
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px;letter-spacing:1px;text-transform:uppercase;">Master Equity Curve</div>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:100px;overflow:visible;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.03);border-radius:4px;">
+             <!-- Zero line indicator -->
+             <line x1="0" y1="${100 - ((0 - Math.min(...arr, 0)) / ((Math.max(...arr, 0) - Math.min(...arr, 0)) || 1)) * 100}" x2="100" y2="${100 - ((0 - Math.min(...arr, 0)) / ((Math.max(...arr, 0) - Math.min(...arr, 0)) || 1)) * 100}" stroke="rgba(255,255,255,0.15)" stroke-dasharray="2,2" stroke-width="0.5px" />
+             <polyline points="${pts}" fill="none" stroke="${strokeColor}" stroke-width="1.5px" style="filter: drop-shadow(0 0 4px ${strokeColor});" />
+          </svg>
+      `;
+  } else if (eqCont) {
+      eqCont.innerHTML = '';
+  }
 
   // Helper
   const draw = (id, obj) => {
@@ -3209,15 +3261,28 @@ function renderAnalytics(d) {
   const reasObj = Object.fromEntries(reasons);
   draw('an-reason-container', reasObj);
 
-  // Symbols
-  const st = (syms) => syms.map(x => `
-    <div class="an-sym-item">
-      <span>${x.symbol}</span>
-      <span>${_fmtAnPnl(x.pnl)}</span>
-    </div>
-  `).join('');
-  document.getElementById('an-top-sym').innerHTML = st(d.symbols.top_10) || '<div class="empty">No data</div>';
-  document.getElementById('an-bot-sym').innerHTML = st(d.symbols.bottom_10) || '<div class="empty">No data</div>';
+  // V2 Table Matrix execution for Symbols
+  const st = (syms) => {
+      return `<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:8px;">
+        <tr style="color:var(--text-dim);border-bottom:1px solid rgba(255,255,255,0.05);">
+            <th style="padding:4px 0;text-align:left;">Asset</th>
+            <th style="padding:4px 0;text-align:right;">Trades</th>
+            <th style="padding:4px 0;text-align:right;">Win Rate</th>
+            <th style="padding:4px 0;text-align:right;">PnL</th>
+        </tr>
+        ${syms.map(x => `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.02);">
+          <td style="padding:6px 0;font-weight:600;">${x.symbol.replace('USDT','')}</td>
+          <td style="padding:6px 0;text-align:right;color:var(--muted);">${x.trades}</td>
+          <td style="padding:6px 0;text-align:right;">${x.win_rate.toFixed(0)}%</td>
+          <td style="padding:6px 0;text-align:right;">${_fmtAnPnl(x.pnl)}</td>
+        </tr>
+        `).join('')}
+      </table>`;
+  };
+
+  document.getElementById('an-top-sym').innerHTML = (d.symbols.top_10 && d.symbols.top_10.length > 0) ? st(d.symbols.top_10) : '<div class="empty">No data</div>';
+  document.getElementById('an-bot-sym').innerHTML = (d.symbols.bottom_10 && d.symbols.bottom_10.length > 0) ? st(d.symbols.bottom_10) : '<div class="empty">No data</div>';
 }
 
 // Collapsible setup
