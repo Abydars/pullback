@@ -49,7 +49,6 @@ _SIGNAL_COOLDOWN_S = 300  # 5 min — one signal per 15m candle at most
 # the first trade slot rather than whichever symbol's WS message arrived first.
 _pending_signals: list[dict] = []
 _flush_task: Optional[asyncio.Task] = None
-_BATCH_WINDOW_S = 3.0  # seconds to wait for stragglers after first signal
 
 # reference to order_manager (set by main.py to avoid circular import)
 _order_manager = None
@@ -339,7 +338,7 @@ async def _flush_pending_signals() -> None:
     Each admitted signal runs independently — the _opening set in
     order_manager prevents exceeding MAX_OPEN_TRADES without a global lock.
     """
-    await asyncio.sleep(_BATCH_WINDOW_S)
+    await asyncio.sleep(config.SIGNAL_BATCH_WINDOW_S)
 
     if not _pending_signals:
         return

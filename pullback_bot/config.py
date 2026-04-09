@@ -82,6 +82,11 @@ WATCHLIST_REFRESH_MINUTES: int = _int("WATCHLIST_REFRESH_MINUTES", 15)
 #   both      — run both; trade whichever fires first (cooldown applies per symbol)
 SIGNAL_MODE: str = _get("SIGNAL_MODE", "pullback")
 SIGNAL_SCORE_THRESHOLD: int = _int("SIGNAL_SCORE_THRESHOLD", 70)
+# SIGNAL_BATCH_WINDOW_S: seconds to wait after the first signal fires before
+# ranking the batch by score.  0.0 = immediate entry on first signal (fastest).
+# 3.0 = collect all signals from the same candle close, then open the highest
+# scored ones first.  Has no meaningful impact on the 15m timeframe.
+SIGNAL_BATCH_WINDOW_S: float = _float("SIGNAL_BATCH_WINDOW_S", 3.0)
 
 # ── BTC Regime Filter ─────────────────────────────────────────────────────────
 # When enabled, the scanner blocks alt-coin signals that trade against the
@@ -174,6 +179,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "WATCHLIST_REFRESH_MINUTES": int,
     "SIGNAL_MODE":               str,
     "SIGNAL_SCORE_THRESHOLD":    int,
+    "SIGNAL_BATCH_WINDOW_S":     float,
     "BTC_REGIME_FILTER":         bool,
     "BTC_BREAKOUT_ROC":          float,
     "CAPITAL":                   float,
@@ -254,6 +260,8 @@ async def update(key: str, raw_value: str) -> None:
         raise ValueError("SIGNAL_MODE must be 'pullback', 'breakout', or 'both'")
     if key == "SIGNAL_SCORE_THRESHOLD" and not (0 <= value <= 100):
         raise ValueError("SIGNAL_SCORE_THRESHOLD must be 0–100")
+    if key == "SIGNAL_BATCH_WINDOW_S" and not (0.0 <= value <= 10.0):
+        raise ValueError("SIGNAL_BATCH_WINDOW_S must be 0.0–10.0")
     if key == "MAX_LEVERAGE" and not (1 <= value <= 125):
         raise ValueError("MAX_LEVERAGE must be 1–125")
     if key == "RISK_PCT" and not (0.1 <= value <= 100.0):

@@ -2389,6 +2389,8 @@ const CFG_FIELDS = [
         options: ['pullback', 'breakout', 'both'],
         hint: 'pullback = reversion to EMA50/swing · breakout = close outside 20-bar range · both = run all, trade highest score' },
       { key: 'SIGNAL_SCORE_THRESHOLD', label: 'Min Signal Score (0–100)', type: 'number', hint: 'Lower = more entries, higher = stricter' },
+      { key: 'SIGNAL_BATCH_WINDOW_S', label: 'Signal Batch Window (s)', type: 'number', step: '0.5',
+        hint: 'Seconds to wait for signals from the same candle before ranking by score. 0 = immediate entry (fastest). 3 = collect all signals then take highest scored first. Has no meaningful impact on 15m timeframe.' },
       { key: 'BTC_REGIME_FILTER', label: 'BTC Regime Filter', type: 'select', options: ['true', 'false'],
         hint: 'Block alt shorts during BTC bull breakout and alt longs during BTC bear breakdown. Prevents trading against the market boss on 15m timeframe.' },
       { key: 'BTC_BREAKOUT_ROC', label: 'BTC Breakout ROC Threshold', type: 'number', step: '0.001',
