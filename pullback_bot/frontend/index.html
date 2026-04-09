@@ -2431,6 +2431,8 @@ const CFG_FIELDS = [
         hint: 'Fraction of open trades that must be negative to consider recovery unlikely. 0.65 = 65% losing.' },
       { key: 'SMART_PORT_SL_MULTIPLIER', label: 'Smart SL: Loss Depth Multiplier', type: 'number', step: '0.1',
         hint: 'Total unrealized must be below -(MIN_TP × multiplier) to trigger. 0.8 with MIN_TP=$5 = triggers at -$4.' },
+      { key: 'SMART_PORT_SL_MIN_AGE_MINUTES', label: 'Smart SL: Min Trade Age (min)', type: 'number', step: '1',
+        hint: 'Minimum minutes all trades must be open before Smart PORT SL can trigger. Prevents firing on normal entry noise. 0 = no gate, 5 = wait 5 minutes first.' },
       { key: 'PORTFOLIO_TP_MODE', label: 'Portfolio TP Mode', type: 'select',
         options: [
           { value: 'trailing', label: 'Trailing Floor' },

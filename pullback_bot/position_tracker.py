@@ -290,7 +290,10 @@ def _should_smart_port_sl_trigger(
     """
     Pure function — no side effects, no awaits, no globals modified.
 
-    Returns True only when ALL three conditions hold simultaneously:
+    Returns True only when ALL conditions hold simultaneously:
+
+    0. Minimum trade age gate — youngest open trade must be at least
+       SMART_PORT_SL_MIN_AGE_MINUTES old (prevents firing on entry noise)
 
     1. Majority of open trades are negative
        (negative_count / total >= SMART_PORT_SL_NEG_RATIO)
@@ -305,6 +308,17 @@ def _should_smart_port_sl_trigger(
     Requires at least INITIAL_BATCH_SIZE + 1 open trades — prevents triggering
     on the first batch alone before recovery slots have opened.
     """
+    if not open_trades:
+        return False
+
+    # Condition 0 — minimum trade age gate
+    now_ms = int(time.time() * 1000)
+    youngest_entry = max(t["entry_time"] for t in open_trades)
+    age_ms = now_ms - youngest_entry
+    min_age_ms = config.SMART_PORT_SL_MIN_AGE_MINUTES * 60 * 1000
+    if age_ms < min_age_ms:
+        return False
+
     min_trades = config.INITIAL_BATCH_SIZE + 1
     if len(open_trades) < min_trades:
         return False
