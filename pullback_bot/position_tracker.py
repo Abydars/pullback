@@ -2,9 +2,8 @@
 position_tracker.py — Tracks open positions.
 
 LIVE mode:
-  - Subscribes to Binance User Data Stream (listenKey) via WebSocket.
-  - Handles ORDER_TRADE_UPDATE events: updates DB on fill/close.
-  - Keepalive ping on listenKey every 30 minutes.
+  - Order fill events are handled by user_data_stream.py.
+  - On startup, reconciles any fills that occurred while the bot was offline.
 
 PAPER mode:
   - Reads mark prices from scanner.mark_prices dict (updated by mark-price WS).
@@ -16,12 +15,9 @@ Both modes broadcast position_update and trade_closed via ws_broadcaster.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from typing import Optional
-
-import websockets
 
 import binance_client as bc
 import config
@@ -119,95 +115,6 @@ _peak_portfolio_pnl:    float = 0.0    # highest total unrealized PnL since armi
 # loop).  A plain bool works just as well in single-threaded asyncio and needs
 # no initialisation.
 _tick_running: bool = False
-
-
-# ── LIVE mode: User Data Stream ───────────────────────────────────────────────
-
-async def _handle_order_update(event: dict) -> None:
-    """Process ORDER_TRADE_UPDATE event from user data stream."""
-    order = event.get("o", {})
-    status = order.get("X")       # FILLED, PARTIALLY_FILLED, CANCELED, etc.
-    binance_id = str(order.get("i", ""))
-    symbol = order.get("s", "")
-    realized_pnl = float(order.get("rp", 0))
-
-    if status not in ("FILLED", "CANCELED", "EXPIRED"):
-        return
-
-    # Look up our trade by binance_order_id
-    open_trades = await db.get_open_trades()
-    sym_trades = [t for t in open_trades if t.get("symbol") == symbol]
-    for trade in sym_trades:
-        if trade.get("binance_order_id") == binance_id:
-            if status == "FILLED":
-                close_price = float(order.get("ap", trade["entry_price"]))
-                close_time = int(time.time() * 1000)
-                direction = trade["direction"]
-                entry = trade["entry_price"]
-                qty = trade["qty"]
-
-                if realized_pnl == 0:
-                    # Calculate manually
-                    if direction == "LONG":
-                        realized_pnl = (close_price - entry) * qty
-                    else:
-                        realized_pnl = (entry - close_price) * qty
-
-                pnl_pct = realized_pnl / (entry * qty) * 100 if entry * qty else 0
-
-                await db.update_trade_close(
-                    trade_id=trade["id"],
-                    close_price=close_price,
-                    close_time=close_time,
-                    pnl_usdt=round(realized_pnl, 4),
-                    pnl_pct=round(pnl_pct, 2),
-                    close_reason="FILLED",
-                )
-                await wsb.broadcaster.broadcast("trade_closed", {
-                    **trade,
-                    "close_price":  close_price,
-                    "close_time":   close_time,
-                    "close_reason": "FILLED",
-                    "pnl_usdt":     round(realized_pnl, 4),
-                    "pnl_pct":      round(pnl_pct, 2),
-                })
-                logger.info("Trade closed: %s pnl=%.4f", trade["symbol"], realized_pnl)
-            elif status in ("CANCELED", "EXPIRED"):
-                await db.update_trade_status(trade["id"], "CANCELLED")
-            break
-
-
-async def _run_user_data_ws(listen_key: str) -> None:
-    """Connect to user data stream, handle events, reconnect on error."""
-    url = f"{config.BINANCE_WS_BASE}/ws/{listen_key}"
-    backoff = 1
-    while True:
-        logger.info("Connecting user-data WS...")
-        try:
-            async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
-                backoff = 1
-                logger.info("User-data WS connected")
-                async for raw in ws:
-                    event = json.loads(raw)
-                    if event.get("e") == "ORDER_TRADE_UPDATE":
-                        await _handle_order_update(event)
-        except asyncio.CancelledError:
-            break
-        except Exception as exc:
-            logger.warning("User-data WS error: %s — reconnect in %ds", exc, backoff)
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 30)
-
-
-async def _keepalive_listen_key(listen_key: str) -> None:
-    """Ping listenKey every 30 minutes to keep it alive."""
-    while True:
-        await asyncio.sleep(30 * 60)
-        try:
-            await bc.keepalive_listen_key(listen_key)
-            logger.debug("listenKey keepalive sent")
-        except Exception as exc:
-            logger.warning("listenKey keepalive failed: %s", exc)
 
 
 # ── Stats broadcast helper ────────────────────────────────────────────────────
@@ -795,12 +702,8 @@ async def start() -> None:
             logger.warning("No API key — skipping live position tracker")
             return
         try:
-            # Reconcile before connecting user-data stream
             await _reconcile_live()
-            listen_key = await bc.create_listen_key()
-            asyncio.create_task(_run_user_data_ws(listen_key), name="user_data_ws")
-            asyncio.create_task(_keepalive_listen_key(listen_key), name="listenkey_keepalive")
-            logger.info("Live position tracker started (listenKey: %s...)", listen_key[:8])
+            logger.info("Live position tracker started")
         except Exception as exc:
             logger.error("Failed to start live position tracker: %s", exc)
     else:

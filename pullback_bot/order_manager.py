@@ -15,7 +15,6 @@ Both modes respect MAX_OPEN_TRADES cap.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 import uuid

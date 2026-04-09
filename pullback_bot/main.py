@@ -28,8 +28,6 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-
 import binance_client as bc
 import config
 import db
