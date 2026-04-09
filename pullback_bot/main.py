@@ -25,7 +25,6 @@ import logging
 import time
 from pathlib import Path
 
-import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 import binance_client as bc

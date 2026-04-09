@@ -195,12 +195,17 @@ def _compute_ema_tail(buf: list[dict], period: int) -> float:
 
 
 def _update_buffer(symbol: str, interval: str, candle: dict, is_closed: bool) -> None:
-    """Update the in-memory kline buffer for a symbol/interval."""
+    """Update the in-memory kline buffer for a symbol/interval.
+
+    Match by candle open-time so that:
+    - In-progress ticks update buf[-1] in place (no duplicate entry).
+    - A closing tick updates buf[-1] in place (no double-append of the same candle).
+    - The first tick of a genuinely new candle appends correctly.
+    """
     buf = _kline_buffers[symbol][interval]
-    if buf and not is_closed:
-        # Update the last (in-progress) candle
+    if buf and buf[-1]["time"] == candle["time"]:
         buf[-1] = candle
-    elif is_closed:
+    else:
         buf.append(candle)
         # Keep only what we need (220 for 15m, 60 for 5m, 10 for 1m)
         limit = {"15m": 220, "5m": 60, "1m": 10}.get(interval, 60)
