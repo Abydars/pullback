@@ -2020,14 +2020,6 @@ function renderHistory() {
   document.getElementById('hist-count').textContent = trades.length ? `(${trades.length})` : '';
 
 
-  // Insights
-  const insCont = document.getElementById('an-insights-container');
-  if (d.insights && d.insights.length > 0) {
-    insCont.innerHTML = d.insights.map(i => `<div class="an-insight-item ${i.type}"><b>Heuristic Scan:</b> ${i.message}</div>`).join('');
-  } else {
-    insCont.innerHTML = `<div class="an-insight-item info">Playbook scanning... requires more trades to generate statistical insights.</div>`;
-  }
-
   // Summary line (all histTrades)
   const winCount = trades.filter(t => (t.pnl_usdt ?? 0) > 0).length;
   const totalPnl = trades.reduce((s, t) => s + (t.pnl_usdt ?? 0), 0);
@@ -3186,6 +3178,7 @@ function renderAnalytics(d) {
   } else {
     insCont.innerHTML = `<div class="an-insight-item info">Playbook scanning... requires more trades to generate statistical insights.</div>`;
   }
+
 
   // Summary
   document.getElementById('an-val-trades').textContent = d.summary.total_trades;
