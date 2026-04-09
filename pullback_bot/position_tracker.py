@@ -616,6 +616,28 @@ async def _reconcile_live() -> None:
                 closed_count += 1
 
         logger.info("Reconciliation complete: %d ghost trade(s) closed", closed_count)
+
+        # ── Reverse check: Binance positions not tracked in DB ────────────────
+        # These can arise from SL/TP placement failures that prevented DB insert
+        # (ghost trades).  We cannot safely auto-adopt without knowing the
+        # original SL/TP, so alert loudly for manual intervention.
+        db_symbols = {t["symbol"] for t in open_trades}
+        untracked  = [(sym, amt) for sym, amt in live_map.items()
+                      if sym not in db_symbols]
+        if untracked:
+            for sym, amt in untracked:
+                logger.critical(
+                    "UNTRACKED LIVE POSITION: %s positionAmt=%.4f — "
+                    "not in database, manual close required",
+                    sym, amt,
+                )
+            logger.critical(
+                "Reconciliation found %d untracked Binance position(s). "
+                "These are likely ghost trades from a failed order placement. "
+                "Close them manually on the exchange.",
+                len(untracked),
+            )
+
     except Exception as exc:
         logger.error("Live reconciliation error: %s", exc)
 

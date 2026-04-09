@@ -306,34 +306,48 @@ class OrderManager:
         atr: float = 0.0,
         session_id: Optional[str] = None,
     ) -> bool:
+        tick    = bc.get_tick_size(symbol)
+        side    = "BUY" if direction == "LONG" else "SELL"
+        sl_side = "SELL" if direction == "LONG" else "BUY"
+
+        # ── Steps 1 & 2: leverage + entry — abort entirely on failure ──────────
+        # Only here is it safe to return False; the position doesn't exist yet.
         try:
-            tick = bc.get_tick_size(symbol)
-            side = "BUY" if direction == "LONG" else "SELL"
-            sl_side = "SELL" if direction == "LONG" else "BUY"
-
-            # 1. Set leverage (REST only — WS API doesn't support this)
             await bc.set_leverage(symbol, leverage)
-
-            # 2. Market entry via WS API
             order = await ws_order_api.place_order(
                 symbol=symbol, side=side, type="MARKET", quantity=qty,
             )
             binance_order_id = str(order.get("orderId", ""))
-            actual_entry = float(order.get("avgPrice") or entry)
+            actual_entry     = float(order.get("avgPrice") or entry)
+        except Exception as exc:
+            logger.error("Live entry failed for %s: %s", symbol, exc)
+            return False
 
-            # 3. Stop Loss via WS API (skipped when USE_STOP_LOSS=false)
-            if config.USE_STOP_LOSS:
+        # ── Entry confirmed — SL / TP failures must NOT prevent DB recording ──
+        # A position without SL/TP is risky but still manageable.
+        # A position with no DB row is a ghost trade the bot can never see.
+
+        # ── Step 3: Stop Loss ─────────────────────────────────────────────────
+        if config.USE_STOP_LOSS:
+            try:
                 await ws_order_api.place_order(
                     symbol=symbol, side=sl_side, type="STOP_MARKET",
                     stopPrice=bc.round_step(sl, tick),
                     closePosition="true",
                 )
+            except Exception as exc:
+                logger.error(
+                    "CRITICAL: SL placement failed for %s (order %s) — "
+                    "position is UNPROTECTED, manual action required: %s",
+                    symbol, binance_order_id, exc,
+                )
 
-            # 4. Trail or fixed TP via WS API (skipped when USE_TAKE_PROFIT=false)
-            if config.USE_TAKE_PROFIT:
+        # ── Step 4: Take-Profit / Trailing Stop ───────────────────────────────
+        if config.USE_TAKE_PROFIT:
+            try:
                 if config.USE_TRAILING and atr > 0:
-                    # Native trailing stop — activates at trail_arm, trails at 1×ATR distance
-                    atr_pct = max(0.1, min(10.0, (atr / actual_entry) * 100))
+                    # Binance enforces a hard 5.0 % maximum callbackRate.
+                    atr_pct = max(0.1, min(5.0, (atr / actual_entry) * 100))
                     await ws_order_api.place_order(
                         symbol=symbol, side=sl_side, type="TRAILING_STOP_MARKET",
                         activationPrice=bc.round_step(tp1, tick),
@@ -346,8 +360,15 @@ class OrderManager:
                         stopPrice=bc.round_step(tp1, tick),
                         closePosition="true",
                     )
+            except Exception as exc:
+                logger.error(
+                    "CRITICAL: TP/trail placement failed for %s (order %s) — "
+                    "no take-profit active, manual action required: %s",
+                    symbol, binance_order_id, exc,
+                )
 
-            # 5. Record in DB
+        # ── Step 5: DB insert — always reached after a successful entry ───────
+        try:
             trade_id = await db.insert_trade(
                 symbol=symbol,
                 direction=direction,
@@ -369,9 +390,12 @@ class OrderManager:
                 trade_id, symbol, direction, actual_entry, leverage, binance_order_id,
             )
             return True
-
         except Exception as exc:
-            logger.error("Live order failed for %s: %s", symbol, exc)
+            logger.error(
+                "CRITICAL: DB insert failed for %s (order %s) — "
+                "position exists on exchange but NOT in database: %s",
+                symbol, binance_order_id, exc,
+            )
             return False
 
 
