@@ -266,8 +266,8 @@ async def update(key: str, raw_value: str) -> None:
     # Extra validation
     if key == "MODE" and value not in ("live", "paper"):
         raise ValueError("MODE must be 'live' or 'paper'")
-    if key == "SIGNAL_MODE" and value not in ("pullback", "breakout", "both"):
-        raise ValueError("SIGNAL_MODE must be 'pullback', 'breakout', or 'both'")
+    if key == "SIGNAL_MODE" and value not in ("pullback", "breakout", "micro_scalp", "funding_predator", "both"):
+        raise ValueError("SIGNAL_MODE must be 'pullback', 'breakout', 'micro_scalp', 'funding_predator', or 'both'")
     if key == "SIGNAL_SCORE_THRESHOLD" and not (0 <= value <= 100):
         raise ValueError("SIGNAL_SCORE_THRESHOLD must be 0–100")
     if key == "SIGNAL_BATCH_WINDOW_S" and not (0.0 <= value <= 10.0):
