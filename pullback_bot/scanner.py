@@ -188,7 +188,7 @@ async def refresh_watchlist_loop() -> None:
 
 async def _seed_klines(symbol: str) -> None:
     """Pre-fill kline buffers from REST API for a symbol."""
-    for interval, limit in [("15m", 500), ("5m", 60), ("1m", 10)]:
+    for interval, limit in [("15m", 500), ("5m", 60), ("1m", 60)]:
         try:
             raw = await bc.get_klines(symbol, interval, limit)
             candles = [
