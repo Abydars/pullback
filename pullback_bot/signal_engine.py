@@ -86,6 +86,35 @@ def _macd(
     return macd_line, signal_line, histogram
 
 
+def _adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Calculate Average Directional Index (ADX) using Wilder's smoothing."""
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    
+    up_move = high - high.shift(1)
+    down_move = low.shift(1) - low
+    
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    
+    plus_dm = pd.Series(plus_dm, index=df.index)
+    minus_dm = pd.Series(minus_dm, index=df.index)
+    
+    # Wilder's smoothing equates roughly to EMA with alpha=1/period
+    tr_smooth = tr.ewm(alpha=1/period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / tr_smooth)
+    minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / tr_smooth)
+    
+    dx = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di)).fillna(0)
+    return dx.ewm(alpha=1/period, adjust=False).mean()
+
+
 # ── BTC Regime ─────────────────────────────────────────────────────────────────
 
 def get_btc_regime(klines_15m: list[dict]) -> str:
@@ -147,129 +176,135 @@ def check_pullback(
     score = 0
     reasons: list[str] = []
 
-    # ── 1. Trend direction (15m) ──────────────────────────────────────────────
+    # ── Parse Candles ──
     close15 = df15["close"]
+    high15  = df15["high"]
+    low15   = df15["low"]
+    open15  = df15["open"]
+    
     ema50 = _ema(close15, 50)
     ema200 = _ema(close15, 200)
 
-    last_close = close15.iloc[-1]
-    last_ema50 = ema50.iloc[-1]
-    last_ema200 = ema200.iloc[-1]
+    last_close = float(close15.iloc[-1])
+    last_high  = float(high15.iloc[-1])
+    last_low   = float(low15.iloc[-1])
+    last_open  = float(open15.iloc[-1])
 
+    prev_close = float(close15.iloc[-2])
+    prev_high  = float(high15.iloc[-2])
+    prev_low   = float(low15.iloc[-2])
+    prev_open  = float(open15.iloc[-2])
+
+    last_ema50  = float(ema50.iloc[-1])
+    last_ema200 = float(ema200.iloc[-1])
+
+    # Indicators
+    adx15      = float(_adx(df15, 14).iloc[-1])
+    atr_series = _atr(df15, 14)
+    atr15      = float(atr_series.iloc[-1])
+
+    # ── 1. Trend Filter & Strength ────────────────────────────────────────────
     if last_close > last_ema50 and last_ema50 > last_ema200:
         direction = "LONG"
-        score += 25
-        reasons.append("trend:LONG")
     elif last_close < last_ema50 and last_ema50 < last_ema200:
         direction = "SHORT"
-        score += 25
-        reasons.append("trend:SHORT")
     else:
-        # Ranging — skip
         return None
 
-    # EMA200 slope — proxy for higher-timeframe alignment.
-    # If EMA200 has been declining over the last 20 bars (≈5 hours on 15m),
-    # the medium-term structure opposes a LONG; rising EMA200 opposes a SHORT.
-    # A 15m EMA cross during a counter-trend bounce would otherwise pass the
-    # trend check above while the broader structure remains against the trade.
-    ema200_slope_up = ema200.iloc[-1] > ema200.iloc[-21]
+    ema200_slope_up = float(ema200.iloc[-1]) > float(ema200.iloc[-21])
     if direction == "LONG" and not ema200_slope_up:
         return None
     if direction == "SHORT" and ema200_slope_up:
         return None
 
-    # ── 2. Pullback zone (15m) ────────────────────────────────────────────────
-    atr_series = _atr(df15, 14)
-    atr15      = atr_series.iloc[-1]
-    # ATR regime: how elevated is current volatility vs recent 20-bar average?
-    atr_avg20  = float(atr_series.iloc[-21:-1].mean()) if len(atr_series) > 21 else atr15
-    atr_ratio  = atr15 / atr_avg20 if atr_avg20 > 0 else 1.0
-    ema50_zone_pct = abs(last_close - last_ema50) / last_ema50
+    score += 40
+    reasons.append(f"trend:{direction}")
 
-    in_ema50_zone = ema50_zone_pct <= 0.005  # within 0.5% of EMA50
-
-    # Swing high/low zones — exclude the current candle so the zone is always
-    # a *prior* level.  Including it would make in_swing_zone trivially true
-    # whenever price makes a new 21-bar low (LONG) or high (SHORT), which is
-    # a breakdown/breakout, not a pullback to support/resistance.
-    recent = df15.iloc[-22:-1]
-    if direction == "LONG":
-        swing_level = recent["low"].min()
-        in_swing_zone = abs(last_close - swing_level) <= atr15 * 1.5
-    else:
-        swing_level = recent["high"].max()
-        in_swing_zone = abs(last_close - swing_level) <= atr15 * 1.5
-
-    if in_ema50_zone or in_swing_zone:
-        score += 25
-        reasons.append("pullback_zone")
-
-    # ── 3. Momentum reversal (5m) ─────────────────────────────────────────────
-    close5 = df5["close"]
-    k, d = _stoch_rsi(close5)
-    _, _, macd_hist = _macd(close5)
-
-    # Use last 2 values for crossover detection
-    k_prev, k_last = k.iloc[-2], k.iloc[-1]
-    d_prev, d_last = d.iloc[-2], d.iloc[-1]
-    hist_prev = macd_hist.iloc[-2]
-    hist_last = macd_hist.iloc[-1]
-
-    stoch_signal = False
-    macd_signal = False
-
-    if direction == "LONG":
-        # K crosses above D from oversold
-        if k_prev < d_prev and k_last > d_last and k_prev < 20:
-            stoch_signal = True
-        # MACD hist turning positive
-        if hist_prev < 0 and hist_last > hist_prev:
-            macd_signal = True
-    else:
-        # K crosses below D from overbought
-        if k_prev > d_prev and k_last < d_last and k_prev > 80:
-            stoch_signal = True
-        # MACD hist turning negative
-        if hist_prev > 0 and hist_last < hist_prev:
-            macd_signal = True
-
-    if stoch_signal:
+    if adx15 > 22.0:
         score += 20
-        reasons.append("stochrsi")
-    if macd_signal:
-        score += 15
-        reasons.append("macd")
+        reasons.append("adx_momentum")
+    else:
+        # Weak chopped trend; very risky to trade pullback.
+        return None
 
-    # ── 4. Volume spike ───────────────────────────────────────────────────────
-    vol15 = df15["volume"]
-    avg_vol = vol15.iloc[-21:-1].mean()
-    last_vol = vol15.iloc[-1]
-    if avg_vol > 0:
-        if last_vol > avg_vol * 1.5:
-            score += 15
-            reasons.append("volume_spike")
-        elif len(klines_5m) > 1:
-            recent_5m_vol = max(float(klines_5m[-1]["volume"]), float(klines_5m[-2]["volume"]))
-            if recent_5m_vol > (avg_vol / 3) * 1.5:
-                score += 15
-                reasons.append("volume_spike")
+    # ── 2. Dynamic Volatility Zone Mapping ────────────────────────────────────
+    ema50_upper_band = last_ema50 + (atr15 * 1.0)
+    ema50_lower_band = last_ema50 - (atr15 * 1.0)
+
+    touched_zone = False
+    if direction == "LONG":
+        if last_low <= ema50_upper_band and last_close >= ema50_lower_band:
+            touched_zone = True
+    else:
+        if last_high >= ema50_lower_band and last_close <= ema50_upper_band:
+            touched_zone = True
+
+    if not touched_zone:
+        return None
+
+    score += 20
+    reasons.append("dynamic_value_zone")
+
+    # ── 3. Strict Candlestick Rejection Filter ────────────────────────────────
+    candle_range = last_high - last_low
+    if candle_range <= 0:
+        return None
+
+    pa_valid = False
+
+    if direction == "LONG":
+        # Check Pinbar (Lower wick must be > 40% of the entire candle structure)
+        lower_wick = min(last_open, last_close) - last_low
+        if lower_wick / candle_range >= 0.40:
+            pa_valid = True
+            reasons.append("pinbar_rejection")
+            score += 20
+        # Check Bullish Engulfing (Current Green body swallows previous Red body)
+        elif last_close > last_open and prev_close < prev_open and last_close >= prev_open and last_open <= prev_close:
+            pa_valid = True
+            reasons.append("bullish_engulfing")
+            score += 20
+    else:
+        # Check Inverse Pinbar (Upper wick must be > 40% of the entire candle structure)
+        upper_wick = last_high - max(last_open, last_close)
+        if upper_wick / candle_range >= 0.40:
+            pa_valid = True
+            reasons.append("inverse_pinbar_rejection")
+            score += 20
+        # Check Bearish Engulfing (Current Red body swallows previous Green body)
+        elif last_close < last_open and prev_close > prev_open and last_close <= prev_open and last_open >= prev_close:
+            pa_valid = True
+            reasons.append("bearish_engulfing")
+            score += 20
+
+    if pa_valid is False:
+        # Falling Knife caught. Kill trade mathematically.
+        return None
 
     # ── Score gate ────────────────────────────────────────────────────────────
     if score < config.SIGNAL_SCORE_THRESHOLD:
         return None
 
-    # ── Compute entry / SL / Trail Arm ───────────────────────────────────────
-    entry_price = last_close
+    # ── 4. Structural Stop Loss Anchoring ─────────────────────────────────────
+    entry_price = float(last_close)
 
-    # SL: 1.5×ATR from entry — sits outside normal 15m noise.
-    # Trail arm: 1×ATR from entry — activates trailing once the trade confirms.
+    atr_avg20 = float(atr_series.iloc[-21:-1].mean()) if len(atr_series) > 21 else atr15
+    atr_ratio = atr15 / atr_avg20 if atr_avg20 > 0 else 1.0
+
     if direction == "LONG":
-        sl_price   = round(entry_price - atr15 * 1.5, 8)
-        trail_arm  = round(entry_price + atr15 * 1.0, 8)
+        # Anchor explicitly below the structural fractal bottom + 0.2 ATR buffer
+        sl_price = round(last_low - (atr15 * 0.2), 8)
+        # Structural disaster cap (1.5 ATR Max)
+        sl_price = max(sl_price, entry_price - (atr15 * 1.5))
+        
+        trail_arm = round(entry_price + atr15 * 1.0, 8)
     else:
-        sl_price   = round(entry_price + atr15 * 1.5, 8)
-        trail_arm  = round(entry_price - atr15 * 1.0, 8)
+        # Anchor explicitly above the structural fractal top + 0.2 ATR buffer
+        sl_price = round(last_high + (atr15 * 0.2), 8)
+        # Structural disaster cap (1.5 ATR Max)
+        sl_price = min(sl_price, entry_price + (atr15 * 1.5))
+        
+        trail_arm = round(entry_price - atr15 * 1.0, 8)
 
     if sl_price <= 0:
         return None
@@ -290,7 +325,7 @@ def check_pullback(
         "signal_type": "PULLBACK",
     }
     logger.info(
-        "Signal: %s %s score=%d sl=%.6f arm=%.6f atr=%.6f reasons=%s",
+        "V2 Pullback Signal: %s %s score=%d sl=%.6f arm=%.6f atr=%.6f reasons=%s",
         symbol, direction, score, sl_price, trail_arm, atr15, reasons,
     )
     return signal
