@@ -1,2 +1,5 @@
 .env
 pullback_bot/__pycache__
+*.db
+*.sqlite
+*.sqlite3
