@@ -78,10 +78,6 @@ WATCHLIST_REFRESH_MINUTES: int = _int("WATCHLIST_REFRESH_MINUTES", 15)
 # ── Signal Settings ───────────────────────────────────────────────────────────
 # Feature: Trading Session Time Guard
 SESSION_GUARD_ENABLED: bool = _bool("SESSION_GUARD_ENABLED", False)
-TRADE_ASIA_SESSION: bool = _bool("TRADE_ASIA_SESSION", False) 
-TRADE_LONDON_SESSION: bool = _bool("TRADE_LONDON_SESSION", False)
-TRADE_NY_SESSION: bool = _bool("TRADE_NY_SESSION", False)
-TRADE_OVERLAP_SESSION: bool = _bool("TRADE_OVERLAP_SESSION", False)
 TRADE_CUSTOM_SESSIONS: str = _get("TRADE_CUSTOM_SESSIONS", "")
 
 #   pullback         — trend-following reversion to EMA50/swing zone (default)

@@ -2467,12 +2467,8 @@ const CFG_FIELDS = [
   {
     section: 'Signal',
     fields: [
-      { key: 'SESSION_GUARD_ENABLED', label: 'Session Time Guard', type: 'select', options: ['true', 'false'], hint: 'If true, algorithmic signal evaluation is physically restricted mathematically to the regions toggled TRUE below.' },
-      { key: 'TRADE_ASIA_SESSION', label: 'Trade Asia Session (23:00–08:00 UTC)', type: 'select', options: ['true', 'false'] },
-      { key: 'TRADE_LONDON_SESSION', label: 'Trade London Session (08:00–16:00 UTC)', type: 'select', options: ['true', 'false'] },
-      { key: 'TRADE_NY_SESSION', label: 'Trade New York Session (13:30–20:00 UTC)', type: 'select', options: ['true', 'false'] },
-      { key: 'TRADE_OVERLAP_SESSION', label: 'Trade London/NY Overlap ONLY (13:30–16:00 UTC)', type: 'select', options: ['true', 'false'], hint: 'Highest global volume and volatility block.' },
-      { key: 'TRADE_CUSTOM_SESSIONS', label: 'Custom Timeframes (UTC)', type: 'text', hint: 'Provide unlimited custom boundaries (comma-separated, formatted <code>HH:MM-HH:MM</code>, e.g. <code>12:00-13:30, 21:00-23:15</code>). Leaves empty to disable.' },
+      { key: 'SESSION_GUARD_ENABLED', label: 'Session Time Guard', type: 'select', options: ['true', 'false'], hint: 'If true, algorithmic signal evaluation is physically restricted mathematically to the custom sessions bounded below.' },
+      { key: 'TRADE_CUSTOM_SESSIONS', label: 'Allowed Trading Sessions (UTC)', type: 'text', hint: 'Provide unlimited custom boundaries (comma-separated, formatted <code>HH:MM-HH:MM</code>, e.g. <code>12:00-13:30, 21:00-23:15</code>). Leaves empty to block all trades.' },
       { key: 'SIGNAL_MODE', label: 'Strategy', type: 'select',
         options: ['pullback', 'breakout', 'micro_scalp', 'funding_predator', 'both'],
         hint: 'pullback = 15m trend · breakout = 15m box exit · micro_scalp = 1m HFT volume · funding_predator = 8H clock tick arbitrage squeeze · both = pullback & breakout' },
@@ -2598,16 +2594,6 @@ function renderConfigForm(values) {
       }
       
       let finalHint = f.hint || '';
-      const _fmtLoc = (ts) => { 
-          const [h,m] = ts.split(':'); 
-          const d = new Date(); 
-          d.setUTCHours(parseInt(h), parseInt(m), 0, 0); 
-          return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); 
-      };
-      if (f.key === 'TRADE_ASIA_SESSION') finalHint = `<span style="color:var(--accent)">Your Local Time: <strong>${_fmtLoc('23:00')} – ${_fmtLoc('08:00')}</strong></span>`;
-      if (f.key === 'TRADE_LONDON_SESSION') finalHint = `<span style="color:var(--accent)">Your Local Time: <strong>${_fmtLoc('08:00')} – ${_fmtLoc('16:00')}</strong></span>`;
-      if (f.key === 'TRADE_NY_SESSION') finalHint = `<span style="color:var(--accent)">Your Local Time: <strong>${_fmtLoc('13:30')} – ${_fmtLoc('20:00')}</strong></span>`;
-      if (f.key === 'TRADE_OVERLAP_SESSION') finalHint = `Highest global volume block. <br/><span style="color:var(--accent)">Your Local Time: <strong>${_fmtLoc('13:30')} – ${_fmtLoc('16:00')}</strong></span>`;
       
       html += `
         <div class="cfg-row">

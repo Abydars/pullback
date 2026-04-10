@@ -388,15 +388,6 @@ async def _evaluate_symbol(symbol: str) -> None:
             now_time = datetime.datetime.utcnow().time()
             
             allowed_ranges = []
-            if getattr(config, "TRADE_ASIA_SESSION", False):
-                allowed_ranges.append(((23, 0), (8, 0)))
-            if getattr(config, "TRADE_LONDON_SESSION", False):
-                allowed_ranges.append(((8, 0), (16, 0)))
-            if getattr(config, "TRADE_NY_SESSION", False):
-                allowed_ranges.append(((13, 30), (20, 0)))
-            if getattr(config, "TRADE_OVERLAP_SESSION", False):
-                allowed_ranges.append(((13, 30), (16, 0)))
-                
             custom_str = getattr(config, "TRADE_CUSTOM_SESSIONS", "")
             if custom_str:
                 for r in custom_str.split(","):
