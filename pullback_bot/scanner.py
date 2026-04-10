@@ -827,6 +827,10 @@ async def start(order_manager=None) -> None:
     _kline_ws_task = asyncio.create_task(_run_kline_ws(), name="kline_ws")
     asyncio.create_task(_run_mark_price_ws(), name="mark_price_ws")
     asyncio.create_task(refresh_watchlist_loop(), name="watchlist_refresh")
+    
+    # Ensure any missing ML models from the initial startup watchlist are trained in the background
+    asyncio.create_task(_auto_train_missing_models(list(active_watchlist)))
+    
     logger.info("Scanner started — evaluation driven by 15m candle close events.")
 
 async def _run_funding_predator_clock() -> None:

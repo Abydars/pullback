@@ -148,19 +148,23 @@ def train_for_symbol(symbol: str):
     logger.info(f"Saved {model_path}")
 
 def get_active_symbols() -> list[str]:
-    """Fetch all USDT symbols passing the config's 24h volume threshold."""
-    logger.info("Fetching eligible symbols by volume from Binance...")
-    url = "https://api.binance.com/api/v3/ticker/24hr"
+    """Fetch all USDT-M perpetual symbols passing the config's 24h volume and price change threshold."""
+    logger.info("Fetching eligible symbols from Binance Futures...")
+    # Use Futures endpoint to match the bot's scanner exactly
+    url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     resp = requests.get(url, timeout=10)
     resp.raise_for_status()
     data = resp.json()
     
     min_vol = getattr(config, "MIN_VOLUME_24H", 20000000)
+    min_chg = getattr(config, "MIN_PRICE_CHANGE_PCT", 0.5)
+    
     usdt_pairs = []
     for d in data:
         if d["symbol"].endswith("USDT"):
             vol = float(d.get("quoteVolume", 0))
-            if vol >= min_vol:
+            chg = abs(float(d.get("priceChangePercent", 0)))
+            if vol >= min_vol and chg >= min_chg:
                 usdt_pairs.append((d["symbol"], vol))
             
     # Sort descending by volume
