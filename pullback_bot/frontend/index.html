@@ -3168,6 +3168,7 @@ document.getElementById('btn-close-all').disabled = true;
 // ============================================================
 initMainChart();
 initPosChart();
+fetch('/api/config').then(r => r.json()).then(d => { _cfgCurrent = d; });
 connectWS();
 
 // ── Analytics ────────────────────────────────────────────────────────────────
