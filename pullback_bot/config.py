@@ -185,6 +185,8 @@ LOG_LEVEL: str = _get("LOG_LEVEL", "INFO")
 
 # Keys that can be changed at runtime via /api/config
 EDITABLE_KEYS: dict[str, type] = {
+    "SESSION_GUARD_ENABLED":     bool,
+    "TRADE_CUSTOM_SESSIONS":     str,
     "MIN_VOLUME_24H":            float,
     "MIN_PRICE_CHANGE_PCT":      float,
     "WATCHLIST_REFRESH_MINUTES": int,

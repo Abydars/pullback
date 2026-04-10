@@ -2594,18 +2594,54 @@ function renderConfigForm(values) {
       }
       
       let finalHint = f.hint || '';
+      let extraDivs = '';
+      if (f.key === 'TRADE_CUSTOM_SESSIONS') {
+          extraDivs = '<div id="session-local-hint" style="margin-top:4px; font-size:12px;"></div>';
+      }
       
       html += `
         <div class="cfg-row">
           <div><div class="cfg-label">${f.label}${restartNote}</div>
                ${finalHint ? `<div class="cfg-hint">${finalHint}</div>` : ''}</div>
-          <div>${input}<div class="cfg-row-err" id="err-${f.key}"></div></div>
+          <div>${input}${extraDivs}<div class="cfg-row-err" id="err-${f.key}"></div></div>
         </div>`;
     }
     html += '</div>';
   }
 
   body.innerHTML = html;
+  
+  const customSessInput = document.querySelector('input[data-key="TRADE_CUSTOM_SESSIONS"]');
+  if (customSessInput) {
+      customSessInput.addEventListener('input', (e) => _updateLocalSessionHint(e.target.value));
+      _updateLocalSessionHint(customSessInput.value); 
+  }
+}
+
+function _updateLocalSessionHint(value) {
+    const hintDiv = document.getElementById('session-local-hint');
+    if (!hintDiv) return;
+    if (!value || !value.trim()) {
+        hintDiv.innerHTML = '';
+        return;
+    }
+    try {
+        const ranges = value.split(',').map(r => r.trim()).filter(Boolean);
+        const formatLoc = (ts) => {
+            const [h,m] = ts.split(':');
+            if (isNaN(h) || isNaN(m)) throw Error();
+            const d = new Date();
+            d.setUTCHours(parseInt(h), parseInt(m), 0, 0);
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        };
+        const localRanges = ranges.map(r => {
+            const [st, en] = r.split('-');
+            return `${formatLoc(st)} – ${formatLoc(en)}`;
+        });
+        hintDiv.innerHTML = `<span style="color:var(--accent);">Local Time: <strong>${localRanges.join(', ')}</strong></span>`;
+    } catch {
+       hintDiv.innerHTML = '<span style="color:var(--red)">Format err: (e.g. 12:00-14:00)</span>';
+    }
 }
 
 async function saveConfig() {
