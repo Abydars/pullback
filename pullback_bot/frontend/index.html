@@ -1005,7 +1005,8 @@
     #chart-pane,
     #hist-pane,
     #pos-chart-pane,
-    #analytics-pane {
+    #analytics-pane,
+    #signals-pane {
       flex: 1;
       overflow: hidden;
       display: none;
@@ -1015,7 +1016,8 @@
     #chart-pane.active,
     #hist-pane.active,
     #pos-chart-pane.active,
-    #analytics-pane.active {
+    #analytics-pane.active,
+    #signals-pane.active {
       display: flex;
     }
 
@@ -2135,7 +2137,8 @@
       }
 
       #hist-pane,
-      #analytics-pane {
+      #analytics-pane,
+      #signals-pane {
         overflow-x: hidden;
         overflow-y: visible;
         width: 100%;
@@ -5076,7 +5079,7 @@
         document.querySelectorAll('#chart-tabs .ctab').forEach(t =>
           t.classList.toggle('active', t.dataset.ctab === tabId)
         );
-        document.querySelectorAll('#chart-pane, #hist-pane, #pos-chart-pane, #analytics-pane').forEach(p =>
+        document.querySelectorAll('#chart-pane, #hist-pane, #pos-chart-pane, #analytics-pane, #signals-pane').forEach(p =>
           p.classList.toggle('active', p.id === tabId)
         );
         // Re-fit time scale when switching back to chart tab
@@ -5282,7 +5285,7 @@
       let html = '';
       logs.forEach(s => {
         const time = fmtTime(s.timestamp, true);
-        const mllbl = s.ml_confidence != null ? `${s.ml_confidence.toFixed(1)}%` : '—';
+        const mllbl = s.ml_confidence != null ? `${(s.ml_confidence * 100).toFixed(0)}%` : '—';
         const color = s.direction === 'LONG' ? 'var(--green)' : 'var(--red)';
         const dir = s.direction === 'LONG' ? '▲ LONG' : '▼ SHORT';
         const status = s.acted_on ? '<span style="color:var(--green)">Taken</span>' : '<span style="color:var(--amber)">Rejected</span>';
