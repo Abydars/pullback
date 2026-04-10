@@ -643,7 +643,7 @@ async def _flush_pending_signals() -> None:
                 acted_on=False,
                 ml_confidence=conf,
                 reason=f"ML Filter rejected ({conf:.2f} < threshold)",
-                metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type")})
+                metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type"), "reasons": sig.get("reasons", [])})
             )
         else:
             valid_batch.append(sig)
@@ -696,7 +696,7 @@ async def _flush_pending_signals() -> None:
             acted_on=False,
             ml_confidence=sig.get("ml_confidence"),
             reason="Direction Capped (MAX_SAME_DIRECTION limit reached)",
-            metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type")})
+            metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type"), "reasons": sig.get("reasons", [])})
         )
 
     # ── Gradual build cap (PnL-aware) ────────────────────────────────────────
@@ -752,7 +752,7 @@ async def _flush_pending_signals() -> None:
                 acted_on=False,
                 ml_confidence=sig.get("ml_confidence"),
                 reason="Deferred (Gradual Build Limit / Drawdown Guard)",
-                metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type")})
+                metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type"), "reasons": sig.get("reasons", [])})
             )
 
     async def _act(sig: dict) -> None:
@@ -771,7 +771,7 @@ async def _flush_pending_signals() -> None:
             acted_on=acted,
             ml_confidence=sig.get("ml_confidence"),
             reason=reason,
-            metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type")})
+            metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type"), "reasons": sig.get("reasons", [])})
         )
 
     if this_scan:
