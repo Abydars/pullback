@@ -3385,6 +3385,7 @@
         case 'kline_history': onKlineHistory(data); break;
         case 'system_status': onSystemStatus(data); break;
         case 'btc_regime': onBtcRegime(data); break;
+        case 'scanner_log_new': onScannerLogNew(data); break;
       }
     }
 
@@ -4396,9 +4397,16 @@
       return (n >= 0 ? '+' : '') + '$' + n.toFixed(dp);
     }
 
-    function fmtTime(ms) {
+    function fmtTime(ms, includeDate = false) {
       if (!ms) return '—';
-      return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+      const t = ms < 9999999999 ? ms * 1000 : ms; // auto convert seconds to milliseconds
+      
+      const opts = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+      if (includeDate) {
+        opts.month = 'short';
+        opts.day = 'numeric';
+      }
+      return new Date(t).toLocaleString(undefined, opts);
     }
 
     // Live clock — local timezone
@@ -5316,6 +5324,42 @@
     }
 
     // ── Analytics ────────────────────────────────────────────────────────────────
+    
+    function onScannerLogNew(s) {
+      const tbody = document.getElementById('signals-body');
+      if (!tbody) return;
+      
+      const emptyRow = tbody.querySelector('.empty');
+      if (emptyRow) emptyRow.parentElement.remove();
+      
+      const time = fmtTime(s.timestamp, true);
+      const mllbl = s.ml_confidence != null ? `${(s.ml_confidence * 100).toFixed(0)}%` : '—';
+      const color = s.direction === 'LONG' ? 'var(--green)' : 'var(--red)';
+      const dir = s.direction === 'LONG' ? '▲ LONG' : '▼ SHORT';
+      const status = s.acted_on ? '<span style="color:var(--green)">Taken</span>' : '<span style="color:var(--amber)">Rejected</span>';
+      const reason = s.reason || (s.acted_on ? 'Entry Taken' : 'Unknown');
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="color:var(--text-dim); padding-left:16px;">${time}</td>
+        <td style="font-weight:600">${s.symbol}</td>
+        <td style="color:${color}">${dir}</td>
+        <td>${s.score}</td>
+        <td>${mllbl}</td>
+        <td>${status}</td>
+        <td style="color:var(--text-dim); padding-right:16px;">${reason}</td>
+      `;
+      
+      tr.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+      tr.style.transition = 'background-color 1.5s ease-out';
+      
+      tbody.prepend(tr);
+      
+      setTimeout(() => {
+        tr.style.backgroundColor = 'transparent';
+      }, 500);
+    }
+    
     let _anFetched = false;
 
     function resetAnalytics() {

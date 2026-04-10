@@ -349,6 +349,20 @@ async def insert_scanner_log(
         )
         await db.commit()
 
+    try:
+        import ws_broadcaster as wsb
+        await wsb.broadcaster.broadcast("scanner_log_new", {
+            "symbol": symbol,
+            "score": score,
+            "direction": direction,
+            "timestamp": timestamp,
+            "acted_on": acted_on,
+            "ml_confidence": ml_confidence,
+            "reason": reason
+        })
+    except Exception:
+        pass
+
 
 async def get_recent_scanner_log(limit: int = 100, offset: int = 0) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
