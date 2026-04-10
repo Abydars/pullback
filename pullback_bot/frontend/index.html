@@ -848,7 +848,7 @@
     }
 
     .panel-title {
-      padding: 8px 12px;
+      padding: 6.2px 12px;
       font-size: 10px;
       font-weight: 700;
       letter-spacing: .1em;
@@ -1540,6 +1540,7 @@
     #right-panel {
       background: var(--bg);
       border-right: none;
+      border-left: 1px solid var(--border);
     }
 
     /* Open Position cards */
@@ -2409,12 +2410,17 @@
 </head>
 
 <body>
-  <div id="auth-modal" style="display:none; position:fixed; inset:0; background:rgba(10,12,16,0.95); z-index:999999; flex-direction:column; align-items:center; justify-content:center; backdrop-filter:blur(8px);">
-    <div style="background:var(--bg2); padding:32px; border-radius:12px; border:1px solid var(--border); box-shadow:0 8px 32px rgba(0,0,0,0.5); width:320px; text-align:center;">
+  <div id="auth-modal"
+    style="display:none; position:fixed; inset:0; background:rgba(10,12,16,0.95); z-index:999999; flex-direction:column; align-items:center; justify-content:center; backdrop-filter:blur(8px);">
+    <div
+      style="background:var(--bg2); padding:32px; border-radius:12px; border:1px solid var(--border); box-shadow:0 8px 32px rgba(0,0,0,0.5); width:320px; text-align:center;">
       <h2 style="margin:0 0 16px 0; font-family:var(--font-mono); font-size:18px; color:var(--text);">PULLBACK BOT</h2>
-      <input type="password" id="auth-pass" placeholder="Enter password" style="width:100%; padding:10px; background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:6px; margin-bottom:16px; font-family:var(--font-mono); outline:none; box-sizing:border-box;" />
-      <button id="auth-submit" style="width:100%; padding:10px; background:var(--amber); color:#000; border:none; border-radius:6px; font-weight:700; cursor:pointer;">LOGIN</button>
-      <div id="auth-error" style="color:var(--red); font-size:12px; margin-top:12px; display:none;">Incorrect password</div>
+      <input type="password" id="auth-pass" placeholder="Enter password"
+        style="width:100%; padding:10px; background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:6px; margin-bottom:16px; font-family:var(--font-mono); outline:none; box-sizing:border-box;" />
+      <button id="auth-submit"
+        style="width:100%; padding:10px; background:var(--amber); color:#000; border:none; border-radius:6px; font-weight:700; cursor:pointer;">LOGIN</button>
+      <div id="auth-error" style="color:var(--red); font-size:12px; margin-top:12px; display:none;">Incorrect password
+      </div>
     </div>
   </div>
   <div id="app">
@@ -4476,6 +4482,8 @@
         fields: [
           { key: 'LOG_LEVEL', label: 'Log Level', type: 'select', options: ['DEBUG', 'INFO', 'WARNING', 'ERROR'], hint: '' },
           { key: 'MODE', label: 'Mode', type: 'select', options: ['paper', 'live'], hint: '⚠ Requires restart', restart: true },
+          { key: 'ML_FILTER_ENABLED', label: 'ML Smart Filter', type: 'select', options: [{ value: 'false', label: 'Disable' }, { value: 'true', label: 'Enable' }], hint: 'Ensure ML model is trained offline first.' },
+          { key: 'ML_CONFIDENCE_THRESHOLD', label: 'ML Confidence Threshold', type: 'number', step: '0.05', min: '0.50', max: '0.99', hint: 'Minimum success probability from ML model required to take a trade (e.g., 0.70 = 70%).' },
           { key: 'WEB_PASSWORD', label: 'Web UI Password', type: 'text', hint: 'Password to access the UI. Leave empty to disable. Keep as *** to keep unchanged.' },
         ],
       },

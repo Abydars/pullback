@@ -17,9 +17,11 @@ All candle data is passed in as a list of dicts with keys:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Optional
 
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -113,6 +115,91 @@ def _adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
     
     dx = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di)).fillna(0)
     return dx.ewm(alpha=1/period, adjust=False).mean()
+
+
+# ── ML Filter Integration ──────────────────────────────────────────────────────
+
+_ML_MODELS = {}
+
+def _get_ml_model(symbol: str):
+    if symbol in _ML_MODELS:
+        return _ML_MODELS[symbol]
+    
+    model_path = os.path.join(os.path.dirname(__file__), "models", f"{symbol}_model.pkl")
+    if os.path.exists(model_path):
+        try:
+            model = joblib.load(model_path)
+            _ML_MODELS[symbol] = model
+            return model
+        except Exception as e:
+            logger.error(f"Failed to load ML model for {symbol}: {e}")
+            _ML_MODELS[symbol] = None
+    else:
+        _ML_MODELS[symbol] = None
+    return None
+
+def _run_ml_filter(symbol: str, df: pd.DataFrame) -> tuple[bool, float, str]:
+    """
+    Returns (passed, confidence, reason).
+    """
+    if not getattr(config, "ML_FILTER_ENABLED", False):
+        return True, 1.0, "ml_disabled"
+        
+    model = _get_ml_model(symbol)
+    if not model:
+        # Fallback to true if no model is trained yet
+        return True, 1.0, "ml_no_model"
+        
+    try:
+        df = df.copy()
+        close = df["close"]
+        ema_50 = _ema(close, 50)
+        ema_200 = _ema(close, 200)
+        
+        dist_50 = (close - ema_50) / ema_50
+        dist_200 = (close - ema_200) / ema_200
+        
+        stoch_k, stoch_d = _stoch_rsi(close)
+        
+        fast_ema = _ema(close, 12)
+        slow_ema = _ema(close, 26)
+        macd_line = fast_ema - slow_ema
+        signal_line = _ema(macd_line, 9)
+        macd_hist = macd_line - signal_line
+        
+        roc_3 = close.pct_change(3)
+        vol_ratio = df["volume"] / df["volume"].rolling(20).mean()
+        
+        features = pd.DataFrame({
+            "dist_50": dist_50,
+            "dist_200": dist_200,
+            "stoch_k": stoch_k,
+            "stoch_d": stoch_d,
+            "macd_hist": macd_hist,
+            "roc_3": roc_3,
+            "vol_ratio": vol_ratio
+        })
+        
+        # Take the very last row for current inference
+        current_features = features.iloc[[-1]]
+        
+        # Check for NaNs
+        if current_features.isnull().values.any():
+            return True, 1.0, "ml_nan_inputs"
+            
+        proba = model.predict_proba(current_features)[0]
+        # proba[1] is the probability of class 1 (Success)
+        success_prob = float(proba[1]) if len(proba) > 1 else float(proba[0])
+        
+        threshold = getattr(config, "ML_CONFIDENCE_THRESHOLD", 0.70)
+        if success_prob >= threshold:
+            return True, success_prob, f"ml_pass_{int(success_prob*100)}"
+        else:
+            return False, success_prob, f"ml_reject_{int(success_prob*100)}"
+            
+    except Exception as e:
+        logger.error(f"ML Filter Error on {symbol}: {e}")
+        return True, 1.0, "ml_error"
 
 
 # ── BTC Regime ─────────────────────────────────────────────────────────────────
@@ -313,6 +400,16 @@ def check_pullback(
     if sl_price <= 0:
         return None
 
+    # --- ML Smart Filter ---
+    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15)
+    if not ml_passed:
+        logger.info(f"[{symbol}] ML Filter rejected pullback ({ml_conf:.2f} < threshold).")
+        return None
+    
+    reasons.append(ml_reason)
+    if "pass" in ml_reason:
+        score += 10
+
     signal: dict = {
         "symbol":      symbol,
         "direction":   direction,
@@ -478,6 +575,16 @@ def check_breakout(
 
     if sl_price <= 0:
         return None
+
+    # --- ML Smart Filter ---
+    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15)
+    if not ml_passed:
+        logger.info(f"[{symbol}] ML Filter rejected BREAKOUT ({ml_conf:.2f} < threshold).")
+        return None
+        
+    reasons.append(ml_reason)
+    if "pass" in ml_reason:
+        score += 10
 
     signal: dict = {
         "symbol":       symbol,

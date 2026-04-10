@@ -57,6 +57,10 @@ def _float(key: str, default: float) -> float:
 MODE: str = _get("MODE", "paper")               # "live" | "paper"
 assert MODE in ("live", "paper"), f"MODE must be 'live' or 'paper', got '{MODE}'"
 
+# ── ML Smart Filter Settings ──────────────────────────────────────────────────
+ML_FILTER_ENABLED: bool = _bool("ML_FILTER_ENABLED", False)
+ML_CONFIDENCE_THRESHOLD: float = _float("ML_CONFIDENCE_THRESHOLD", 0.70)
+
 # ── Binance Credentials ───────────────────────────────────────────────────────
 BINANCE_API_KEY: str = _get("BINANCE_API_KEY", "")
 BINANCE_API_SECRET: str = _get("BINANCE_API_SECRET", "")
@@ -225,6 +229,8 @@ EDITABLE_KEYS: dict[str, type] = {
     "LOG_LEVEL":                 str,
     "MODE":                      str,
     "WEB_PASSWORD":              str,
+    "ML_FILTER_ENABLED":         bool,
+    "ML_CONFIDENCE_THRESHOLD":   float,
 }
 
 # Keys that require a bot restart to take full effect

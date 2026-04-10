@@ -120,6 +120,36 @@ async def build_watchlist() -> list[str]:
         return active_watchlist  # keep old list on error
 
 
+async def _auto_train_missing_models(symbols: list[str]) -> None:
+    """Check if newly added symbols have trained models; if not, spawn a background thread to train them."""
+    if not getattr(config, "ML_FILTER_ENABLED", False):
+        return
+        
+    import os
+    from train_ml_model import train_for_symbol
+    
+    missing = []
+    models_dir = os.path.join(os.path.dirname(__file__), "models")
+    for s in symbols:
+        model_path = os.path.join(models_dir, f"{s}_model.pkl")
+        if not os.path.exists(model_path):
+            missing.append(s)
+            
+    if not missing:
+        return
+        
+    logger.info("Found %d untrained symbols. Spawning background ML training...", len(missing))
+    
+    def _train_batch():
+        for sym in missing:
+            try:
+                train_for_symbol(sym)
+            except Exception as e:
+                logger.error("Auto-train failed for %s: %s", sym, e)
+                
+    asyncio.create_task(asyncio.to_thread(_train_batch))
+
+
 async def refresh_watchlist_loop() -> None:
     """Refresh the active_watchlist every WATCHLIST_REFRESH_MINUTES."""
     global active_watchlist, _kline_ws_task
@@ -183,6 +213,10 @@ async def refresh_watchlist_loop() -> None:
                 "(%d added, %d dropped, %d total)",
                 len(added), len(dropped), len(active_watchlist),
             )
+
+        # Automatically train ML models for any newly added symbols that lack one.
+        if added:
+            asyncio.create_task(_auto_train_missing_models(list(added)))
 
         await asyncio.sleep(config.WATCHLIST_REFRESH_MINUTES * 60)
 
