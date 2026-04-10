@@ -2606,6 +2606,7 @@
                   <th data-col="margin">Capital</th>
                   <th data-col="signal_type">Strategy</th>
                   <th data-col="signal_score">Score</th>
+                  <th data-col="ml_confidence">ML%</th>
                   <th data-col="duration">Duration</th>
                   <th data-col="close_reason">Reason</th>
                   <th data-col="fee">Fee</th>
@@ -3862,6 +3863,7 @@
         <div class="pos-kv"><span class="k">Lev</span><span class="v">${t.leverage ?? '—'}×</span></div>
         <div class="pos-kv"><span class="k">Strategy</span><span class="v" style="font-size:10px;letter-spacing:.05em">${t.signal_type ?? 'PULLBACK'}</span></div>
         <div class="pos-kv"><span class="k">Score</span><span class="v">${t.signal_score ?? '—'}</span></div>
+        <div class="pos-kv"><span class="k">AI Filter</span><span class="v" style="color:var(--cyan)">${t.ml_confidence != null ? (t.ml_confidence * 100).toFixed(0) + '%' : '—'}</span></div>
         <div class="pos-kv"><span class="k">Open</span><span class="v">${t.duration ?? '—'}</span></div>
       </div>
       <div style="margin-top:8px;display:flex;justify-content:flex-end;" class="pos-card-footer">
@@ -3992,6 +3994,7 @@
         <td style="color:var(--muted)">${marginStr}</td>
         <td style="color:var(--muted);font-size:10px">${t.signal_type ?? 'PULLBACK'}</td>
         <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
+        <td style="color:var(--cyan)">${t.ml_confidence != null ? (t.ml_confidence * 100).toFixed(0) + '%' : '—'}</td>
         <td style="color:var(--muted)">${durStr}</td>
         <td><span class="hist-reason ${rc.cls}">${rc.label}</span></td>
         <td style="color:var(--red);opacity:.7">${feeStr}</td>
@@ -4088,6 +4091,7 @@
         <td style="color:var(--muted)">${marginStr}</td>
         <td style="color:var(--muted);font-size:10px">${t.signal_type ?? 'PULLBACK'}</td>
         <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
+        <td style="color:var(--cyan)">${t.ml_confidence != null ? (t.ml_confidence * 100).toFixed(0) + '%' : '—'}</td>
         <td style="color:var(--muted)">${durStr}</td>
         <td><span class="hist-reason ${rc.cls}">${rc.label}</span></td>
         <td style="color:var(--red);opacity:.7">${feeStr}</td>
@@ -4112,7 +4116,7 @@
           <thead><tr>
             <th>Symbol</th><th>Dir</th><th>Entry Time</th><th>Exit Time</th>
             <th>Entry $</th><th>Close $</th><th>Qty</th><th>Lev</th>
-            <th>Capital</th><th>Strategy</th><th>Score</th><th>Duration</th>
+            <th>Capital</th><th>Strategy</th><th>Score</th><th>ML%</th><th>Duration</th>
             <th>Reason</th><th>Fee</th><th>PnL</th><th></th>
           </tr></thead>
           <tbody>${tradesHtml}</tbody>

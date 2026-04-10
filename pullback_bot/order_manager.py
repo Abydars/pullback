@@ -243,6 +243,7 @@ class OrderManager:
                     symbol, direction, entry, sl, tp1, tp2,
                     qty, leverage, now_ms, score, signal_type,
                     session_id=_active_session_id,
+                    ml_confidence=signal.get("ml_confidence"),
                 )
             else:
                 return await self._live_open(
@@ -250,6 +251,7 @@ class OrderManager:
                     qty, leverage, now_ms, score, signal_type,
                     atr=atr,
                     session_id=_active_session_id,
+                    ml_confidence=signal.get("ml_confidence"),
                 )
         finally:
             _opening.discard(symbol)
@@ -270,6 +272,7 @@ class OrderManager:
         score: int,
         signal_type: str = "PULLBACK",
         session_id: Optional[str] = None,
+        ml_confidence: Optional[float] = None,
     ) -> bool:
         trade_id = await db.insert_trade(
             symbol=symbol,
@@ -285,6 +288,7 @@ class OrderManager:
             leverage=leverage,
             signal_type=signal_type,
             session_id=session_id,
+            ml_confidence=ml_confidence,
         )
         notional = entry * qty
         logger.info(
@@ -312,6 +316,7 @@ class OrderManager:
         signal_type: str = "PULLBACK",
         atr: float = 0.0,
         session_id: Optional[str] = None,
+        ml_confidence: Optional[float] = None,
     ) -> bool:
         tick    = bc.get_tick_size(symbol)
         side    = "BUY" if direction == "LONG" else "SELL"
@@ -391,6 +396,7 @@ class OrderManager:
                 binance_order_id=binance_order_id,
                 signal_type=signal_type,
                 session_id=session_id,
+                ml_confidence=ml_confidence,
             )
             logger.info(
                 "Live trade opened: #%d %s %s entry=%.6f leverage=%dx order=%s",

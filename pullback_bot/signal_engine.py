@@ -424,6 +424,7 @@ def check_pullback(
         "timestamp":   int(time.time()),
         "reasons":     reasons,
         "signal_type": "PULLBACK",
+        "ml_confidence": ml_conf,
     }
     logger.info(
         "V2 Pullback Signal: %s %s score=%d sl=%.6f arm=%.6f atr=%.6f reasons=%s",
@@ -600,6 +601,7 @@ def check_breakout(
         "timestamp":    int(time.time()),
         "reasons":      reasons,
         "signal_type":  "BREAKOUT",
+        "ml_confidence": ml_conf,
     }
     logger.info(
         "V2 Breakout Signal: %s %s score=%d sl=%.6f arm=%.6f atr=%.6f reasons=%s",
