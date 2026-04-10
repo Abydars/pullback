@@ -87,6 +87,7 @@ TRADE_CUSTOM_SESSIONS: str = _get("TRADE_CUSTOM_SESSIONS", "")
 # Feature: Funding Rate Time Guard
 FUNDING_GUARD_ENABLED: bool = _bool("FUNDING_GUARD_ENABLED", False)
 FUNDING_GUARD_MINUTES: int = int(_get("FUNDING_GUARD_MINUTES", "5"))
+FUNDING_GUARD_ALLOW_SHORTS: bool = _bool("FUNDING_GUARD_ALLOW_SHORTS", False)
 
 #   pullback         — trend-following reversion to EMA50/swing zone (default)
 #   breakout         — close outside 20-candle consolidation range with volume
@@ -198,6 +199,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "TRADE_CUSTOM_SESSIONS":     str,
     "FUNDING_GUARD_ENABLED":     bool,
     "FUNDING_GUARD_MINUTES":     int,
+    "FUNDING_GUARD_ALLOW_SHORTS":bool,
     "MIN_VOLUME_24H":            float,
     "MIN_PRICE_CHANGE_PCT":      float,
     "WATCHLIST_REFRESH_MINUTES": int,

@@ -417,6 +417,7 @@ async def _evaluate_symbol(symbol: str) -> None:
             return
 
         # ── Funding Rate Execution Guard ─────────────
+        funding_guard_active = False
         if config.FUNDING_GUARD_ENABLED and config.SIGNAL_MODE != "funding_predator":
             import datetime
             now_t = datetime.datetime.utcnow()
@@ -425,7 +426,7 @@ async def _evaluate_symbol(symbol: str) -> None:
             # Funding occurs every 8 hours (480 minutes): 00:00, 08:00, 16:00 UTC
             nearest_tick = round(now_mins / 480.0) * 480
             if abs(now_mins - nearest_tick) <= config.FUNDING_GUARD_MINUTES:
-                return # Block evaluation to bypass funding cluster volatility
+                funding_guard_active = True
                 
         # ── Global Session Time Guard ─────────────
         custom_str = getattr(config, "TRADE_CUSTOM_SESSIONS", "").strip()
@@ -505,27 +506,40 @@ async def _evaluate_symbol(symbol: str) -> None:
                 return True
             return False
 
+        def _funding_blocks(sig: dict) -> bool:
+            if not funding_guard_active:
+                return False
+            allow_shorts = getattr(config, "FUNDING_GUARD_ALLOW_SHORTS", False)
+            if allow_shorts:
+                if sig["direction"] == "LONG":
+                    logger.debug("Funding Guard active (LONGs paused) — blocking LONG %s", symbol)
+                    return True
+                return False
+            else:
+                logger.debug("Funding Guard active — blocking %s", symbol)
+                return True
+
         candidates: list[dict] = []
 
         if mode in ("pullback", "both"):
             s = await asyncio.to_thread(
                 signal_engine.check_pullback, symbol, k15[:], k5[:]
             )
-            if s and not _regime_blocks(s):
+            if s and not _regime_blocks(s) and not _funding_blocks(s):
                 candidates.append(s)
                 
         if mode == "micro_scalp":
             s = await asyncio.to_thread(
                 signal_engine.check_micro_scalp, symbol, k1m[:]
             )
-            if s and not _regime_blocks(s):
+            if s and not _regime_blocks(s) and not _funding_blocks(s):
                 candidates.append(s)
 
         if mode in ("breakout", "both"):
             s = await asyncio.to_thread(
                 signal_engine.check_breakout, symbol, k15[:], k5[:]
             )
-            if s and not _regime_blocks(s):
+            if s and not _regime_blocks(s) and not _funding_blocks(s):
                 candidates.append(s)
 
         if not candidates:

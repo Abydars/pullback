@@ -4368,6 +4368,7 @@
           { key: 'SESSION_GUARD_ENABLED', label: 'Session Time Guard', type: 'select', options: ['true', 'false'], hint: 'If true, algorithmic signal evaluation is physically restricted mathematically to the custom sessions bounded below.' },
           { key: 'TRADE_CUSTOM_SESSIONS', label: 'Allowed Trading Sessions (UTC)', type: 'text', hint: 'Provide unlimited custom boundaries (comma-separated, formatted <code>HH:MM-HH:MM</code>, e.g. <code>12:00-13:30, 21:00-23:15</code>). Leaves empty to block all trades.' },
           { key: 'FUNDING_GUARD_ENABLED', label: 'Funding Rate Guard', type: 'select', options: ['true', 'false'], hint: 'If true, blocks algorithmic entries exactly across the 8-Hour Binance Funding ticks (00:00, 08:00, 16:00 UTC) to avoid manipulation.' },
+          { key: 'FUNDING_GUARD_ALLOW_SHORTS', label: 'Funding Guard: Allow Shorts', type: 'select', options: ['true', 'false'], hint: 'If true, only LONG trades are paused during funding guard. SHORT trades will still execute to capture funding dumps.' },
           { key: 'FUNDING_GUARD_MINUTES', label: 'Funding Guard Buffer (Minutes)', type: 'number', step: '1', min: '1', max: '60', hint: 'Distance before and after the hour tick to block execution. (E.g. 5 = blocks 23:55 to 00:05).' },
           {
             key: 'SIGNAL_MODE', label: 'Strategy', type: 'select',
