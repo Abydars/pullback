@@ -112,19 +112,6 @@ async def build_watchlist() -> list[str]:
             if vol >= config.MIN_VOLUME_24H and chg >= config.MIN_PRICE_CHANGE_PCT:
                 watchlist.append(sym)
 
-        # Guard against Binance's 1024-stream-per-connection limit.
-        # Keep the highest-volume symbols when we'd otherwise exceed it.
-        if len(watchlist) > _MAX_WS_SYMBOLS:
-            original = len(watchlist)
-            vol_map = {t["symbol"]: float(t.get("quoteVolume", 0)) for t in tickers}
-            watchlist.sort(key=lambda s: vol_map.get(s, 0), reverse=True)
-            watchlist = watchlist[:_MAX_WS_SYMBOLS]
-            logger.warning(
-                "Watchlist trimmed from %d to %d symbols to stay within "
-                "the Binance 1024-stream-per-connection limit",
-                original, _MAX_WS_SYMBOLS,
-            )
-
         watchlist.sort()
         logger.info("Watchlist built: %d symbols", len(watchlist))
         return watchlist
@@ -291,21 +278,12 @@ def _update_buffer(symbol: str, interval: str, candle: dict, is_closed: bool) ->
             _kline_buffers[symbol][interval] = buf[-limit:]
 
 
-async def _run_kline_ws() -> None:
-    """
-    Subscribe to kline WebSocket for the current active_watchlist.
-    Reads active_watchlist on every (re)connect so watchlist refreshes
-    are picked up without restarting the whole process.
-    Re-seeds kline buffers after unexpected disconnects to patch any
-    candles missed during the gap.
-    Broadcasts kline_update (with EMA values) to subscribed UI clients.
-    """
+async def _run_kline_ws_shard(symbols: list[str], shard_id: int) -> None:
+    """Sub-task for handling a partitioned chunk of symbols in a WebSocket."""
     backoff = 1
     needs_reseed = False   # True only after an unexpected disconnect
     while True:
         try:
-            symbols = list(active_watchlist)
-
             # After an unexpected disconnect, re-seed to fill any candle
             # gaps that accumulated while the WS was down.
             if needs_reseed and symbols:
@@ -331,12 +309,14 @@ async def _run_kline_ws() -> None:
                     if parsed:
                         sym, interval, candle, is_closed = parsed
                         _update_buffer(sym, interval, candle, is_closed)
-                        # Route the signal engine hook dynamically based on active mode
+                        
+                        # ZERO-LATENCY DISPATCH: Route the signal engine hook dynamically based on active mode BEFORE broadcasting
                         if is_closed:
                             if config.SIGNAL_MODE == "micro_scalp" and interval == "1m":
                                 asyncio.create_task(_evaluate_symbol(sym), name=f"eval_{sym}")
                             elif config.SIGNAL_MODE != "micro_scalp" and interval == "5m":
                                 asyncio.create_task(_evaluate_symbol(sym), name=f"eval_{sym}")
+                                
                         # Broadcast to any UI client subscribed to this symbol/interval
                         buf = _kline_buffers[sym][interval]
                         ema50 = _compute_ema_tail(buf, 50) if len(buf) >= 50 else 0.0
@@ -355,10 +335,30 @@ async def _run_kline_ws() -> None:
         except asyncio.CancelledError:
             break
         except Exception as exc:
-            logger.warning("Kline WS error: %s — reconnect in %ds", exc, backoff)
+            logger.warning("Kline WS Shard %d error: %s — reconnect in %ds", shard_id, exc, backoff)
             needs_reseed = True
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
+
+async def _run_kline_ws() -> None:
+    """Manager loop that spawns sharded connections for the active watchlist."""
+    try:
+        symbols = list(active_watchlist)
+        chunk_size = 300  # Well below 341 max streams limit per connection
+        chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
+        
+        logger.info("Spawning %d WS shards to cover %d symbols", len(chunks), len(symbols))
+        
+        tasks = [
+            asyncio.create_task(_run_kline_ws_shard(chunk, i))
+            for i, chunk in enumerate(chunks)
+        ]
+        
+        await asyncio.gather(*tasks)
+    except asyncio.CancelledError:
+        for t in tasks:
+            t.cancel()
+        raise
 
 
 # ── Per-symbol signal evaluation (triggered by 15m candle close) ─────────────
@@ -788,16 +788,33 @@ async def _run_funding_predator_clock() -> None:
                 
                 logger.info(f"Funding Predator: Target locked on {best_target_sym} at {best_rate*100}%. Waiting for tick...")
                 
-                # Dynamic ultra-fast sleep loop waiting for the 08:00:01 squeeze event 
-                while True:
-                    await asyncio.sleep(0.1)
-                    now_inner = datetime.datetime.utcnow()
-                    if now_inner.hour in target_tick_hours and now_inner.minute == 0 and now_inner.second == 1:
-                        logger.warning(f"Funding Predator: ZERO HOUR TICK EXECUTING FIRE ON {best_target_sym}")
+                # Calculate precise sleep required to hit execution window exactly, CPU stays at 0%
+                now_inner = datetime.datetime.utcnow()
+                next_hour = None
+                for t_hour in sorted(target_tick_hours):
+                    if now_inner.hour < t_hour:
+                        next_hour = t_hour
+                        break
+                if next_hour is None:
+                    next_hour = min(target_tick_hours)
+                
+                target_dt = datetime.datetime(now_inner.year, now_inner.month, now_inner.day, next_hour, 0, 1)
+                if next_hour < now_inner.hour:
+                    target_dt += datetime.timedelta(days=1)
+                    
+                sleep_seconds = (target_dt - now_inner).total_seconds()
+                
+                if sleep_seconds > 0:
+                     await asyncio.sleep(sleep_seconds)
+                
+                logger.warning(f"Funding Predator: ZERO HOUR TICK EXECUTING FIRE ON {best_target_sym}")
                         signal = signal_engine.check_funding_predator(best_target_sym, best_rate, best_mark)
                         if signal:
                             # Direct payload bypass injection to order manager (circumventing score batches)
                             await om.order_manager.handle_signal(signal)
+                
+                # Cooldown so we don't rapid-trigger
+                await asyncio.sleep(60)
                         break
                         
             except Exception as e:
