@@ -82,7 +82,7 @@ TRADE_CUSTOM_SESSIONS: str = _get("TRADE_CUSTOM_SESSIONS", "")
 
 # Feature: Funding Rate Time Guard
 FUNDING_GUARD_ENABLED: bool = _bool("FUNDING_GUARD_ENABLED", False)
-FUNDING_GUARD_MINUTES: int = int(_get("FUNDING_GUARD_MINUTES", 5))
+FUNDING_GUARD_MINUTES: int = int(_get("FUNDING_GUARD_MINUTES", "5"))
 
 #   pullback         — trend-following reversion to EMA50/swing zone (default)
 #   breakout         — close outside 20-candle consolidation range with volume
