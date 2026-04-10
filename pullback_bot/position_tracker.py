@@ -309,8 +309,10 @@ async def _paper_tick() -> None:
                 qty   = float(trade["qty"])
                 sl    = float(trade["sl_price"])
                 trail_arm  = float(trade["tp1_price"])   # activation level (1×ATR from entry)
-                risk_dist  = abs(entry - sl)             # = 1.5×ATR
-                trail_dist = risk_dist / 1.5             # = 1×ATR — trailing stop follows at 1 ATR
+                
+                # Derive precise real-time ATR from the structurally anchored trail_arm
+                atr_estimate = abs(trail_arm - entry)
+                trail_dist = atr_estimate * 1.0          # Trailing stop naturally follows mathematically at exactly 1 ATR
 
                 tid = trade["id"]
 
