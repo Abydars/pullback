@@ -483,11 +483,11 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
 
 /* ── Mobile tabs ──────────────────────────────────────────────────────────── */
 #mobile-tabs {
-  display: none; align-items: center; justify-content: space-around; padding: 6px 8px;
+  display: none; align-items: center; justify-content: flex-start; padding: 6px 8px;
   background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 6px;
 }
 .mob-tab {
-  flex: 1; padding: 8px 4px; text-align: center; font-size: 10px; font-weight: 700;
+  flex: 0 0 auto; padding: 8px 12px; text-align: center; font-size: 11px; font-weight: 700;
   letter-spacing: .05em; text-transform: uppercase; color: var(--muted);
   cursor: pointer; border: 1px solid transparent; background: transparent; font-family: var(--font-ui);
   border-radius: 16px; transition: all .2s;
@@ -503,10 +503,11 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
   html, body { overflow: auto; }
   #app { grid-template-rows: auto auto 1fr auto; height: auto; min-height: 100vh; }
   #mobile-tabs { display: flex; }
+  #chart-tabs { display: none !important; }
   #main { grid-template-columns: 1fr; overflow: visible; }
-  #scanner-panel { display: none; height: 50vh; min-height: 280px; }
-  #chart-panel   { display: none; height: 60vh; min-height: 360px; }
-  #right-panel   { display: none; min-height: 50vh; }
+  #scanner-panel { display: none; height: auto; min-height: 280px; }
+  #chart-panel   { display: none; height: auto; min-height: 360px; }
+  #right-panel   { display: none; height: auto; min-height: 50vh; }
   #scanner-panel.mob-active, #chart-panel.mob-active, #right-panel.mob-active { display: flex; }
   #header { gap: 10px; padding: 10px 12px; flex-wrap: wrap; justify-content: space-between; align-items: center; height: auto; min-height: 44px; }
   #header > * { flex-shrink: 0; }
@@ -516,6 +517,9 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
   .tf-bar { margin-left: 0; width: 100%; justify-content: space-between; }
   #right-panel { width: 100%; border-right: none; }
   .pos-stats-row { grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
+  #chart-container { height: 400px; }
+  #pos-chart-pane { height: 400px; }
+  #hist-pane, #analytics-pane { overflow: visible; }
 }
 @media (max-width: 480px) {
   html, body { font-size: 10px; }
@@ -675,11 +679,13 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
   </div>
 
   <!-- ── Mobile Tabs ── -->
-  <div id="mobile-tabs">
+  <div id="mobile-tabs" style="overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch;">
     <button class="mob-tab active" data-panel="scanner-panel">Scanner</button>
+    <button class="mob-tab" data-panel="right-panel">Open Pos</button>
     <button class="mob-tab" data-panel="chart-panel" data-ctab="pos-chart-pane">Pos Chart</button>
-    <button class="mob-tab" data-panel="chart-panel">Chart</button>
-    <button class="mob-tab" data-panel="right-panel">Positions</button>
+    <button class="mob-tab" data-panel="chart-panel" data-ctab="chart-pane">Market Chart</button>
+    <button class="mob-tab" data-panel="chart-panel" data-ctab="hist-pane">History</button>
+    <button class="mob-tab" data-panel="chart-panel" data-ctab="analytics-pane" onclick="if(typeof fetchAnalytics==='function')fetchAnalytics()">Analytics</button>
   </div>
 
   <!-- ── Main ── -->
