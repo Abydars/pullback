@@ -291,16 +291,20 @@ def check_pullback(
     atr_avg20 = float(atr_series.iloc[-21:-1].mean()) if len(atr_series) > 21 else atr15
     atr_ratio = atr15 / atr_avg20 if atr_avg20 > 0 else 1.0
 
+    # Identify the true 5-candle structural swing high/low for anchoring
+    recent_low = float(df15["low"].iloc[-5:].min())
+    recent_high = float(df15["high"].iloc[-5:].max())
+
     if direction == "LONG":
-        # Anchor explicitly below the structural fractal bottom + 0.4 ATR buffer (widened to absorb wicks)
-        sl_price = round(last_low - (atr15 * 0.4), 8)
+        # Anchor explicitly below the 5-candle structural fractal bottom + 0.75 ATR buffer (widened to absorb wicks)
+        sl_price = round(recent_low - (atr15 * 0.75), 8)
         # Structural disaster cap (2.5 ATR Max)
         sl_price = max(sl_price, entry_price - (atr15 * 2.5))
         
         trail_arm = round(entry_price + atr15 * 1.0, 8)
     else:
-        # Anchor explicitly above the structural fractal top + 0.4 ATR buffer (widened to absorb wicks)
-        sl_price = round(last_high + (atr15 * 0.4), 8)
+        # Anchor explicitly above the 5-candle structural fractal top + 0.75 ATR buffer (widened to absorb wicks)
+        sl_price = round(recent_high + (atr15 * 0.75), 8)
         # Structural disaster cap (2.5 ATR Max)
         sl_price = min(sl_price, entry_price + (atr15 * 2.5))
         

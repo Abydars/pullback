@@ -926,6 +926,7 @@ const state = {
   lastMarkPrice: null,    // latest mark price for selected symbol
   sparklineData: {},     // symbol -> last 50 close prices (5m)
   prevPnl: {},           // trade_id -> prev pnl for blink
+  posExpanded: {},       // trade_id -> boolean (expanded or not)
 };
 
 // ============================================================
@@ -1863,6 +1864,10 @@ function renderPositions() {
       card.dataset.id = String(t.id);
       list.appendChild(card);
     }
+    
+    // Check expansion state memory (default to false)
+    const expanded = state.posExpanded[t.id] || false;
+    const expandIcon = expanded ? '▲' : '▼';
 
     // Percentage helpers (all relative to entry price)
     const entry = t.entry_price;
@@ -1926,9 +1931,9 @@ function renderPositions() {
     const armBadge = trailActive ? `<span class="trail-badge">⟳ TRAILING</span>` : '';
 
     card.innerHTML = `
-      <div class="pos-card-header">
-        <div style="cursor:pointer; display:flex; align-items:center; gap:5px; flex-wrap:wrap;" onclick="selectSymbol('${t.symbol}')">
-          <span class="pos-card-sym">${t.symbol.replace('USDT','')}<span style="font-size:9px;color:var(--muted)">/USDT</span></span>
+      <div class="pos-card-header" style="cursor:pointer; position:relative; padding-right:20px;" onclick="togglePosCard(${t.id})">
+        <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+          <span class="pos-card-sym" onclick="event.stopPropagation(); selectSymbol('${t.symbol}')" style="cursor:pointer; z-index:2;">${t.symbol.replace('USDT','')}<span style="font-size:9px;color:var(--muted)">/USDT</span></span>
           <span class="pos-card-dir ${isLong ? 'pos-dir-long' : 'pos-dir-short'}">${isLong ? 'LONG' : 'SHORT'}</span>
           ${armBadge}
           ${proxBadge}
@@ -1937,8 +1942,10 @@ function renderPositions() {
           <div class="pos-card-pnl ${pnlCls}${blink}">${fmtUsdt(pnl)}</div>
           <div class="pos-card-roe ${pnlCls}">ROE ${roe >= 0 ? '+' : ''}${roe.toFixed(2)}%</div>
         </div>
+        <div style="position:absolute; right:10px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:10px;">${expandIcon}</div>
       </div>
-      <div class="pos-card-grid">
+      <div class="pos-card-body" style="display: ${expanded ? 'block' : 'none'};">
+        <div class="pos-card-grid">
         <div class="pos-kv">
           <span class="k">Entry</span>
           <span class="v">${fmtPrice(entry)}</span>
@@ -1994,8 +2001,9 @@ function renderPositions() {
         <div class="pos-kv"><span class="k">Score</span><span class="v">${t.signal_score ?? '—'}</span></div>
         <div class="pos-kv"><span class="k">Open</span><span class="v">${t.duration ?? '—'}</span></div>
       </div>
-      <div style="margin-top:8px;display:flex;justify-content:flex-end;">
+      <div style="margin-top:8px;display:flex;justify-content:flex-end;" class="pos-card-footer">
         <button class="btn-close-pos" onclick="closePosition(${t.id}, this)">✕ Close</button>
+      </div>
       </div>
     `;
   });
@@ -2055,6 +2063,11 @@ function _reasonCfg(closeReason) {
     FILLED:        { cls: 'hr-other', label: 'FILLED' },
     RECONCILED:    { cls: 'hr-other', label: 'RECONCILED' },
   }[reason] ?? { cls: 'hr-other', label: reason || '—' };
+}
+
+function togglePosCard(id) {
+  state.posExpanded[id] = !state.posExpanded[id];
+  renderPositions();
 }
 
 function renderHistory() {
