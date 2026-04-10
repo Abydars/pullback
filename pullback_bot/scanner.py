@@ -55,6 +55,8 @@ _kline_buffers: dict[str, dict[str, list[dict]]] = defaultdict(
 _last_signal_ts: dict[str, float] = {}
 _SIGNAL_COOLDOWN_S = 300  # 5 min — one signal per 15m candle at most
 
+_oi_cache: dict[str, list[dict]] = {}  # {symbol: [oihist_dict, ...]}
+
 # Signal batch queue — signals from concurrent 15m closes are held here
 # for a short window, then flushed in score order so the best signal gets
 # the first trade slot rather than whichever symbol's WS message arrived first.
@@ -225,7 +227,7 @@ async def refresh_watchlist_loop() -> None:
 
 async def _seed_klines(symbol: str) -> None:
     """Pre-fill kline buffers from REST API for a symbol."""
-    for interval, limit in [("15m", 500), ("5m", 60), ("1m", 60)]:
+    for interval, limit in [("15m", 500), ("5m", 60), ("1m", 60), ("4h", 200)]:
         try:
             raw = await bc.get_klines(symbol, interval, limit)
             candles = [
@@ -251,7 +253,7 @@ def _make_stream_url(symbols: list[str]) -> str:
     streams = []
     for sym in symbols:
         s = sym.lower()
-        streams += [f"{s}@kline_1m", f"{s}@kline_5m", f"{s}@kline_15m"]
+        streams += [f"{s}@kline_1m", f"{s}@kline_5m", f"{s}@kline_15m", f"{s}@kline_4h"]
     combined = "/".join(streams)
     return f"{config.BINANCE_WS_BASE}/stream?streams={combined}"
 
@@ -307,7 +309,7 @@ def _update_buffer(symbol: str, interval: str, candle: dict, is_closed: bool) ->
         # Keep only what we need (500 for 15m — EMA200 needs ~2.5× period for
         # stable burn-in; 60 for 5m; 10 for 1m which is only used for mark-price
         # stable burn-in; 60 for 5m; 60 for 1m (for micro-scalp history)
-        limit = {"15m": 500, "5m": 60, "1m": 60}.get(interval, 60)
+        limit = {"15m": 500, "5m": 60, "1m": 60, "4h": 200}.get(interval, 60)
         if len(buf) > limit:
             _kline_buffers[symbol][interval] = buf[-limit:]
 
@@ -406,7 +408,8 @@ async def _evaluate_symbol(symbol: str) -> None:
         k15 = _kline_buffers[symbol]["15m"]
         k5  = _kline_buffers[symbol]["5m"]
         k1m = _kline_buffers[symbol]["1m"]
-        if config.SIGNAL_MODE != "micro_scalp" and (len(k15) < 210 or len(k5) < 50):
+        k4h = _kline_buffers[symbol]["4h"]
+        if config.SIGNAL_MODE != "micro_scalp" and (len(k15) < 210 or len(k5) < 50 or (config.FILTER_MTF_ENABLED and len(k4h) < 150)):
             return
         if config.SIGNAL_MODE == "micro_scalp" and len(k1m) < 20:
             return
@@ -523,7 +526,7 @@ async def _evaluate_symbol(symbol: str) -> None:
 
         if mode in ("pullback", "both"):
             s = await asyncio.to_thread(
-                signal_engine.check_pullback, symbol, k15[:], k5[:]
+                signal_engine.check_pullback, symbol, k15[:], k5[:], k4h[:], _oi_cache.get(symbol, [])
             )
             if s and not _regime_blocks(s) and not _funding_blocks(s):
                 candidates.append(s)
@@ -537,7 +540,7 @@ async def _evaluate_symbol(symbol: str) -> None:
 
         if mode in ("breakout", "both"):
             s = await asyncio.to_thread(
-                signal_engine.check_breakout, symbol, k15[:], k5[:]
+                signal_engine.check_breakout, symbol, k15[:], k5[:], k4h[:], _oi_cache.get(symbol, [])
             )
             if s and not _regime_blocks(s) and not _funding_blocks(s):
                 candidates.append(s)
@@ -857,11 +860,30 @@ async def start(order_manager=None) -> None:
     _kline_ws_task = asyncio.create_task(_run_kline_ws(), name="kline_ws")
     asyncio.create_task(_run_mark_price_ws(), name="mark_price_ws")
     asyncio.create_task(refresh_watchlist_loop(), name="watchlist_refresh")
+    asyncio.create_task(_run_oi_worker(), name="oi_worker")
     
     # Ensure any missing ML models from the initial startup watchlist are trained in the background
     asyncio.create_task(_auto_train_missing_models(list(active_watchlist)))
     
     logger.info("Scanner started — evaluation driven by 15m candle close events.")
+
+async def _run_oi_worker() -> None:
+    """Periodically fetches open interest history for all active symbols."""
+    while True:
+        if config.FILTER_OI_ENABLED and active_watchlist:
+            symbols = list(active_watchlist)
+            for i in range(0, len(symbols), 10):
+                batch = symbols[i : i + 10]
+                tasks = [bc.get_open_interest_hist(sym, period="5m", limit=30) for sym in batch]
+                try:
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    for sym, res in zip(batch, results):
+                        if not isinstance(res, Exception) and res:
+                            _oi_cache[sym] = res
+                except Exception as e:
+                    logger.warning("OI worker batch fail: %s", e)
+                await asyncio.sleep(2)  # delay between batches
+        await asyncio.sleep(300)  # poll every 5 minutes
 
 async def _run_funding_predator_clock() -> None:
     """

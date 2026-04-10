@@ -73,6 +73,28 @@ def _stoch_rsi(
     return k, d
 
 
+def _compute_daily_vwap(df: pd.DataFrame) -> float:
+    """Calculates Daily Volume Weighted Average Price (VWAP) matching Binance 00:00 UTC resets."""
+    import datetime
+    now_utc = datetime.datetime.utcnow()
+    start_of_day = datetime.datetime(now_utc.year, now_utc.month, now_utc.day, tzinfo=datetime.timezone.utc).timestamp()
+    
+    if "time" not in df.columns:
+        return 0.0
+        
+    day_df = df[df["time"] >= start_of_day]
+    if len(day_df) == 0:
+        return 0.0
+        
+    typical_price = (day_df["high"] + day_df["low"] + day_df["close"]) / 3.0
+    cum_vol = day_df["volume"].sum()
+    if cum_vol == 0:
+        return 0.0
+        
+    vwap = (typical_price * day_df["volume"]).sum() / cum_vol
+    return float(vwap)
+
+
 def _macd(
     series: pd.Series,
     fast: int = 12,
@@ -122,6 +144,9 @@ def _adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
 _ML_MODELS = {}
 
 def _get_ml_model(symbol: str):
+    if not getattr(config, "ML_FILTER_ENABLED", False):
+        return None
+        
     if symbol in _ML_MODELS:
         return _ML_MODELS[symbol]
     
@@ -242,6 +267,8 @@ def check_pullback(
     symbol: str,
     klines_15m: list[dict],
     klines_5m: list[dict],
+    klines_4h: list[dict] = [],
+    oi_hist: list[dict] = [],
 ) -> Optional[dict]:
     """
     Run the full pullback scoring model.
@@ -314,6 +341,23 @@ def check_pullback(
         # Weak chopped trend; very risky to trade pullback.
         return None
 
+    # ── MTF Alignment (4-Hour Macro Trend) ────────────────────────────────────
+    if config.FILTER_MTF_ENABLED and len(klines_4h) >= 200:
+        df4h = pd.DataFrame(klines_4h).astype(float)
+        ema200_4h = _ema(df4h["close"], 200)
+        current_4h_close = float(df4h["close"].iloc[-1])
+        current_4h_ema = float(ema200_4h.iloc[-1])
+        
+        if direction == "LONG" and current_4h_close < current_4h_ema:
+            logger.debug("MTF Guard: Blocked LONG on %s (Below 4H EMA200)", symbol)
+            return None
+        if direction == "SHORT" and current_4h_close > current_4h_ema:
+            logger.debug("MTF Guard: Blocked SHORT on %s (Above 4H EMA200)", symbol)
+            return None
+            
+        score += 20
+        reasons.append("mtf_aligned")
+
     # ── 2. Dynamic Volatility Zone Mapping ────────────────────────────────────
     ema50_upper_band = last_ema50 + (atr15 * 1.0)
     ema50_lower_band = last_ema50 - (atr15 * 1.0)
@@ -367,6 +411,53 @@ def check_pullback(
     if pa_valid is False:
         # Falling Knife caught. Kill trade mathematically.
         return None
+
+    # ── Open Interest (OI) Spike Detection ────────────────────────────────────
+    if config.FILTER_OI_ENABLED and oi_hist and len(oi_hist) > 5:
+        try:
+            oi_start = float(oi_hist[0].get("sumOpenInterest", 0))
+            oi_end = float(oi_hist[-1].get("sumOpenInterest", 0))
+            if oi_start > 0:
+                oi_change = (oi_end - oi_start) / oi_start
+                if oi_change > 0.015:  # 1.5% genuine liquidity injection
+                    score += 20
+                    reasons.append("oi_spike")
+                elif oi_change < -0.015: # -1.5% liquidity drying up / squeeze trap
+                    logger.debug("OI Guard: Blocked %s %s (OI dropping by %.2f%%)", symbol, direction, oi_change * 100)
+                    return None
+        except Exception as e:
+            logger.debug("OI parsing error %s: %s", symbol, e)
+            pass
+
+    # ── Daily VWAP Bounce ───────────────────────────────────────────────────
+    if config.FILTER_VWAP_ENABLED:
+        vwap = _compute_daily_vwap(df15)
+        if vwap > 0:
+            dist_to_vwap = abs(last_close - vwap)
+            if dist_to_vwap <= (atr15 * 0.25):
+                score += 30
+                reasons.append("daily_vwap_bounce")
+
+    # ── RSI Divergence ──────────────────────────────────────────────────────
+    if config.FILTER_RSI_ENABLED:
+        df_rsi = _rsi(df15["close"], 14)
+        if len(df_rsi) > 20:
+            recent_price_low = float(df15["low"].iloc[-10:].min())
+            recent_rsi_low = float(df_rsi.iloc[-10:].min())
+            prev_price_low = float(df15["low"].iloc[-20:-10].min())
+            prev_rsi_low = float(df_rsi.iloc[-20:-10].min())
+            
+            recent_price_high = float(df15["high"].iloc[-10:].max())
+            recent_rsi_high = float(df_rsi.iloc[-10:].max())
+            prev_price_high = float(df15["high"].iloc[-20:-10].max())
+            prev_rsi_high = float(df_rsi.iloc[-20:-10].max())
+            
+            if direction == "LONG" and recent_price_low < prev_price_low and recent_rsi_low > prev_rsi_low:
+                score += 20
+                reasons.append("bullish_rsi_div")
+            elif direction == "SHORT" and recent_price_high > prev_price_high and recent_rsi_high < prev_rsi_high:
+                score += 20
+                reasons.append("bearish_rsi_div")
 
     # ── Score gate ────────────────────────────────────────────────────────────
     if score < config.SIGNAL_SCORE_THRESHOLD:
@@ -439,6 +530,8 @@ def check_breakout(
     symbol: str,
     klines_15m: list[dict],
     klines_5m: list[dict],
+    klines_4h: list[dict] = [],
+    oi_hist: list[dict] = [],
 ) -> Optional[dict]:
     """
     V2 Structural Breakout / Breakdown detector.
@@ -505,6 +598,23 @@ def check_breakout(
     else:
         return None   # no breakout on this candle
 
+    # ── MTF Alignment (4-Hour Macro Trend) ────────────────────────────────────
+    if config.FILTER_MTF_ENABLED and len(klines_4h) >= 200:
+        df4h = pd.DataFrame(klines_4h).astype(float)
+        ema200_4h = _ema(df4h["close"], 200)
+        current_4h_close = float(df4h["close"].iloc[-1])
+        current_4h_ema = float(ema200_4h.iloc[-1])
+        
+        if direction == "LONG" and current_4h_close < current_4h_ema:
+            logger.debug("MTF Guard: Blocked LONG Breakout on %s (Below 4H EMA)", symbol)
+            return None
+        if direction == "SHORT" and current_4h_close > current_4h_ema:
+            logger.debug("MTF Guard: Blocked SHORT Breakdown on %s (Above 4H EMA)", symbol)
+            return None
+            
+        score += 20
+        reasons.append("mtf_aligned")
+
     # ── 2. Macro-Trend Cohesion ──────────────────────────────────────────────
     if ema50_val and ema200_val:
         if direction == "LONG":
@@ -553,6 +663,36 @@ def check_breakout(
                 # Wick rejected support; fail trade.
                 return None
 
+    # ── Daily VWAP Bounce ───────────────────────────────────────────────────
+    if config.FILTER_VWAP_ENABLED:
+        vwap = _compute_daily_vwap(df15)
+        if vwap > 0:
+            dist_to_vwap = abs(last_close - vwap)
+            if dist_to_vwap <= (atr15 * 0.25):
+                score += 30
+                reasons.append("daily_vwap_bounce")
+
+    # ── RSI Divergence ──────────────────────────────────────────────────────
+    if config.FILTER_RSI_ENABLED:
+        df_rsi = _rsi(df15["close"], 14)
+        if len(df_rsi) > 20:
+            recent_price_low = float(df15["low"].iloc[-10:].min())
+            recent_rsi_low = float(df_rsi.iloc[-10:].min())
+            prev_price_low = float(df15["low"].iloc[-20:-10].min())
+            prev_rsi_low = float(df_rsi.iloc[-20:-10].min())
+            
+            recent_price_high = float(df15["high"].iloc[-10:].max())
+            recent_rsi_high = float(df_rsi.iloc[-10:].max())
+            prev_price_high = float(df15["high"].iloc[-20:-10].max())
+            prev_rsi_high = float(df_rsi.iloc[-20:-10].max())
+            
+            if direction == "LONG" and recent_price_low < prev_price_low and recent_rsi_low > prev_rsi_low:
+                score += 20
+                reasons.append("bullish_rsi_div")
+            elif direction == "SHORT" and recent_price_high > prev_price_high and recent_rsi_high < prev_rsi_high:
+                score += 20
+                reasons.append("bearish_rsi_div")
+
     # ── Score gate ────────────────────────────────────────────────────────────
     if score < config.SIGNAL_SCORE_THRESHOLD:
         return None
@@ -576,6 +716,23 @@ def check_breakout(
 
     if sl_price <= 0:
         return None
+
+    # ── Open Interest (OI) Spike Detection ────────────────────────────────────
+    if config.FILTER_OI_ENABLED and oi_hist and len(oi_hist) > 5:
+        try:
+            oi_start = float(oi_hist[0].get("sumOpenInterest", 0))
+            oi_end = float(oi_hist[-1].get("sumOpenInterest", 0))
+            if oi_start > 0:
+                oi_change = (oi_end - oi_start) / oi_start
+                if oi_change > 0.015:  # 1.5% genuine liquidity injection
+                    score += 20
+                    reasons.append("oi_spike")
+                elif oi_change < -0.015: # -1.5% liquidity drying up / squeeze trap
+                    logger.debug("OI Guard: Blocked %s %s (OI dropping by %.2f%%)", symbol, direction, oi_change * 100)
+                    return None
+        except Exception as e:
+            logger.debug("OI parsing error %s: %s", symbol, e)
+            pass
 
     # --- ML Smart Filter ---
     ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15)

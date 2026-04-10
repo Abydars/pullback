@@ -4446,6 +4446,10 @@
             hint: 'pullback = 15m trend · breakout = 15m box exit · micro_scalp = 1m HFT volume · funding_predator = 8H clock tick arbitrage squeeze · both = pullback & breakout'
           },
           { key: 'FUNDING_PREDATOR_THRESHOLD', label: 'Min Funding Threshold (%)', type: 'number', step: '0.001', hint: 'The baseline yield required to justify an 08:00:00 tick execution. 0.015 = 1.5%.' },
+          { key: 'FILTER_MTF_ENABLED', label: 'MTF Alignment (4H)', type: 'select', options: ['true', 'false'], hint: 'If true, blocks 15m signals that trade against the 4H EMA 200 Macro Trend.' },
+          { key: 'FILTER_OI_ENABLED', label: 'Open Interest (OI) Spike', type: 'select', options: ['true', 'false'], hint: 'If true, validates that fresh money is entering the market before permitting a breakout signal.' },
+          { key: 'FILTER_VWAP_ENABLED', label: 'Daily VWAP Bounce', type: 'select', options: ['true', 'false'], hint: 'If true, heavily boosts conviction (+30 score) on signals that bounce mathematically off the Daily VWAP.' },
+          { key: 'FILTER_RSI_ENABLED', label: 'RSI Divergence', type: 'select', options: ['true', 'false'], hint: 'If true, automatically detects bullish/bearish divergence and grants +20 score points.' },
           { key: 'SIGNAL_SCORE_THRESHOLD', label: 'Min Signal Score (0–100)', type: 'number', hint: 'Lower = more entries, higher = stricter' },
           {
             key: 'SIGNAL_BATCH_WINDOW_S', label: 'Signal Batch Window (s)', type: 'number', step: '0.5',

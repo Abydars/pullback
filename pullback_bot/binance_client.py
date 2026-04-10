@@ -133,6 +133,14 @@ async def get_all_premium_indices() -> list[dict]:
     return await _get("/fapi/v1/premiumIndex")
 
 
+async def get_open_interest_hist(symbol: str, period: str = "5m", limit: int = 30) -> list[dict]:
+    """Fetch Open Interest History for a specific symbol."""
+    return await _get(
+        "/futures/data/openInterestHist",
+        params={"symbol": symbol, "period": period, "limit": limit}
+    )
+
+
 async def get_positions() -> list[dict]:
     """Get all open positions (signed)."""
     return await _get("/fapi/v2/positionRisk", params={}, signed=True)
