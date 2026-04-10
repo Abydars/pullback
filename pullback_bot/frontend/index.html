@@ -4844,14 +4844,7 @@
         }
       }
 
-      // Check if LOW tier hits max leverage and still can't reach target
-      const lowTier = tiers.find(t => t.label === 'LOW');
-      if (lowTier && lowTier.minLev > maxLev && lowTier.coverage < 95) {
-        recs.push({
-          cls: 'info', icon: '→',
-          text: `LOW-volatility tier needs <strong>${lowTier.minLev}× leverage</strong> to hit the risk target but MAX_LEVERAGE is capped at ${maxLev}×. Consider raising MAX_LEVERAGE to ${lowTier.minLev} for stable, low-ATR assets.`
-        });
-      }
+      // (Removed lowTier max leverage recommendation since the backend hard-caps at 10x regardless of config)
 
       // Warn if risk target > 5% capital (aggressive)
       if (riskPct > 5) {
