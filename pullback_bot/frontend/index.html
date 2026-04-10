@@ -4400,7 +4400,7 @@
     function fmtTime(ms, includeDate = false) {
       if (!ms) return '—';
       const t = ms < 9999999999 ? ms * 1000 : ms; // auto convert seconds to milliseconds
-      
+
       const opts = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
       if (includeDate) {
         opts.month = 'short';
@@ -5309,26 +5309,32 @@
 
         let metaHtml = '';
         if (s.metadata) {
-            try {
-                const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
-                let reasonsHtml = '';
-                if (meta.reasons && meta.reasons.length > 0) {
-                    reasonsHtml = meta.reasons.map(r => `<span style="background: rgba(0, 150, 255, 0.1); color: var(--blue); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(0, 150, 255, 0.2)">✓ ${r.replace(/_/g, ' ')}</span>`).join('');
-                }
-                if (meta.entry || reasonsHtml) {
-                    metaHtml = `
-                    <div style="font-size: 11px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; max-width: 350px; margin-left: auto; color: var(--text-dim);">
-                        ${meta.type ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 500;">⛙ ${meta.type}</span>` : ''}
-                        ${meta.entry ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">⚡︎ Entry: ${meta.entry}</span>` : ''}
-                        ${meta.sl ? `<span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl}</span>` : ''}
-                        ${meta.atr ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">Volatility: ${meta.atr}</span>` : ''}
-                        ${reasonsHtml}
-                    </div>`;
-                }
-            } catch(e) {}
+          try {
+            const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
+            let reasonsHtml = '';
+            if (meta.reasons && meta.reasons.length > 0) {
+              reasonsHtml = meta.reasons.map(r => `<span style="background: rgba(0, 150, 255, 0.1); color: var(--blue); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(0, 150, 255, 0.2)">✓ ${r.replace(/_/g, ' ')}</span>`).join('');
+            }
+            if (meta.entry || reasonsHtml) {
+              metaHtml = `
+              <tr>
+                <td colspan="7" style="padding: 4px 16px 12px 16px; border-top: none; background: rgba(0,0,0,0.15);">
+                  <div style="font-size: 11px; display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-dim);">
+                      ${meta.type ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 500;">⛙ ${meta.type}</span>` : ''}
+                      ${meta.entry ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">⚡︎ Entry: ${meta.entry}</span>` : ''}
+                      ${meta.sl ? `<span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl}</span>` : ''}
+                      ${meta.atr ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">Volatility: ${meta.atr}</span>` : ''}
+                      ${reasonsHtml}
+                  </div>
+                </td>
+              </tr>`;
+            }
+          } catch (e) { }
         }
 
-        html += `<tr>
+        const borderStyle = metaHtml ? 'border-bottom: none;' : '';
+
+        html += `<tr style="${borderStyle}">
           <td style="color:var(--text-dim); padding-left:16px;">${time}</td>
           <td style="font-weight:600">${s.symbol}</td>
           <td style="color:${color}">${dir}</td>
@@ -5337,9 +5343,8 @@
           <td>${status}</td>
           <td style="color:var(--text-dim); padding-right:16px;">
             ${reason}
-            ${metaHtml}
           </td>
-        </tr>`;
+        </tr>${metaHtml}`;
       });
 
       const tempWrapper = document.createElement('table');
@@ -5352,14 +5357,14 @@
     }
 
     // ── Analytics ────────────────────────────────────────────────────────────────
-    
+
     function onScannerLogNew(s) {
       const tbody = document.getElementById('signals-body');
       if (!tbody) return;
-      
+
       const emptyRow = tbody.querySelector('.empty');
       if (emptyRow) emptyRow.parentElement.remove();
-      
+
       const time = fmtTime(s.timestamp, true);
       const mllbl = s.ml_confidence != null ? `${(s.ml_confidence * 100).toFixed(0)}%` : '—';
       const color = s.direction === 'LONG' ? 'var(--green)' : 'var(--red)';
@@ -5369,26 +5374,33 @@
 
       let metaHtml = '';
       if (s.metadata) {
-          try {
-              const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
-              let reasonsHtml = '';
-              if (meta.reasons && meta.reasons.length > 0) {
-                  reasonsHtml = meta.reasons.map(r => `<span style="background: rgba(0, 150, 255, 0.1); color: var(--blue); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(0, 150, 255, 0.2)">✓ ${r.replace(/_/g, ' ')}</span>`).join('');
-              }
-              if (meta.entry || reasonsHtml) {
-                  metaHtml = `
-                  <div style="font-size: 11px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; max-width: 350px; margin-left: auto; color: var(--text-dim);">
-                      ${meta.type ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 500;">⛙ ${meta.type}</span>` : ''}
-                      ${meta.entry ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">⚡︎ Entry: ${meta.entry}</span>` : ''}
-                      ${meta.sl ? `<span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl}</span>` : ''}
-                      ${meta.atr ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">Volatility: ${meta.atr}</span>` : ''}
-                      ${reasonsHtml}
-                  </div>`;
-              }
-          } catch(e) {}
+        try {
+          const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
+          let reasonsHtml = '';
+          if (meta.reasons && meta.reasons.length > 0) {
+            reasonsHtml = meta.reasons.map(r => `<span style="background: rgba(0, 150, 255, 0.1); color: var(--blue); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(0, 150, 255, 0.2)">✓ ${r.replace(/_/g, ' ')}</span>`).join('');
+          }
+          if (meta.entry || reasonsHtml) {
+            metaHtml = `
+            <tr>
+              <td colspan="7" style="padding: 4px 16px 12px 16px; border-top: none; background: rgba(0,0,0,0.15);">
+                <div style="font-size: 11px; display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-dim);">
+                    ${meta.type ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 500;">⛙ ${meta.type}</span>` : ''}
+                    ${meta.entry ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">⚡︎ Entry: ${meta.entry}</span>` : ''}
+                    ${meta.sl ? `<span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl}</span>` : ''}
+                    ${meta.atr ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">Volatility: ${meta.atr}</span>` : ''}
+                    ${reasonsHtml}
+                </div>
+              </td>
+            </tr>`;
+          }
+        } catch (e) { }
       }
 
+      const borderStyle = metaHtml ? 'border-bottom: none;' : '';
+
       const tr = document.createElement('tr');
+      tr.style.cssText = borderStyle;
       tr.innerHTML = `
         <td style="color:var(--text-dim); padding-left:16px;">${time}</td>
         <td style="font-weight:600">${s.symbol}</td>
@@ -5398,20 +5410,34 @@
         <td>${status}</td>
         <td style="color:var(--text-dim); padding-right:16px;">
             ${reason}
-            ${metaHtml}
         </td>
       `;
-      
+
       tr.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
       tr.style.transition = 'background-color 1.5s ease-out';
-      
-      tbody.prepend(tr);
-      
-      setTimeout(() => {
-        tr.style.backgroundColor = 'transparent';
-      }, 500);
+
+      if (metaHtml) {
+          const tempWrapper = document.createElement('table');
+          tempWrapper.innerHTML = `<tbody>${metaHtml}</tbody>`;
+          const metaRow = tempWrapper.querySelector('tbody').firstChild;
+          metaRow.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+          metaRow.style.transition = 'background-color 1.5s ease-out';
+          
+          tbody.prepend(metaRow);
+          tbody.prepend(tr);
+          
+          setTimeout(() => {
+            tr.style.backgroundColor = 'transparent';
+            metaRow.style.backgroundColor = 'transparent';
+          }, 500);
+      } else {
+          tbody.prepend(tr);
+          setTimeout(() => {
+            tr.style.backgroundColor = 'transparent';
+          }, 500);
+      }
     }
-    
+
     let _anFetched = false;
 
     function resetAnalytics() {
