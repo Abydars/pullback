@@ -168,6 +168,13 @@ class OrderManager:
         score       = signal["score"]
         signal_type = signal.get("signal_type", "PULLBACK")
 
+        # ── 0. Portfolio Trailing Guard (Wait-and-See) ────────────────────────
+        import sys
+        _pt = sys.modules.get("position_tracker")
+        if _pt and getattr(_pt, "_portfolio_trail_armed", False):
+            logger.info("Signal %s %s skipped — Portfolio Trail is ARMED", symbol, direction)
+            return False
+
         # ── 1. Per-symbol in-flight guard (no await, immediate) ───────────────
         if symbol in _opening:
             logger.info("Signal %s %s skipped — already opening this symbol", symbol, direction)
