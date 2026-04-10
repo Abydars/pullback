@@ -4722,7 +4722,10 @@
       }
 
       // Smooth leverage formula: lev = floor(4 / atr_pct), same as backend
-      const smoothLev = atrPct => Math.max(1, Math.min(maxLev, Math.floor(4.0 / atrPct)));
+      const smoothLev = atrPct => {
+        const adjustedAtrPct = Math.max(0.40, atrPct);
+        return Math.max(1, Math.min(maxLev, Math.floor(4.0 / adjustedAtrPct)));
+      };
 
       // Representative ATR% sample points across the volatility spectrum
       const TIERS = [
@@ -4745,7 +4748,8 @@
         const actualRisk = notional * slPct;
         const coverage = Math.min(100, (actualRisk / riskTarget) * 100);
         const maxOpenFull = Math.floor(capital / (riskTarget / (slPct * t.lev)));
-        return { ...t, slPct: t.atrPct * 1.5, notional, margin, actualRisk, coverage, maxOpenFull };
+        const minLev = Math.ceil(notionalRisk / perTradeMgn);
+        return { ...t, slPct: t.atrPct * 1.5, notional, margin, actualRisk, coverage, maxOpenFull, minLev };
       });
 
       // ── Summary cards ──
