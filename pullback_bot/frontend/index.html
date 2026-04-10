@@ -3214,12 +3214,18 @@ document.getElementById('btn-close-all').disabled = true;
     if (panelId === 'chart-panel') {
       const innerTab = ctabId || 'chart-pane';
       if (window.switchCTab) window.switchCTab(innerTab);
-      // Fit whichever chart is now active
-      if (innerTab === 'pos-chart-pane' && posChart) {
-        requestAnimationFrame(() => posChart.timeScale().fitContent());
-      } else if (mainChart) {
-        requestAnimationFrame(() => mainChart.timeScale().fitContent());
-      }
+      // Fit whichever chart is now active, explicitly fighting the ResizeObserver display:none bug
+      setTimeout(() => {
+        if (innerTab === 'pos-chart-pane' && posChart) {
+          const c = document.getElementById('pos-chart-container');
+          if (c.clientWidth > 0 && c.clientHeight > 0) posChart.resize(c.clientWidth, c.clientHeight);
+          posChart.timeScale().fitContent();
+        } else if (mainChart) {
+          const c = document.getElementById('chart-container');
+          if (c.clientWidth > 0 && c.clientHeight > 0) mainChart.resize(c.clientWidth, c.clientHeight);
+          mainChart.timeScale().fitContent();
+        }
+      }, 50);
     }
   }
 
