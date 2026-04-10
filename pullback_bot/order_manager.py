@@ -90,9 +90,8 @@ async def _calc_qty_and_leverage(
     # leverage = floor(4 / atr_pct) — e.g. ATR=1% → 4x, ATR=0.5% → 8x,
     # ATR=0.2% → 20x.  Constant 4 keeps leverage conservatively low at all
     # volatility levels while still scaling smoothly.
-    atr_pct  = max(0.40, (atr / entry) * 100)  # floor at 0.40 % — below this the
-    # formula int(4/atr_pct) exceeds 10x and loses differentiation against the
-    # MAX_LEVERAGE cap.  0.40 % → raw_lev=10; anything calmer is treated equally.
+    # vol coins to be governed entirely by MAX_LEVERAGE setting. 0.08% → raw_lev=50
+    atr_pct  = max(0.08, (atr / entry) * 100)
     raw_lev  = int(4.0 / atr_pct)
     raw_lev  = max(1, min(raw_lev, max_lev))
 

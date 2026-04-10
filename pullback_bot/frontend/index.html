@@ -4723,7 +4723,7 @@
 
       // Smooth leverage formula: lev = floor(4 / atr_pct), same as backend
       const smoothLev = atrPct => {
-        const adjustedAtrPct = Math.max(0.40, atrPct);
+        const adjustedAtrPct = Math.max(0.08, atrPct);
         return Math.max(1, Math.min(maxLev, Math.floor(4.0 / adjustedAtrPct)));
       };
 
