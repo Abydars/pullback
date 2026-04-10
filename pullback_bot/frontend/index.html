@@ -3344,6 +3344,7 @@
         case 'trade_closed': onTradeClosed(data); break;
         case 'portfolio_stop_triggered': onPortfolioStop(data); break;
         case 'portfolio_trail_armed': onPortfolioTrailArmed(data); break;
+        case 'portfolio_trail_disarmed': onPortfolioTrailDisarmed(data); break;
         case 'stats_update': updateStats(data); break;
         case 'trade_deleted': onTradeDeleted(data); break;
         case 'trades_cleared': onTradesCleared(); break;
@@ -3528,6 +3529,20 @@
       const tgtStr = fmtUsdt(data.target ?? 0);
       toast('t-amber', '🎯', 'Portfolio trail armed',
         `PnL: ${pnlStr}  ·  Target: ${tgtStr}`, 8000);
+    }
+
+    function onPortfolioTrailDisarmed(data) {
+      _portfolioTrailArmed = false;
+      _portfolioTrailPeak = 0;
+      let msg = 'Portfolio trail disarmed';
+      if (data.reason === 'all_positive') {
+        msg = 'Disarmed: All trades are profitable (riding independent trails)';
+      } else if (data.reason === 'dropped_below_target') {
+        msg = 'Disarmed: PnL dropped below target';
+      } else if (data.reason === 'went_negative') {
+        msg = 'Disarmed: Portfolio went negative';
+      }
+      toast('t-amber', 'ℹ️', 'Portfolio Trail', msg, 6000);
     }
 
     function onKlineUpdate(data) {
