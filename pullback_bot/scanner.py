@@ -808,14 +808,11 @@ async def _run_funding_predator_clock() -> None:
                      await asyncio.sleep(sleep_seconds)
                 
                 logger.warning(f"Funding Predator: ZERO HOUR TICK EXECUTING FIRE ON {best_target_sym}")
-                        signal = signal_engine.check_funding_predator(best_target_sym, best_rate, best_mark)
-                        if signal:
-                            # Direct payload bypass injection to order manager (circumventing score batches)
-                            await om.order_manager.handle_signal(signal)
-                
+                signal = signal_engine.check_funding_predator(best_target_sym, best_rate, best_mark)
+                if signal:
+                    # Direct payload bypass injection to order manager (circumventing score batches)
+                    await om.order_manager.handle_signal(signal)
                 # Cooldown so we don't rapid-trigger
                 await asyncio.sleep(60)
-                        break
-                        
             except Exception as e:
                 logger.error(f"Funding Predator Error: {e}")
