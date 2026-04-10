@@ -541,19 +541,14 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
   #stats-bar { flex-wrap: wrap; gap: 8px 16px; padding: 8px 12px; height: auto; line-height: 1.5; }
   #chart-header { flex-wrap: wrap; gap: 6px 10px; padding: 10px 12px; position: static; }
   .tf-bar { margin-left: 0; width: 100%; justify-content: space-between; }
-  .pos-stats-row { grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
-  #chart-container { height: 400px; }
-  #pos-chart-pane { height: 400px; }
-  #hist-pane, #analytics-pane { overflow: visible; }
-}
-  .pos-stats-row { grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
-  #chart-container { height: 400px; }
-  #pos-chart-pane { height: 400px; }
+  .pos-stats-row { grid-template-columns: 1fr 1fr; gap: 8px; }
+  #chart-container { height: 60vh; min-height: 400px; }
+  #pos-chart-pane { height: 60vh; min-height: 400px; }
   #hist-pane, #analytics-pane { overflow: visible; }
 }
 @media (max-width: 480px) {
   html, body { font-size: 10px; }
-  .pos-stats-row { grid-template-columns: 1fr 1fr; }
+  #pos-chart-pane, #chart-container { height: 50vh; min-height: 360px; }
   #chart-header { gap: 6px; }
   .sym-search-wrap { width: 100%; }
   #sym-search { width: 100%; flex: 1; }
@@ -715,9 +710,9 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
 
   <!-- ── Mobile Tabs ── -->
   <div id="mobile-tabs" style="overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch;">
-    <button class="mob-tab active" data-panel="right-panel">Open Pos</button>
-    <button class="mob-tab" data-panel="chart-panel" data-ctab="pos-chart-pane">Pos Chart</button>
+    <button class="mob-tab active" data-panel="chart-panel" data-ctab="pos-chart-pane">Pos Chart</button>
     <button class="mob-tab" data-panel="chart-panel" data-ctab="chart-pane">Market Chart</button>
+    <button class="mob-tab" data-panel="right-panel">Open Pos</button>
     <button class="mob-tab" data-panel="chart-panel" data-ctab="hist-pane">History</button>
     <button class="mob-tab" data-panel="chart-panel" data-ctab="analytics-pane" onclick="if(typeof fetchAnalytics==='function')fetchAnalytics()">Analytics</button>
   </div>
@@ -738,8 +733,8 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
 
       <!-- Tab bar -->
       <div id="chart-tabs">
-        <button class="ctab" data-ctab="pos-chart-pane">Position Chart</button>
-        <button class="ctab active" data-ctab="chart-pane">Chart</button>
+        <button class="ctab active" data-ctab="pos-chart-pane">Position Chart</button>
+        <button class="ctab" data-ctab="chart-pane">Chart</button>
                 <button class="ctab" data-ctab="hist-pane">
           Trade History <span class="ctab-count" id="hist-count"></span>
         </button>
@@ -747,7 +742,7 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
       </div>
 
       <!-- Chart pane -->
-      <div id="chart-pane" class="active">
+      <div id="chart-pane">
         <div id="chart-header">
           <span id="chart-symbol">—</span>
           <span id="chart-price">—</span>
@@ -771,7 +766,7 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
       </div>
 
       <!-- Position Chart pane -->
-      <div id="pos-chart-pane">
+      <div id="pos-chart-pane" class="active">
         <div id="pos-chart-container">
           <div class="pos-chart-empty-state" id="pos-chart-empty">No open positions</div>
           <div id="pos-pnl-overlay" style="display:none">
