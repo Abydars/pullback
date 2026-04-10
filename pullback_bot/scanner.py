@@ -667,9 +667,20 @@ async def start(order_manager=None) -> None:
 
     # Initial watchlist
     active_watchlist = await build_watchlist()
+    
+    funding_rates_map = {}
+    if config.SIGNAL_MODE == "funding_predator":
+        try:
+            import binance_client as bc
+            api_rates = await bc.get_all_premium_indices()
+            for r in api_rates:
+                if r["symbol"] in active_watchlist:
+                    funding_rates_map[r["symbol"]] = float(r.get("lastFundingRate", 0))
+        except Exception: pass
+
     await wsb.broadcaster.broadcast(
         "scanner_watchlist",
-        {"symbols": active_watchlist, "count": len(active_watchlist)},
+        {"symbols": active_watchlist, "count": len(active_watchlist), "funding_targets": funding_rates_map},
     )
 
     # Seed klines concurrently in batches of 10 (Binance rate-limit safe)

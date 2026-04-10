@@ -1511,6 +1511,7 @@ function onInit(data) {
 
 function onWatchlist(data) {
   state.watchlist = data.symbols || [];
+  state.fundingTargets = data.funding_targets || {};
   document.getElementById('scan-count').textContent = `(${state.watchlist.length})`;
   document.getElementById('h-watch').textContent = state.watchlist.length;
   renderScanner();
@@ -1746,9 +1747,13 @@ function buildScannerRow(sym) {
   row.className = 'sym-row';
   row.id = 'symrow-' + sym;
   row.dataset.sym = sym;
+  const fr = state.fundingTargets && state.fundingTargets[sym] !== undefined 
+      ? `<div style="font-size:10px; color:var(--text); margin-top:1px; font-weight: 500; letter-spacing: 0.5px;">YIELD: <span style="color:var(--accent)">${(state.fundingTargets[sym]*100).toFixed(3)}%</span></div>` : '';
+
   row.innerHTML = `
     <div>
       <div class="sym-name">${sym.replace('USDT','')}<span style="color:var(--muted);font-size:9px">/USDT</span></div>
+      ${fr}
       <div class="sym-score-bar"><div class="sym-score-fill" id="fill-${sym}" style="width:0%"></div></div>
     </div>
     <div class="sparkline-wrap">
