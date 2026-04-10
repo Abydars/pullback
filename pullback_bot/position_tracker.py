@@ -466,12 +466,22 @@ async def _paper_tick() -> None:
                 triggered_reason = "SMART_PORT_SL"
 
             if triggered_reason is None and min_tp_usdt != 0.0:
-                if config.PORTFOLIO_TP_MODE == "normal":
-                    # Normal mode — close immediately when PnL reaches the threshold
-                    if total_unrealized >= min_tp_usdt:
-                        triggered_reason = "PORTFOLIO_TP"
-
-                else:  # "trailing"
+                # If ALL open trades are individually in profit, let them ride their individual 
+                # trailing stops to maximize gains instead of capping the whole portfolio early.
+                all_positive = len(open_trades) > 0 and all(paper_unrealized.get(t["id"], 0.0) >= 0.0 for t in open_trades)
+                
+                global _portfolio_trail_armed, _peak_portfolio_pnl
+                if all_positive:
+                    if _portfolio_trail_armed:
+                        _portfolio_trail_armed = False
+                        _peak_portfolio_pnl    = 0.0
+                        logger.info("Portfolio trail disarmed: All individual trades are profitable. Deferring to individual trailing stops.")
+                else:
+                    if config.PORTFOLIO_TP_MODE == "normal":
+                        # Normal mode — close immediately when PnL reaches the threshold
+                        if total_unrealized >= min_tp_usdt:
+                            triggered_reason = "PORTFOLIO_TP"
+                    else:  # "trailing"
                     # Trailing floor — 3-phase arm / trail / disarm
                     global _portfolio_trail_armed, _peak_portfolio_pnl
 
