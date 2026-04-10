@@ -226,19 +226,23 @@ async def get_analytics_trades(start_ms: Optional[int] = None, end_ms: Optional[
 
 
 async def delete_trade(trade_id: int) -> bool:
-    """Hard-delete a single closed trade. Returns True if a row was deleted."""
+    """Hard-delete a single closed trade, and optionally clean up empty sessions."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             "DELETE FROM trades WHERE id=? AND status='CLOSED'", (trade_id,)
         )
+        # Purge any session that no longer has existing trades associated with it
+        await db.execute("DELETE FROM sessions WHERE id NOT IN (SELECT session_id FROM trades WHERE session_id IS NOT NULL)")
         await db.commit()
         return cursor.rowcount > 0
 
 
 async def delete_all_closed_trades() -> int:
-    """Hard-delete all closed trades. Returns count deleted."""
+    """Hard-delete all closed trades and cascade drop empty sessions. Returns count deleted."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("DELETE FROM trades WHERE status='CLOSED'")
+        # Purge any session that no longer has existing trades associated with it
+        await db.execute("DELETE FROM sessions WHERE id NOT IN (SELECT session_id FROM trades WHERE session_id IS NOT NULL)")
         await db.commit()
         return cursor.rowcount
 
