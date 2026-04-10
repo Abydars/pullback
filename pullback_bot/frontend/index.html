@@ -46,9 +46,31 @@ html, body {
 /* ── Layout ───────────────────────────────────────────────────────────────── */
 #app { display: grid; grid-template-rows: 44px 1fr 28px; height: 100vh; }
 #main { 
-  display: grid; 
-  grid-template-columns: minmax(220px, 16vw) 1fr minmax(280px, 20vw); 
+  display: flex;
   overflow: hidden; 
+  align-items: stretch;
+}
+#scanner-panel {
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  border-right: none;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+#scanner-panel.drawer-open {
+  width: 320px;
+  opacity: 1;
+  border-right: 1px solid var(--border);
+}
+#chart-panel {
+  flex: 1;
+  min-width: 0;
+}
+#right-panel {
+  width: 340px;
+  flex-shrink: 0;
 }
 
 /* ── Header ───────────────────────────────────────────────────────────────── */
@@ -495,27 +517,35 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
 .mob-tab.active { color: var(--text); background: var(--bg3); border-color: var(--border); box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
 
 /* ── Responsive layout ────────────────────────────────────────────────────── */
-@media (max-width: 1100px) {
-  #main { grid-template-columns: 220px 1fr 240px; }
-  .sym-row { padding: 6px 8px; }
-}
 @media (max-width: 900px) {
   html, body { overflow: auto; }
   #app { grid-template-rows: auto auto 1fr auto; height: auto; min-height: 100vh; }
   #mobile-tabs { display: flex; }
   #chart-tabs { display: none !important; }
-  #main { grid-template-columns: 1fr; overflow: visible; }
-  #scanner-panel { display: none; height: auto; min-height: 280px; }
+  #main { display: block; overflow: visible; position: relative; }
+  
+  /* Scanner becomes an absolute overlay on mobile */
+  #scanner-panel { 
+      position: fixed; top: 44px; left: 0; bottom: 0; background: var(--bg2); 
+      z-index: 100; box-shadow: 4px 0 24px rgba(0,0,0,0.5); border-right: 1px solid var(--border);
+  }
+  #scanner-panel.drawer-open { width: 85vw; max-width: 320px; }
+
   #chart-panel   { display: none; height: auto; min-height: 360px; }
-  #right-panel   { display: none; height: auto; min-height: 50vh; }
-  #scanner-panel.mob-active, #chart-panel.mob-active, #right-panel.mob-active { display: flex; }
+  #right-panel   { display: none; height: auto; min-height: 50vh; width: 100%; border-right: none; }
+  #chart-panel.mob-active, #right-panel.mob-active { display: flex; }
+  
   #header { gap: 10px; padding: 10px 12px; flex-wrap: wrap; justify-content: space-between; align-items: center; height: auto; min-height: 44px; }
   #header > * { flex-shrink: 0; }
   #server-time { display: none; }
   #stats-bar { flex-wrap: wrap; gap: 8px 16px; padding: 8px 12px; height: auto; line-height: 1.5; }
   #chart-header { flex-wrap: wrap; gap: 6px 10px; padding: 10px 12px; position: static; }
   .tf-bar { margin-left: 0; width: 100%; justify-content: space-between; }
-  #right-panel { width: 100%; border-right: none; }
+  .pos-stats-row { grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
+  #chart-container { height: 400px; }
+  #pos-chart-pane { height: 400px; }
+  #hist-pane, #analytics-pane { overflow: visible; }
+}
   .pos-stats-row { grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
   #chart-container { height: 400px; }
   #pos-chart-pane { height: 400px; }
@@ -601,7 +631,12 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
 
   <!-- ── Header ── -->
   <div id="header">
-    <span class="logo">⬡ PULLBACK BOT</span>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <button id="btn-toggle-scanner" title="Toggle Scanner Drawer" style="background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:700; font-size:11px; font-family:var(--font-mono); display:flex; align-items:center; gap:6px;">
+        <span style="font-size:14px; line-height:1;">☰</span> SCANNER
+      </button>
+      <span class="logo">⬡ PULLBACK BOT</span>
+    </div>
     <span id="mode-badge" class="mode-badge mode-paper">PAPER</span>
     <span id="session-badge" class="mode-badge" style="display:none; font-weight:800;"></span>
     <span id="btc-regime-badge" class="regime-badge regime-neutral">BTC –</span>
@@ -680,8 +715,7 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
 
   <!-- ── Mobile Tabs ── -->
   <div id="mobile-tabs" style="overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch;">
-    <button class="mob-tab active" data-panel="scanner-panel">Scanner</button>
-    <button class="mob-tab" data-panel="right-panel">Open Pos</button>
+    <button class="mob-tab active" data-panel="right-panel">Open Pos</button>
     <button class="mob-tab" data-panel="chart-panel" data-ctab="pos-chart-pane">Pos Chart</button>
     <button class="mob-tab" data-panel="chart-panel" data-ctab="chart-pane">Market Chart</button>
     <button class="mob-tab" data-panel="chart-panel" data-ctab="hist-pane">History</button>
@@ -3218,6 +3252,17 @@ initMainChart();
 initPosChart();
 fetch('/api/config').then(r => r.json()).then(d => { _cfgCurrent = d; });
 connectWS();
+
+const btnToggleScanner = document.getElementById("btn-toggle-scanner");
+if (btnToggleScanner) {
+  btnToggleScanner.addEventListener("click", () => {
+    document.getElementById("scanner-panel").classList.toggle("drawer-open");
+    setTimeout(() => {
+      if (mainChart) mainChart.timeScale().fitContent();
+      if (posChart) posChart.timeScale().fitContent();
+    }, 310);
+  });
+}
 
 // ── Analytics ────────────────────────────────────────────────────────────────
 let _anFetched = false;
