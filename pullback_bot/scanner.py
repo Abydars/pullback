@@ -169,7 +169,6 @@ async def refresh_watchlist_loop() -> None:
         for sym in dropped:
             _kline_buffers.pop(sym, None)
             _last_signal_ts.pop(sym, None)
-            mark_prices.pop(sym, None)
         if dropped:
             logger.debug(
                 "Watchlist cleanup: removed %d dropped symbol(s) from buffers",
@@ -798,10 +797,9 @@ async def _run_mark_price_ws() -> None:
                 async for raw in ws:
                     data = json.loads(raw)
                     if isinstance(data, list):
-                        current_set = set(active_watchlist)
                         for item in data:
                             s = item.get("s", "")
-                            if s in current_set:
+                            if s:
                                 mark_prices[s] = float(item.get("p", 0))
                         # Trigger position tracker immediately — no event indirection,
                         # so trail/SL checks run within the same event-loop cycle.
