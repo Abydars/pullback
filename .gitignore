@@ -3,3 +3,5 @@ pullback_bot/__pycache__
 *.db
 *.sqlite
 *.sqlite3
+pullback_bot/models
+pullback_bot/logs

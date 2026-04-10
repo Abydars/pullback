@@ -174,6 +174,12 @@ class OrderManager:
             logger.info("Signal %s %s skipped — Portfolio Trail is ARMED", symbol, direction)
             return False, "Portfolio Trail is currently ARMED (waiting for resolution)"
 
+        # ── 0.5. ML Smart Filter Guard ──────────────────────────────────────────
+        if not signal.get("ml_passed", True):
+            conf = signal.get("ml_confidence", 0.0)
+            logger.info("Signal %s %s skipped — ML Filter rejected (%.2f < threshold)", symbol, direction, conf)
+            return False, f"ML Filter rejected ({conf:.2f} < threshold)"
+
         # ── 1. Per-symbol in-flight guard (no await, immediate) ───────────────
         if symbol in _opening:
             logger.info("Signal %s %s skipped — already opening this symbol", symbol, direction)
@@ -268,6 +274,7 @@ class OrderManager:
         qty: float,
         leverage: int,
         now_ms: int,
+        score: int,
         signal_type: str = "PULLBACK",
         session_id: Optional[str] = None,
         ml_confidence: Optional[float] = None,

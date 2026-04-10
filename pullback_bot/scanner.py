@@ -729,8 +729,13 @@ async def _flush_pending_signals() -> None:
             )
 
     async def _act(sig: dict) -> None:
-        result = await _order_manager.handle_signal(sig) if _order_manager else (False, "Order Manager Offline")
-        acted, reason = result if isinstance(result, tuple) else (False, "Unknown")
+        try:
+            result = await _order_manager.handle_signal(sig) if _order_manager else (False, "Order Manager Offline")
+            acted, reason = result if isinstance(result, tuple) else (False, "Unknown")
+        except Exception as exc:
+            logger.error("Error in signal handling for %s: %s", sig["symbol"], exc)
+            acted, reason = False, f"Exception: {exc}"
+
         await db.insert_scanner_log(
             symbol=sig["symbol"],
             score=sig["score"],

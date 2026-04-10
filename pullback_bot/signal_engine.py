@@ -404,8 +404,7 @@ def check_pullback(
     ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15)
     if not ml_passed:
         logger.info(f"[{symbol}] ML Filter rejected pullback ({ml_conf:.2f} < threshold).")
-        return None
-    
+        
     reasons.append(ml_reason)
     if "pass" in ml_reason:
         score += 10
@@ -424,6 +423,7 @@ def check_pullback(
         "timestamp":   int(time.time()),
         "reasons":     reasons,
         "signal_type": "PULLBACK",
+        "ml_passed":   ml_passed,
         "ml_confidence": ml_conf,
     }
     logger.info(
@@ -581,7 +581,6 @@ def check_breakout(
     ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15)
     if not ml_passed:
         logger.info(f"[{symbol}] ML Filter rejected BREAKOUT ({ml_conf:.2f} < threshold).")
-        return None
         
     reasons.append(ml_reason)
     if "pass" in ml_reason:
@@ -601,6 +600,7 @@ def check_breakout(
         "timestamp":    int(time.time()),
         "reasons":      reasons,
         "signal_type":  "BREAKOUT",
+        "ml_passed":    ml_passed,
         "ml_confidence": ml_conf,
     }
     logger.info(
