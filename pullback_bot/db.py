@@ -95,6 +95,7 @@ async def init_db() -> None:
             "ALTER TABLE trades ADD COLUMN signal_type TEXT",
             "ALTER TABLE trades ADD COLUMN session_id TEXT",
             "ALTER TABLE trades ADD COLUMN ml_confidence REAL",
+            "ALTER TABLE scanner_log ADD COLUMN ml_confidence REAL",
         ]:
             try:
                 await db.execute(col_sql)
@@ -337,12 +338,12 @@ async def get_today_stats() -> dict:
 # ── Scanner log helpers ────────────────────────────────────────────────────────
 
 async def insert_scanner_log(
-    symbol: str, score: int, direction: str, timestamp: int, acted_on: bool = False
+    symbol: str, score: int, direction: str, timestamp: int, acted_on: bool = False, ml_confidence: float = None
 ) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO scanner_log (symbol, score, direction, timestamp, acted_on) VALUES (?,?,?,?,?)",
-            (symbol, score, direction, timestamp, int(acted_on)),
+            "INSERT INTO scanner_log (symbol, score, direction, timestamp, acted_on, ml_confidence) VALUES (?,?,?,?,?,?)",
+            (symbol, score, direction, timestamp, int(acted_on), ml_confidence),
         )
         await db.commit()
 

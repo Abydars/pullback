@@ -669,6 +669,7 @@ async def _flush_pending_signals() -> None:
             direction=sig["direction"],
             timestamp=sig["timestamp"],
             acted_on=False,
+            ml_confidence=sig.get("ml_confidence"),
         )
 
     # ── Gradual build cap (PnL-aware) ────────────────────────────────────────
@@ -722,6 +723,7 @@ async def _flush_pending_signals() -> None:
                 direction=sig["direction"],
                 timestamp=sig["timestamp"],
                 acted_on=False,
+                ml_confidence=sig.get("ml_confidence"),
             )
 
     async def _act(sig: dict) -> None:
@@ -732,6 +734,7 @@ async def _flush_pending_signals() -> None:
             direction=sig["direction"],
             timestamp=sig["timestamp"],
             acted_on=acted,
+            ml_confidence=sig.get("ml_confidence"),
         )
 
     if this_scan:

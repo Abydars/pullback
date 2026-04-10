@@ -3628,6 +3628,7 @@
     <div>
       <div class="sym-name">${sym.replace('USDT', '')}<span style="color:var(--muted);font-size:9px">/USDT</span></div>
       ${fr}
+      <div class="sym-ml" id="ml-${sym}" style="color:var(--cyan);font-size:10px;font-weight:600;display:none;margin-top:2px;"></div>
       <div class="sym-score-bar"><div class="sym-score-fill" id="fill-${sym}" style="width:0%"></div></div>
     </div>
     <div class="sparkline-wrap">
@@ -3646,11 +3647,19 @@
       if (!info) return;
       const fill = document.getElementById('fill-' + sym);
       const dir = document.getElementById('dir-' + sym);
+      const ml = document.getElementById('ml-' + sym);
       if (fill) fill.style.width = info.score + '%';
       if (dir) {
         dir.textContent = info.direction === 'LONG' ? '▲' : '▼';
         dir.className = 'sym-dir ' + (info.direction === 'LONG' ? 'dir-long' : 'dir-short');
       }
+      if (ml && info.ml_confidence != null) {
+        ml.textContent = 'AI Filter: ' + (info.ml_confidence * 100).toFixed(0) + '%';
+        ml.style.display = 'block';
+      } else if (ml) {
+        ml.style.display = 'none';
+      }
+      
       if (isSignal) {
         row.classList.add('signal');
         setTimeout(() => row.classList.remove('signal'), 10000);
