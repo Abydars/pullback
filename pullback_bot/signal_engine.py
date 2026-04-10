@@ -292,17 +292,17 @@ def check_pullback(
     atr_ratio = atr15 / atr_avg20 if atr_avg20 > 0 else 1.0
 
     if direction == "LONG":
-        # Anchor explicitly below the structural fractal bottom + 0.2 ATR buffer
-        sl_price = round(last_low - (atr15 * 0.2), 8)
-        # Structural disaster cap (1.5 ATR Max)
-        sl_price = max(sl_price, entry_price - (atr15 * 1.5))
+        # Anchor explicitly below the structural fractal bottom + 0.4 ATR buffer (widened to absorb wicks)
+        sl_price = round(last_low - (atr15 * 0.4), 8)
+        # Structural disaster cap (2.5 ATR Max)
+        sl_price = max(sl_price, entry_price - (atr15 * 2.5))
         
         trail_arm = round(entry_price + atr15 * 1.0, 8)
     else:
-        # Anchor explicitly above the structural fractal top + 0.2 ATR buffer
-        sl_price = round(last_high + (atr15 * 0.2), 8)
-        # Structural disaster cap (1.5 ATR Max)
-        sl_price = min(sl_price, entry_price + (atr15 * 1.5))
+        # Anchor explicitly above the structural fractal top + 0.4 ATR buffer (widened to absorb wicks)
+        sl_price = round(last_high + (atr15 * 0.4), 8)
+        # Structural disaster cap (2.5 ATR Max)
+        sl_price = min(sl_price, entry_price + (atr15 * 2.5))
         
         trail_arm = round(entry_price - atr15 * 1.0, 8)
 
@@ -466,10 +466,10 @@ def check_breakout(
     entry_price = last_close
 
     if direction == "LONG":
-        sl_price  = round(max(resistance - atr15 * 0.3, entry_price - atr15 * 1.5), 8)
+        sl_price  = round(max(resistance - atr15 * 0.5, entry_price - atr15 * 2.5), 8)
         trail_arm = round(entry_price + atr15 * 1.0, 8)
     else:
-        sl_price  = round(min(support + atr15 * 0.3, entry_price + atr15 * 1.5), 8)
+        sl_price  = round(min(support + atr15 * 0.5, entry_price + atr15 * 2.5), 8)
         trail_arm = round(entry_price - atr15 * 1.0, 8)
 
     if sl_price <= 0:
