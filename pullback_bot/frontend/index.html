@@ -5313,21 +5313,19 @@
             const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
             let reasonsHtml = '';
             if (meta.reasons && meta.reasons.length > 0) {
-              reasonsHtml = meta.reasons.map(r => `<span style="padding: 2px 6px; border-radius: 4px;">✓ ${r.replace(/_/g, ' ')}</span>`).join('');
+              reasonsHtml = meta.reasons.map(r => `<span style="background: rgba(0, 150, 255, 0.1); color: var(--blue); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(0, 150, 255, 0.2)">✓ ${r.replace(/_/g, ' ')}</span>`).join('');
             }
             if (meta.entry || reasonsHtml) {
               metaHtml = `
-              <tr>
-                <td colspan="7" style="padding: 4px 16px 4px 16px; border-top: none; background: rgba(0,0,0,0.15);">
+              
                   <div style="font-size: 11px; display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-dim);">
-                      ${meta.type ? `<span style="padding: 2px 6px; border-radius: 4px; font-weight: 500;">⛙ ${meta.type}</span>` : ''}
-                      ${meta.entry ? `<span style="padding: 2px 6px; border-radius: 4px;">⚡︎ Entry: ${meta.entry}</span>` : ''}
-                      ${meta.sl ? `<span style="padding: 2px 6px; border-radius: 4px;">⨯ SL: ${meta.sl}</span>` : ''}
-                      ${meta.atr ? `<span style="padding: 2px 6px; border-radius: 4px;">Volatility: ${meta.atr}</span>` : ''}
+                      ${meta.type ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 500;">⛙ ${meta.type}</span>` : ''}
+                      ${meta.entry ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">⚡︎ Entry: ${meta.entry}</span>` : ''}
+                      ${meta.sl ? `<span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl}</span>` : ''}
+                      ${meta.atr ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">Volatility: ${meta.atr}</span>` : ''}
                       ${reasonsHtml}
                   </div>
-                </td>
-              </tr>`;
+                `;
             }
           } catch (e) { }
         }
@@ -5343,8 +5341,9 @@
           <td>${status}</td>
           <td style="color:var(--text-dim); padding-right:16px;">
             ${reason}
+            ${metaHtml}
           </td>
-        </tr>${metaHtml}`;
+        </tr>`;
       });
 
       const tempWrapper = document.createElement('table');

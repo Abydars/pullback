@@ -239,6 +239,10 @@ EDITABLE_KEYS: dict[str, type] = {
     "WEB_PASSWORD":              str,
     "ML_FILTER_ENABLED":         bool,
     "ML_CONFIDENCE_THRESHOLD":   float,
+    "FILTER_MTF_ENABLED":        bool,
+    "FILTER_OI_ENABLED":         bool,
+    "FILTER_VWAP_ENABLED":       bool,
+    "FILTER_RSI_ENABLED":        bool,
 }
 
 # Keys that require a bot restart to take full effect
