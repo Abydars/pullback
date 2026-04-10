@@ -1248,10 +1248,23 @@ async function updatePosChart(positions) {
   positions.forEach(t => { totalPnl += (t.unrealized_pnl ?? 0); });
 
   // ── Fetch live config values for reference lines ──────────────────────────
-  let minTpUsdt = 0, trailFactor = 0.5;
+  let minTpUsdt = 0, trailFactor = 0.5, tpMode = 'trailing';
   if (typeof _cfgCurrent !== 'undefined' && _cfgCurrent) {
       minTpUsdt   = parseFloat(_cfgCurrent.PORTFOLIO_MIN_TP_USDT)  || 0;
       trailFactor = parseFloat(_cfgCurrent.PORTFOLIO_TRAIL_FACTOR) || 0.5;
+      tpMode      = _cfgCurrent.PORTFOLIO_TP_MODE || 'trailing';
+  }
+
+  // ── Continually Synchronize Frontend UI Trailing State ────────────────────
+  if (tpMode === 'trailing' && minTpUsdt > 0) {
+      if (totalPnl >= minTpUsdt) _portfolioTrailArmed = true;
+      if (totalPnl < minTpUsdt)  _portfolioTrailArmed = false;
+  }
+
+  if (_portfolioTrailArmed) {
+      _portfolioTrailPeak = Math.max(_portfolioTrailPeak, totalPnl);
+  } else {
+      _portfolioTrailPeak = 0;
   }
 
   // ── Rebuild reference lines ───────────────────────────────────────────────
