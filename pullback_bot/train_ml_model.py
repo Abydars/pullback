@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import joblib
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_split_test
+from sklearn.model_selection import train_test_split
 
 from . import config
 
