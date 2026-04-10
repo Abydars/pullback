@@ -394,12 +394,12 @@ async def _evaluate_symbol(symbol: str) -> None:
                 return # Block evaluation to bypass funding cluster volatility
                 
         # ── Global Session Time Guard ─────────────
-        if config.SESSION_GUARD_ENABLED:
+        custom_str = getattr(config, "TRADE_CUSTOM_SESSIONS", "").strip()
+        if config.SESSION_GUARD_ENABLED or custom_str:
             import datetime
             now_time = datetime.datetime.utcnow().time()
             
             allowed_ranges = []
-            custom_str = getattr(config, "TRADE_CUSTOM_SESSIONS", "")
             if custom_str:
                 for r in custom_str.split(","):
                     try:
