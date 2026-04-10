@@ -382,6 +382,52 @@ async def _evaluate_symbol(symbol: str) -> None:
         if now - _last_signal_ts.get(symbol, 0) < _SIGNAL_COOLDOWN_S:
             return
 
+        # ── Global Session Time Guard ─────────────
+        if config.SESSION_GUARD_ENABLED:
+            import datetime
+            now_time = datetime.datetime.utcnow().time()
+            
+            allowed_ranges = []
+            if getattr(config, "TRADE_ASIA_SESSION", False):
+                allowed_ranges.append(((23, 0), (8, 0)))
+            if getattr(config, "TRADE_LONDON_SESSION", False):
+                allowed_ranges.append(((8, 0), (16, 0)))
+            if getattr(config, "TRADE_NY_SESSION", False):
+                allowed_ranges.append(((13, 30), (20, 0)))
+            if getattr(config, "TRADE_OVERLAP_SESSION", False):
+                allowed_ranges.append(((13, 30), (16, 0)))
+                
+            custom_str = getattr(config, "TRADE_CUSTOM_SESSIONS", "")
+            if custom_str:
+                for r in custom_str.split(","):
+                    try:
+                        st, en = r.strip().split("-")
+                        sh, sm = map(int, st.split(":"))
+                        eh, em = map(int, en.split(":"))
+                        allowed_ranges.append(((sh, sm), (eh, em)))
+                    except Exception:
+                        pass
+                
+            if not allowed_ranges:
+                return # Block immediately if Guard is on but all toggles/custom blocks are empty.
+                
+            allowed = False
+            for (st_h, st_m), (en_h, en_m) in allowed_ranges:
+                start_t = datetime.time(st_h, st_m)
+                end_t = datetime.time(en_h, en_m)
+                
+                if start_t <= end_t:
+                    if start_t <= now_time <= end_t:
+                        allowed = True
+                        break
+                else: # Midnight overlap (e.g. Asia 23:00 -> 08:00)
+                    if now_time >= start_t or now_time <= end_t:
+                        allowed = True
+                        break
+                        
+            if not allowed:
+                return
+
         # This function is now triggered precisely on a 5m candle close.
         # Both k15[-1] (which may still be forming) and k5[-1] (just closed) 
         # are valid snapshots for evaluation.
