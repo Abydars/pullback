@@ -500,6 +500,36 @@ async def _evaluate_symbol(symbol: str) -> None:
         # If both fired, take the higher-scoring signal for this symbol
         sig = max(candidates, key=lambda x: x["score"])
 
+        # ── 3. Anti-Correlation System Guard ──────────────────────────────────────
+        # Reject candidates that perfectly hedge (inverse) or duplicate (positive) open trades.
+        import db
+        import numpy as np
+        open_trades = await db.get_open_trades()
+        if open_trades:
+            sym_closes = [float(c["close"]) for c in k15[-20:]]
+            if len(sym_closes) >= 20:
+                for t in open_trades:
+                    open_sym = t["symbol"]
+                    if open_sym == symbol:
+                        continue
+                    if t["direction"] != sig["direction"]:
+                        continue
+                    
+                    open_k15 = _kline_buffers.get(open_sym, {}).get("15m", [])
+                    if len(open_k15) >= 20:
+                        open_closes = [float(c["close"]) for c in open_k15[-20:]]
+                        try:
+                            corr = float(np.corrcoef(sym_closes, open_closes)[0][1])
+                        except Exception:
+                            continue
+                        
+                        if corr > 0.85:
+                            logger.info("Guard: Blocked %s %s due to POSITIVE correlation (%.2f) with open trade %s", symbol, sig["direction"], corr, open_sym)
+                            return
+                        if corr < -0.65:
+                            logger.info("Guard: Blocked %s %s due to INVERSE hedges (%.2f) with open trade %s", symbol, sig["direction"], corr, open_sym)
+                            return
+
         _last_signal_ts[symbol] = now
 
         # Queue for batch ranking — flush fires after _BATCH_WINDOW_S so
