@@ -625,6 +625,27 @@ async def _flush_pending_signals() -> None:
     batch = sorted(_pending_signals, key=lambda s: s["score"], reverse=True)
     _pending_signals.clear()
 
+    # ── ML Filter pre-filter ───────────────────────────────────────────────────
+    # Reject and log ML-failed signals immediately so they don't consume batch slots
+    valid_batch: list[dict] = []
+    for sig in batch:
+        if not sig.get("ml_passed", True):
+            conf = sig.get("ml_confidence", 0.0)
+            logger.info("Signal %s %s skipped — ML Filter rejected (%.2f < threshold)", sig["symbol"], sig["direction"], conf)
+            await db.insert_scanner_log(
+                symbol=sig["symbol"],
+                score=sig["score"],
+                direction=sig["direction"],
+                timestamp=sig["timestamp"],
+                acted_on=False,
+                ml_confidence=conf,
+                reason=f"ML Filter rejected ({conf:.2f} < threshold)",
+            )
+        else:
+            valid_batch.append(sig)
+            
+    batch = valid_batch
+
     # ── Direction-cap filter ───────────────────────────────────────────────────
     # Seed counts from already-open trades so the cap accounts for existing
     # directional exposure, not just signals in this batch.
