@@ -382,6 +382,17 @@ async def _evaluate_symbol(symbol: str) -> None:
         if now - _last_signal_ts.get(symbol, 0) < _SIGNAL_COOLDOWN_S:
             return
 
+        # ── Funding Rate Execution Guard ─────────────
+        if config.FUNDING_GUARD_ENABLED and config.SIGNAL_MODE != "funding_predator":
+            import datetime
+            now_t = datetime.datetime.utcnow()
+            now_mins = now_t.hour * 60 + now_t.minute
+            
+            # Funding occurs every 8 hours (480 minutes): 00:00, 08:00, 16:00 UTC
+            nearest_tick = round(now_mins / 480.0) * 480
+            if abs(now_mins - nearest_tick) <= config.FUNDING_GUARD_MINUTES:
+                return # Block evaluation to bypass funding cluster volatility
+                
         # ── Global Session Time Guard ─────────────
         if config.SESSION_GUARD_ENABLED:
             import datetime

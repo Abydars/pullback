@@ -80,6 +80,10 @@ WATCHLIST_REFRESH_MINUTES: int = _int("WATCHLIST_REFRESH_MINUTES", 15)
 SESSION_GUARD_ENABLED: bool = _bool("SESSION_GUARD_ENABLED", False)
 TRADE_CUSTOM_SESSIONS: str = _get("TRADE_CUSTOM_SESSIONS", "")
 
+# Feature: Funding Rate Time Guard
+FUNDING_GUARD_ENABLED: bool = _bool("FUNDING_GUARD_ENABLED", False)
+FUNDING_GUARD_MINUTES: int = int(_get("FUNDING_GUARD_MINUTES", 5))
+
 #   pullback         — trend-following reversion to EMA50/swing zone (default)
 #   breakout         — close outside 20-candle consolidation range with volume
 #   micro_scalp      — HFT 1-minute orderflow hunter targeting massive PA anomalies
@@ -187,6 +191,8 @@ LOG_LEVEL: str = _get("LOG_LEVEL", "INFO")
 EDITABLE_KEYS: dict[str, type] = {
     "SESSION_GUARD_ENABLED":     bool,
     "TRADE_CUSTOM_SESSIONS":     str,
+    "FUNDING_GUARD_ENABLED":     bool,
+    "FUNDING_GUARD_MINUTES":     int,
     "MIN_VOLUME_24H":            float,
     "MIN_PRICE_CHANGE_PCT":      float,
     "WATCHLIST_REFRESH_MINUTES": int,

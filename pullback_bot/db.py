@@ -432,7 +432,6 @@ async def get_sessions(limit: int = 50) -> list[dict]:
         cursor = await db.execute(
             """
             SELECT * FROM sessions
-            WHERE ended_at IS NOT NULL
             ORDER BY started_at DESC
             LIMIT ?
             """,
