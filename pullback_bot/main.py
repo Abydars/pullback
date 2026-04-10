@@ -23,10 +23,11 @@ import asyncio
 import json
 import logging
 import time
+import base64
 from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 import binance_client as bc
 import config
 import db
@@ -48,7 +49,40 @@ logger = logging.getLogger("main")
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="Pullback Bot", version="1.0.0")
 
+@app.middleware("http")
+async def cookie_auth(request: Request, call_next):
+    if not getattr(config, "WEB_PASSWORD", ""):
+        return await call_next(request)
+        
+    allowed_paths = {"/", "/api/auth", "/favicon.ico"}
+    if request.url.path in allowed_paths:
+        return await call_next(request)
+        
+    auth_cookie = request.cookies.get("pullback_auth")
+    if not auth_cookie or auth_cookie != config.WEB_PASSWORD:
+        return Response("Unauthorized", status_code=401)
+        
+    return await call_next(request)
+
 _FRONTEND = Path(__file__).parent / "frontend" / "index.html"
+
+@app.post("/api/auth")
+async def api_auth(request: Request):
+    if not getattr(config, "WEB_PASSWORD", ""):
+        return JSONResponse({"ok": True})
+        
+    try:
+        body = await request.json()
+        pwd = body.get("password")
+    except Exception:
+        pwd = None
+        
+    if pwd == config.WEB_PASSWORD:
+        resp = JSONResponse({"ok": True})
+        resp.set_cookie("pullback_auth", config.WEB_PASSWORD, httponly=True, max_age=86400*30)
+        return resp
+        
+    return JSONResponse({"error": "Invalid password"}, status_code=401)
 
 
 # ── Startup / Shutdown ────────────────────────────────────────────────────────
@@ -121,6 +155,12 @@ async def _status_broadcast_loop() -> None:
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
+    if getattr(config, "WEB_PASSWORD", ""):
+        auth_cookie = ws.cookies.get("pullback_auth")
+        if not auth_cookie or auth_cookie != config.WEB_PASSWORD:
+            await ws.close(code=1008, reason="Unauthorized")
+            return
+            
     await wsb.broadcaster.connect(ws)
     try:
         # Send initial state snapshot

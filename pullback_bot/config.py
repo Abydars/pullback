@@ -177,6 +177,7 @@ SMART_PORT_SL_MIN_AGE_MINUTES: int = _int("SMART_PORT_SL_MIN_AGE_MINUTES", 5)
 
 # ── Server ────────────────────────────────────────────────────────────────────
 PORT: int = _int("PORT", 8080)
+WEB_PASSWORD: str = _get("WEB_PASSWORD", "")
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DB_PATH: str = _get("DB_PATH", str(Path(__file__).parent / "trades.db"))
@@ -223,15 +224,22 @@ EDITABLE_KEYS: dict[str, type] = {
     "SMART_PORT_SL_MIN_AGE_MINUTES":  int,
     "LOG_LEVEL":                 str,
     "MODE":                      str,
+    "WEB_PASSWORD":              str,
 }
 
 # Keys that require a bot restart to take full effect
 RESTART_REQUIRED_KEYS = {"MODE", "PORT"}
 
+# Keys that should not be sent or logged plainly if possible
+SECRET_KEYS = {"WEB_PASSWORD"}
+
 
 def get_all() -> dict:
     """Return all editable config values as a plain dict."""
-    return {k: globals()[k] for k in EDITABLE_KEYS}
+    d = {k: globals()[k] for k in EDITABLE_KEYS}
+    if "WEB_PASSWORD" in d:
+        d["WEB_PASSWORD"] = "***" if d["WEB_PASSWORD"] else ""
+    return d
 
 
 async def load_from_db() -> None:
@@ -265,6 +273,10 @@ async def update(key: str, raw_value: str) -> None:
     """
     if key not in EDITABLE_KEYS:
         raise ValueError(f"Unknown or non-editable config key: {key!r}")
+        
+    if key == "WEB_PASSWORD" and raw_value == "***":
+        # Ignore masked password updates submitted from UI
+        return
 
     cast = EDITABLE_KEYS[key]
     try:

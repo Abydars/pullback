@@ -2409,6 +2409,14 @@
 </head>
 
 <body>
+  <div id="auth-modal" style="display:none; position:fixed; inset:0; background:rgba(10,12,16,0.95); z-index:999999; flex-direction:column; align-items:center; justify-content:center; backdrop-filter:blur(8px);">
+    <div style="background:var(--bg2); padding:32px; border-radius:12px; border:1px solid var(--border); box-shadow:0 8px 32px rgba(0,0,0,0.5); width:320px; text-align:center;">
+      <h2 style="margin:0 0 16px 0; font-family:var(--font-mono); font-size:18px; color:var(--text);">PULLBACK BOT</h2>
+      <input type="password" id="auth-pass" placeholder="Enter password" style="width:100%; padding:10px; background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:6px; margin-bottom:16px; font-family:var(--font-mono); outline:none; box-sizing:border-box;" />
+      <button id="auth-submit" style="width:100%; padding:10px; background:var(--amber); color:#000; border:none; border-radius:6px; font-weight:700; cursor:pointer;">LOGIN</button>
+      <div id="auth-error" style="color:var(--red); font-size:12px; margin-top:12px; display:none;">Incorrect password</div>
+    </div>
+  </div>
   <div id="app">
 
     <!-- ── Header ── -->
@@ -2418,7 +2426,7 @@
           style="background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:700; font-size:11px; font-family:var(--font-mono); display:flex; align-items:center; gap:6px;">
           <span style="font-size:14px; line-height:1;">☰</span> SCANNER
         </button>
-        <span class="logo">⬡ PULLBACK BOT</span>
+        <span class="logo"></span>
       </div>
       <span id="mode-badge" class="mode-badge mode-paper">PAPER</span>
       <span id="session-badge" class="mode-badge" style="display:none; font-weight:800;"></span>
@@ -5112,12 +5120,48 @@
     })();
 
     // ============================================================
-    // BOOT
+    // BOOT & AUTH
     // ============================================================
-    initMainChart();
-    initPosChart();
-    fetch('/api/config').then(r => r.json()).then(d => { _cfgCurrent = d; });
-    connectWS();
+    async function checkAuthAndBoot() {
+      const authModal = document.getElementById('auth-modal');
+      const passInput = document.getElementById('auth-pass');
+      const authBtn = document.getElementById('auth-submit');
+      const authErr = document.getElementById('auth-error');
+
+      authBtn.onclick = async () => {
+        authErr.style.display = 'none';
+        const res = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: passInput.value })
+        });
+        if (res.ok) {
+          authModal.style.display = 'none';
+          bootApp();
+        } else {
+          authErr.style.display = 'block';
+        }
+      };
+
+      passInput.onkeyup = (e) => { if (e.key === 'Enter') authBtn.click(); };
+
+      const r = await fetch('/api/config');
+      if (r.status === 401) {
+        authModal.style.display = 'flex';
+        passInput.focus();
+      } else {
+        _cfgCurrent = await r.json();
+        bootApp();
+      }
+    }
+
+    function bootApp() {
+      initMainChart();
+      initPosChart();
+      connectWS();
+    }
+
+    checkAuthAndBoot();
 
     const btnToggleScanner = document.getElementById("btn-toggle-scanner");
     if (btnToggleScanner) {
