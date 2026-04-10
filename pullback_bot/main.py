@@ -224,6 +224,12 @@ async def api_trades() -> JSONResponse:
     return JSONResponse(trades)
 
 
+@app.get("/api/scanner_events")
+async def api_scanner_events(limit: int = 100, offset: int = 0) -> JSONResponse:
+    logs = await db.get_recent_scanner_log(limit, offset)
+    return JSONResponse(logs)
+
+
 @app.delete("/api/trades/{trade_id}")
 async def delete_trade(trade_id: int) -> JSONResponse:
     """Hard-delete a single closed trade record."""

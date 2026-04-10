@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Optional
+from typing import Optional, Set, Tuple
 
 import binance_client as bc
 import config
@@ -143,10 +143,10 @@ async def _calc_qty_and_leverage(
 class OrderManager:
     """Handles signal → order flow for both live and paper modes."""
 
-    async def handle_signal(self, signal: dict) -> bool:
+    async def handle_signal(self, signal: dict) -> Tuple[bool, str]:
         """
         Act on a validated signal dict.
-        Returns True if a trade was opened, False otherwise.
+        Returns (acted: bool, reason: str).
 
         Guards (all checked before registering in-flight):
           1. Per-symbol: skip if symbol is already being opened
@@ -172,12 +172,12 @@ class OrderManager:
         _pt = sys.modules.get("position_tracker")
         if _pt and getattr(_pt, "_portfolio_trail_armed", False):
             logger.info("Signal %s %s skipped — Portfolio Trail is ARMED", symbol, direction)
-            return False
+            return False, "Portfolio Trail is currently ARMED (waiting for resolution)"
 
         # ── 1. Per-symbol in-flight guard (no await, immediate) ───────────────
         if symbol in _opening:
             logger.info("Signal %s %s skipped — already opening this symbol", symbol, direction)
-            return False
+            return False, "Signal overlap: Position already currently opening"
 
         # ── 2. Capacity check ─────────────────────────────────────────────────
         # Count DB open trades + in-flight together so concurrent signals
@@ -190,13 +190,13 @@ class OrderManager:
                 symbol, direction, config.MAX_OPEN_TRADES,
                 open_count, len(_opening),
             )
-            return False
+            return False, "MAX_OPEN_TRADES capacity reached"
 
         # ── 3. Duplicate symbol guard ─────────────────────────────────────────
         open_trades = await db.get_open_trades()
         if any(t["symbol"] == symbol for t in open_trades):
             logger.info("Signal %s %s skipped — position already open", symbol, direction)
-            return False
+            return False, "Position already currently open for symbol"
 
         # ── 4. Per-symbol cooldown ────────────────────────────────────────────
         cooldown_min = config.SYMBOL_COOLDOWN_MINUTES
@@ -210,7 +210,7 @@ class OrderManager:
                         "Signal %s %s skipped — cooldown active (%dm remaining)",
                         symbol, direction, remaining,
                     )
-                    return False
+                    return False, f"Cooldown block: {remaining}m remaining"
 
         # ── 5. Calculate qty and leverage ─────────────────────────────────────
         step      = bc.get_step_size(symbol)
@@ -222,7 +222,7 @@ class OrderManager:
         qty = bc.round_step(raw_qty, step)
         if qty <= 0:
             logger.warning("Calculated qty=0 for %s, skipping", symbol)
-            return False
+            return False, "Calculated Risk Quantity <= 0 (Margin/Lev cap too tight)"
 
         now_ms = int(time.time() * 1000)
 
@@ -268,11 +268,10 @@ class OrderManager:
         qty: float,
         leverage: int,
         now_ms: int,
-        score: int,
         signal_type: str = "PULLBACK",
         session_id: Optional[str] = None,
         ml_confidence: Optional[float] = None,
-    ) -> bool:
+    ) -> Tuple[bool, str]:
         trade_id = await db.insert_trade(
             symbol=symbol,
             direction=direction,
@@ -296,7 +295,7 @@ class OrderManager:
             trade_id, symbol, direction, entry, sl, qty,
             notional, notional / leverage, leverage, abs(entry - sl) * qty, score,
         )
-        return True
+        return True, "Trade Opened"
 
     # ── Live mode ──────────────────────────────────────────────────────────────
 
@@ -316,7 +315,7 @@ class OrderManager:
         atr: float = 0.0,
         session_id: Optional[str] = None,
         ml_confidence: Optional[float] = None,
-    ) -> bool:
+    ) -> Tuple[bool, str]:
         tick    = bc.get_tick_size(symbol)
         side    = "BUY" if direction == "LONG" else "SELL"
         sl_side = "SELL" if direction == "LONG" else "BUY"
@@ -332,7 +331,7 @@ class OrderManager:
             actual_entry     = float(order.get("avgPrice") or entry)
         except Exception as exc:
             logger.error("Live entry failed for %s: %s", symbol, exc)
-            return False
+            return False, f"Live Entry Error: {exc}"
 
         # ── Entry confirmed — SL / TP failures must NOT prevent DB recording ──
         # A position without SL/TP is risky but still manageable.
@@ -401,14 +400,14 @@ class OrderManager:
                 "Live trade opened: #%d %s %s entry=%.6f leverage=%dx order=%s",
                 trade_id, symbol, direction, actual_entry, leverage, binance_order_id,
             )
-            return True
+            return True, "Trade Opened"
         except Exception as exc:
             logger.error(
                 "CRITICAL: DB insert failed for %s (order %s) — "
                 "position exists on exchange but NOT in database: %s",
                 symbol, binance_order_id, exc,
             )
-            return False
+            return False, "Failed DB insert (Warning: Ghost trade created!)"
 
 
 async def restore_session() -> None:

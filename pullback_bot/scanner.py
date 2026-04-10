@@ -670,6 +670,7 @@ async def _flush_pending_signals() -> None:
             timestamp=sig["timestamp"],
             acted_on=False,
             ml_confidence=sig.get("ml_confidence"),
+            reason="Direction Capped (MAX_SAME_DIRECTION limit reached)",
         )
 
     # ── Gradual build cap (PnL-aware) ────────────────────────────────────────
@@ -724,10 +725,12 @@ async def _flush_pending_signals() -> None:
                 timestamp=sig["timestamp"],
                 acted_on=False,
                 ml_confidence=sig.get("ml_confidence"),
+                reason="Deferred (Gradual Build Limit / Drawdown Guard)",
             )
 
     async def _act(sig: dict) -> None:
-        acted = await _order_manager.handle_signal(sig) if _order_manager else False
+        result = await _order_manager.handle_signal(sig) if _order_manager else (False, "Order Manager Offline")
+        acted, reason = result if isinstance(result, tuple) else (False, "Unknown")
         await db.insert_scanner_log(
             symbol=sig["symbol"],
             score=sig["score"],
@@ -735,6 +738,7 @@ async def _flush_pending_signals() -> None:
             timestamp=sig["timestamp"],
             acted_on=acted,
             ml_confidence=sig.get("ml_confidence"),
+            reason=reason,
         )
 
     if this_scan:

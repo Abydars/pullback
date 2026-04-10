@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS scanner_log (
     score     INTEGER NOT NULL,
     direction TEXT    NOT NULL,
     timestamp INTEGER NOT NULL,
-    acted_on  INTEGER NOT NULL DEFAULT 0   -- 0=false, 1=true
+    acted_on  INTEGER NOT NULL DEFAULT 0,  -- 0=false, 1=true
+    reason    TEXT                         -- reason why acted or skipped
 );
 """
 
@@ -96,6 +97,7 @@ async def init_db() -> None:
             "ALTER TABLE trades ADD COLUMN session_id TEXT",
             "ALTER TABLE trades ADD COLUMN ml_confidence REAL",
             "ALTER TABLE scanner_log ADD COLUMN ml_confidence REAL",
+            "ALTER TABLE scanner_log ADD COLUMN reason TEXT",
         ]:
             try:
                 await db.execute(col_sql)
@@ -338,21 +340,21 @@ async def get_today_stats() -> dict:
 # ── Scanner log helpers ────────────────────────────────────────────────────────
 
 async def insert_scanner_log(
-    symbol: str, score: int, direction: str, timestamp: int, acted_on: bool = False, ml_confidence: float = None
+    symbol: str, score: int, direction: str, timestamp: int, acted_on: bool = False, ml_confidence: float = None, reason: str = None
 ) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO scanner_log (symbol, score, direction, timestamp, acted_on, ml_confidence) VALUES (?,?,?,?,?,?)",
-            (symbol, score, direction, timestamp, int(acted_on), ml_confidence),
+            "INSERT INTO scanner_log (symbol, score, direction, timestamp, acted_on, ml_confidence, reason) VALUES (?,?,?,?,?,?,?)",
+            (symbol, score, direction, timestamp, int(acted_on), ml_confidence, reason),
         )
         await db.commit()
 
 
-async def get_recent_scanner_log(limit: int = 100) -> list[dict]:
+async def get_recent_scanner_log(limit: int = 100, offset: int = 0) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
-            "SELECT * FROM scanner_log ORDER BY timestamp DESC LIMIT ?", (limit,)
+            "SELECT * FROM scanner_log ORDER BY timestamp DESC LIMIT ? OFFSET ?", (limit, offset)
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]

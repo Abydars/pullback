@@ -2517,6 +2517,7 @@
       <button class="mob-tab" data-panel="chart-panel" data-ctab="chart-pane">Market Chart</button>
       <button class="mob-tab" data-panel="right-panel">Open Pos</button>
       <button class="mob-tab" data-panel="chart-panel" data-ctab="hist-pane">History</button>
+      <button class="mob-tab" data-panel="chart-panel" data-ctab="signals-pane" onclick="if(typeof fetchSignalLogs==='function')fetchSignalLogs(true)">Signals</button>
       <button class="mob-tab" data-panel="chart-panel" data-ctab="analytics-pane"
         onclick="if(typeof fetchAnalytics==='function')fetchAnalytics()">Analytics</button>
     </div>
@@ -2542,6 +2543,7 @@
           <button class="ctab" data-ctab="hist-pane">
             Trade History <span class="ctab-count" id="hist-count"></span>
           </button>
+          <button class="ctab" data-ctab="signals-pane" onclick="fetchSignalLogs(true)">Signal Logs</button>
           <button class="ctab" data-ctab="analytics-pane" onclick="fetchAnalytics()">Analytics</button>
         </div>
 
@@ -2723,6 +2725,30 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Signals pane -->
+        <div id="signals-pane">
+           <div class="ungrouped-label">Scanner Signal Feed (Live & Historical)</div>
+           <div id="signals-table-wrap" style="height: calc(100vh - 180px); overflow-y: auto;">
+             <table class="hist-table" style="position: relative;">
+               <thead style="position: sticky; top: 0; background: var(--bg-card); z-index: 10;">
+                 <tr>
+                   <th style="padding-left:16px;">Time</th>
+                   <th>Symbol</th>
+                   <th>Dir</th>
+                   <th>AI Score</th>
+                   <th>ML %</th>
+                   <th>Status</th>
+                   <th style="min-width:300px;">Bot Decision / Reason</th>
+                 </tr>
+               </thead>
+               <tbody id="signals-body">
+                 <tr><td colspan="7" class="empty">Loading signal logs...</td></tr>
+               </tbody>
+             </table>
+             <div id="signals-loader" style="display:none; text-align:center; padding: 24px; color: var(--amber);">Loading more logs...</div>
+           </div>
         </div>
 
       </div>
@@ -5210,6 +5236,78 @@
       });
     }
 
+    // ── Signal Logs ──────────────────────────────────────────────────────────────
+    let signalsOffset = 0;
+    let signalsLoading = false;
+    let signalsHasMore = true;
+
+    async function fetchSignalLogs(reset = false) {
+      if (reset) {
+        signalsOffset = 0;
+        signalsHasMore = true;
+        document.getElementById('signals-body').innerHTML = '';
+      }
+      if (!signalsHasMore || signalsLoading) return;
+      signalsLoading = true;
+      
+      const loader = document.getElementById('signals-loader');
+      if (signalsOffset > 0 && loader) loader.style.display = 'block';
+
+      try {
+        const res = await fetch(`/api/scanner_events?limit=100&offset=${signalsOffset}`);
+        if (!res.ok) throw new Error('API Error');
+        const logs = await res.json();
+        
+        if (logs.length < 100) signalsHasMore = false;
+        signalsOffset += logs.length;
+        
+        renderSignals(logs, reset);
+      } catch (err) {
+        console.error('Failed to load signals:', err);
+      } finally {
+        signalsLoading = false;
+        if (loader) loader.style.display = 'none';
+      }
+    }
+
+    function renderSignals(logs, reset) {
+      const tbody = document.getElementById('signals-body');
+      if (reset) tbody.innerHTML = '';
+      
+      if (logs.length === 0 && reset) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">No signals log found</td></tr>';
+        return;
+      }
+      
+      let html = '';
+      logs.forEach(s => {
+        const time = fmtTime(s.timestamp, true);
+        const mllbl = s.ml_confidence != null ? `${s.ml_confidence.toFixed(1)}%` : '—';
+        const color = s.direction === 'LONG' ? 'var(--green)' : 'var(--red)';
+        const dir = s.direction === 'LONG' ? '▲ LONG' : '▼ SHORT';
+        const status = s.acted_on ? '<span style="color:var(--green)">Taken</span>' : '<span style="color:var(--amber)">Rejected</span>';
+        const reason = s.reason || (s.acted_on ? 'Entry Taken' : 'Unknown');
+        
+        html += `<tr>
+          <td style="color:var(--text-dim); padding-left:16px;">${time}</td>
+          <td style="font-weight:600">${s.symbol}</td>
+          <td style="color:${color}">${dir}</td>
+          <td>${s.score}</td>
+          <td>${mllbl}</td>
+          <td>${status}</td>
+          <td style="color:var(--text-dim); padding-right:16px;">${reason}</td>
+        </tr>`;
+      });
+      
+      const tempWrapper = document.createElement('table');
+      tempWrapper.innerHTML = `<tbody>${html}</tbody>`;
+      const docFrag = document.createDocumentFragment();
+      while(tempWrapper.querySelector('tbody').firstChild) {
+        docFrag.appendChild(tempWrapper.querySelector('tbody').firstChild);
+      }
+      tbody.appendChild(docFrag);
+    }
+
     // ── Analytics ────────────────────────────────────────────────────────────────
     let _anFetched = false;
 
@@ -5468,6 +5566,18 @@
         badge.style.display = 'none';
       }
     }, 5000);
+
+    // Initialize infinite scroll wrapper
+    document.addEventListener('DOMContentLoaded', () => {
+      const wrap = document.getElementById('signals-table-wrap');
+      if (wrap) {
+        wrap.addEventListener('scroll', () => {
+          if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 60) {
+            fetchSignalLogs(false);
+          }
+        });
+      }
+    });
 
   </script>
 </body>
