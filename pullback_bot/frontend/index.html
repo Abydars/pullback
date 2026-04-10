@@ -12,21 +12,21 @@
 /* ── Reset & Base ─────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg: #09090b;
-  --bg2: #18181b;
-  --bg3: #27272a;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-glow: rgba(255, 255, 255, 0.12);
-  --text: #fafafa;
-  --muted: #a1a1aa;
-  --green: #22c55e;
-  --red: #ef4444;
+  --bg: #0B0E11;
+  --bg2: #181A20;
+  --bg3: #2B3139;
+  --border: rgba(255, 255, 255, 0.05);
+  --border-glow: rgba(255, 255, 255, 0.1);
+  --text: #EAECEF;
+  --muted: #848E9C;
+  --green: #0ECB81;
+  --red: #F6465D;
   --amber: #f59e0b;
   --indigo: #6366f1;
   --blue: #3b82f6;
   --font-ui: 'Inter', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
-  --glass-bg: rgba(24, 24, 27, 0.85);
+  --glass-bg: rgba(24, 26, 32, 0.85);
 }
 html, body { 
   height: 100%; background: var(--bg); color: var(--text); 
@@ -397,22 +397,23 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
 
 /* Open Position cards */
 .pos-card {
-  background: var(--bg2); margin: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
-  padding: 12px; cursor: pointer; transition: all .2s cubic-bezier(0.4, 0, 0.2, 1); animation: slideIn .2s ease;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  background: var(--bg2); margin: 8px 12px; border-radius: 12px; border: 1px solid var(--border);
+  padding: 16px; cursor: pointer; transition: all .2s cubic-bezier(0.4, 0, 0.2, 1); animation: slideIn .2s ease;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
 }
-.pos-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.2); border-color: rgba(255,255,255,0.15); }
-.pos-card-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-.pos-card-sym { font-size: 13px; font-weight: 700; font-family: var(--font-mono); }
-.pos-card-dir { display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 3px; letter-spacing: .08em; font-family: var(--font-ui); margin-top: 2px;}
-.pos-dir-long  { background: rgba(34,197,94,.15);  color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
-.pos-dir-short { background: rgba(239,68,68,.15);   color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
-.trail-badge { font-family: var(--font-ui); font-size: 8px; font-weight: 700; padding: 2px 4px; border-radius: 3px; letter-spacing: .08em; background: rgba(245,158,11,.15); color: var(--amber); border: 1px solid rgba(245,158,11,.3); animation: trailPulse 2s ease-in-out infinite; margin-top: 2px; display: inline-block;}
+.pos-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.4); border-color: rgba(255,255,255,0.1); }
+.pos-card-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 0px; padding-bottom: 0px; border-bottom: none; }
+.pos-card-header.expanded { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.pos-card-sym { font-size: 14px; font-weight: 700; font-family: var(--font-mono); }
+.pos-card-dir { display: inline-block; font-size: 9px; font-weight: 700; padding: 3px 6px; border-radius: 4px; letter-spacing: .08em; font-family: var(--font-ui); margin-top: 4px;}
+.pos-dir-long  { background: rgba(14,203,129,0.1);  color: var(--green); border: 1px solid rgba(14,203,129,0.2); }
+.pos-dir-short { background: rgba(246,70,93,0.1);   color: var(--red); border: 1px solid rgba(246,70,93,0.2); }
+.trail-badge { font-family: var(--font-ui); font-size: 8px; font-weight: 700; padding: 2px 4px; border-radius: 3px; letter-spacing: .08em; background: rgba(245,158,11,.15); color: var(--amber); border: 1px solid rgba(245,158,11,.3); animation: trailPulse 2s ease-in-out infinite; margin-top: 4px; display: inline-block;}
 @keyframes trailPulse { 0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(245,158,11,0.2); } 50% { opacity: .5; box-shadow: none; } }
-.prox-badge { font-family: var(--font-ui); font-size: 8px; font-weight: 700; padding: 2px 4px; border-radius: 3px; letter-spacing: .06em; border: 1px solid; margin-top: 2px; display: inline-block;}
-.pos-card-pnl  { font-size: 15px; font-weight: 700; font-family: var(--font-mono); text-align: right; }
-.pos-card-roe  { font-size: 11px; font-weight: 600; font-family: var(--font-mono); text-align: right; margin-top: 2px; }
-.pos-card-grid { display: flex; flex-direction: column; gap: 4px; }
+.prox-badge { font-family: var(--font-ui); font-size: 8px; font-weight: 700; padding: 2px 4px; border-radius: 3px; letter-spacing: .06em; border: 1px solid; margin-top: 4px; display: inline-block;}
+.pos-card-pnl  { font-size: 16px; font-weight: 700; font-family: var(--font-mono); text-align: right; }
+.pos-card-roe  { font-size: 11px; font-weight: 500; font-family: var(--font-mono); text-align: right; margin-top: 4px; }
+.pos-card-grid { display: flex; flex-direction: column; gap: 8px; }
 .pos-kv { display: flex; align-items: baseline; justify-content: space-between; padding: 1px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
 .pos-kv:last-child { border-bottom: none; }
 .pos-kv .k   { font-size: 9px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-family: var(--font-ui); }
@@ -453,11 +454,11 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
 .empty { padding: 24px 16px; color: var(--muted); text-align: center; font-size: 11px; font-weight: 500; font-family: var(--font-ui); }
 
 /* ── Position stats summary ───────────────────────────────────────────────── */
-#pos-stats { padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); position: relative; z-index: 5; }
-.pos-stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.pos-stat-item { display: flex; flex-direction: column; gap: 2px; background: var(--bg); padding: 8px; border-radius: 6px; border: 1px solid var(--border); }
-.pos-stat-item .k { font-size: 9px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-family: var(--font-ui);}
-.pos-stat-item .v { font-size: 13px; font-weight: 700; font-family: var(--font-mono); }
+#pos-stats { padding: 16px 12px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; box-shadow: 0 4px 16px rgba(0,0,0,0.15); position: relative; z-index: 5; }
+.pos-stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pos-stat-item { display: flex; flex-direction: column; gap: 4px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border: 1px solid var(--border); box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
+.pos-stat-item .k { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-family: var(--font-ui); }
+.pos-stat-item .v { font-size: 14px; font-weight: 700; font-family: var(--font-mono); }
 
 /* ── Close buttons ────────────────────────────────────────────────────────── */
 .btn-close-pos {
@@ -1931,18 +1932,22 @@ function renderPositions() {
     const armBadge = trailActive ? `<span class="trail-badge">⟳ TRAILING</span>` : '';
 
     card.innerHTML = `
-      <div class="pos-card-header" style="cursor:pointer; position:relative; padding-right:20px;" onclick="togglePosCard(${t.id})">
-        <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
-          <span class="pos-card-sym" onclick="event.stopPropagation(); selectSymbol('${t.symbol}')" style="cursor:pointer; z-index:2;">${t.symbol.replace('USDT','')}<span style="font-size:9px;color:var(--muted)">/USDT</span></span>
-          <span class="pos-card-dir ${isLong ? 'pos-dir-long' : 'pos-dir-short'}">${isLong ? 'LONG' : 'SHORT'}</span>
-          ${armBadge}
-          ${proxBadge}
+      <div class="pos-card-header ${expanded ? 'expanded' : ''}" style="cursor:pointer; position:relative; padding-right:24px;" onclick="togglePosCard(${t.id})">
+        <div style="display:flex; flex-direction:column; align-items:flex-start; gap:4px; max-width:65%;">
+          <span class="pos-card-sym" onclick="event.stopPropagation(); selectSymbol('${t.symbol}')" style="cursor:pointer; z-index:2; line-height:1;">${t.symbol.replace('USDT','')}<span style="font-size:10px;color:var(--muted);margin-left:2px;">/USDT</span></span>
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span class="pos-card-dir ${isLong ? 'pos-dir-long' : 'pos-dir-short'}">${isLong ? 'LONG' : 'SHORT'}</span>
+            ${armBadge}
+            ${proxBadge}
+          </div>
         </div>
-        <div style="text-align:right;">
+        <div style="text-align:right; display:flex; flex-direction:column; justify-content:flex-start;">
           <div class="pos-card-pnl ${pnlCls}${blink}">${fmtUsdt(pnl)}</div>
           <div class="pos-card-roe ${pnlCls}">ROE ${roe >= 0 ? '+' : ''}${roe.toFixed(2)}%</div>
         </div>
-        <div style="position:absolute; right:10px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:10px;">${expandIcon}</div>
+        <div style="position:absolute; right:8px; top:12px; transform:translateY(-50%); color:var(--muted); font-size:10px; opacity:0.6; transition:transform 0.2s;">
+            ${expandIcon}
+        </div>
       </div>
       <div class="pos-card-body" style="display: ${expanded ? 'block' : 'none'};">
         <div class="pos-card-grid">
