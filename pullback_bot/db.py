@@ -43,9 +43,9 @@ CREATE TABLE IF NOT EXISTS scanner_log (
     symbol    TEXT    NOT NULL,
     score     INTEGER NOT NULL,
     direction TEXT    NOT NULL,
-    timestamp INTEGER NOT NULL,
     acted_on  INTEGER NOT NULL DEFAULT 0,  -- 0=false, 1=true
-    reason    TEXT                         -- reason why acted or skipped
+    reason    TEXT,                        -- reason why acted or skipped
+    metadata  TEXT                         -- JSON encoded extra details (SL, TP, etc)
 );
 """
 
@@ -98,6 +98,7 @@ async def init_db() -> None:
             "ALTER TABLE trades ADD COLUMN ml_confidence REAL",
             "ALTER TABLE scanner_log ADD COLUMN ml_confidence REAL",
             "ALTER TABLE scanner_log ADD COLUMN reason TEXT",
+            "ALTER TABLE scanner_log ADD COLUMN metadata TEXT",
         ]:
             try:
                 await db.execute(col_sql)
@@ -340,12 +341,12 @@ async def get_today_stats() -> dict:
 # ── Scanner log helpers ────────────────────────────────────────────────────────
 
 async def insert_scanner_log(
-    symbol: str, score: int, direction: str, timestamp: int, acted_on: bool = False, ml_confidence: float = None, reason: str = None
+    symbol: str, score: int, direction: str, timestamp: int, acted_on: bool = False, ml_confidence: float = None, reason: str = None, metadata: str = None
 ) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO scanner_log (symbol, score, direction, timestamp, acted_on, ml_confidence, reason) VALUES (?,?,?,?,?,?,?)",
-            (symbol, score, direction, timestamp, int(acted_on), ml_confidence, reason),
+            "INSERT INTO scanner_log (symbol, score, direction, timestamp, acted_on, ml_confidence, reason, metadata) VALUES (?,?,?,?,?,?,?,?)",
+            (symbol, score, direction, timestamp, int(acted_on), ml_confidence, reason, metadata),
         )
         await db.commit()
 
@@ -358,7 +359,8 @@ async def insert_scanner_log(
             "timestamp": timestamp,
             "acted_on": acted_on,
             "ml_confidence": ml_confidence,
-            "reason": reason
+            "reason": reason,
+            "metadata": metadata
         })
     except Exception:
         pass

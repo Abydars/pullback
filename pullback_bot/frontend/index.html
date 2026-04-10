@@ -5307,6 +5307,22 @@
         const status = s.acted_on ? '<span style="color:var(--green)">Taken</span>' : '<span style="color:var(--amber)">Rejected</span>';
         const reason = s.reason || (s.acted_on ? 'Entry Taken' : 'Unknown');
 
+        let metaHtml = '';
+        if (s.metadata) {
+            try {
+                const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
+                if (meta.entry) {
+                    metaHtml = `
+                    <div style="font-size: 11px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-dim);">
+                        <span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 500;">⛙ ${meta.type || 'PULLBACK'}</span>
+                        <span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">⚡︎ Entry: ${meta.entry}</span>
+                        <span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl}</span>
+                        <span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">Volatility: ${meta.atr}</span>
+                    </div>`;
+                }
+            } catch(e) {}
+        }
+
         html += `<tr>
           <td style="color:var(--text-dim); padding-left:16px;">${time}</td>
           <td style="font-weight:600">${s.symbol}</td>
@@ -5314,7 +5330,10 @@
           <td>${s.score}</td>
           <td>${mllbl}</td>
           <td>${status}</td>
-          <td style="color:var(--text-dim); padding-right:16px;">${reason}</td>
+          <td style="color:var(--text-dim); padding-right:16px;">
+            ${reason}
+            ${metaHtml}
+          </td>
         </tr>`;
       });
 
@@ -5343,6 +5362,22 @@
       const status = s.acted_on ? '<span style="color:var(--green)">Taken</span>' : '<span style="color:var(--amber)">Rejected</span>';
       const reason = s.reason || (s.acted_on ? 'Entry Taken' : 'Unknown');
 
+      let metaHtml = '';
+      if (s.metadata) {
+          try {
+              const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
+              if (meta.entry) {
+                  metaHtml = `
+                  <div style="font-size: 11px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-dim);">
+                      <span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 500;">⛙ ${meta.type || 'PULLBACK'}</span>
+                      <span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">⚡︎ Entry: ${meta.entry}</span>
+                      <span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl}</span>
+                      <span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">Volatility: ${meta.atr}</span>
+                  </div>`;
+              }
+          } catch(e) {}
+      }
+
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td style="color:var(--text-dim); padding-left:16px;">${time}</td>
@@ -5351,7 +5386,10 @@
         <td>${s.score}</td>
         <td>${mllbl}</td>
         <td>${status}</td>
-        <td style="color:var(--text-dim); padding-right:16px;">${reason}</td>
+        <td style="color:var(--text-dim); padding-right:16px;">
+            ${reason}
+            ${metaHtml}
+        </td>
       `;
       
       tr.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
