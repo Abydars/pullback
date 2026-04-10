@@ -18,9 +18,9 @@ logger = logging.getLogger("ml_trainer")
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def fetch_historical_klines(symbol: str, interval: str = "15m", limit: int = 1000) -> pd.DataFrame:
-    """Download klines from Binance API."""
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+def fetch_historical_klines(symbol: str, interval: str = "15m", limit: int = 1500) -> pd.DataFrame:
+    """Download klines from Binance Futures API."""
+    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
     logger.info(f"Downloading {limit} candles for {symbol} ({interval})...")
     resp = requests.get(url, timeout=10)
     resp.raise_for_status()
@@ -118,7 +118,7 @@ def build_targets(df: pd.DataFrame, target_pct: float = 0.015, stop_pct: float =
     return df
 
 def train_for_symbol(symbol: str):
-    df = fetch_historical_klines(symbol, limit=2000)
+    df = fetch_historical_klines(symbol, limit=1500)
     df = build_features(df)
     df = build_targets(df)
     
