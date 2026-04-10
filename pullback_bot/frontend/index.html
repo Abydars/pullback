@@ -598,6 +598,7 @@ canvas.sparkline { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)
   <div id="header">
     <span class="logo">⬡ PULLBACK BOT</span>
     <span id="mode-badge" class="mode-badge mode-paper">PAPER</span>
+    <span id="session-badge" class="mode-badge" style="display:none; font-weight:800;"></span>
     <span id="btc-regime-badge" class="regime-badge regime-neutral">BTC –</span>
     <div id="conn-dot" title="WebSocket connection"></div>
     <span class="stat-pill">Positions: <span id="h-open">0</span></span>
@@ -1248,11 +1249,10 @@ async function updatePosChart(positions) {
 
   // ── Fetch live config values for reference lines ──────────────────────────
   let minTpUsdt = 0, trailFactor = 0.5;
-  try {
-    const cfg = await fetch('/api/config').then(r => r.json());
-    minTpUsdt   = parseFloat(cfg.PORTFOLIO_MIN_TP_USDT)  || 0;
-    trailFactor = parseFloat(cfg.PORTFOLIO_TRAIL_FACTOR) || 0.5;
-  } catch(e) {}
+  if (typeof _cfgCurrent !== 'undefined' && _cfgCurrent) {
+      minTpUsdt   = parseFloat(_cfgCurrent.PORTFOLIO_MIN_TP_USDT)  || 0;
+      trailFactor = parseFloat(_cfgCurrent.PORTFOLIO_TRAIL_FACTOR) || 0.5;
+  }
 
   // ── Rebuild reference lines ───────────────────────────────────────────────
   clearPosChartLines();
@@ -3367,6 +3367,49 @@ document.querySelectorAll('.ctab').forEach(b => {
     }
   });
 });
+
+setInterval(() => {
+   if (!_cfgCurrent) return;
+   const badge = document.getElementById('session-badge');
+   if (!_cfgCurrent.SESSION_GUARD_ENABLED) {
+       badge.style.display = 'none';
+       return;
+   }
+   
+   let custom_str = _cfgCurrent.TRADE_CUSTOM_SESSIONS || "";
+   if (!custom_str.trim()) {
+       badge.style.display = 'inline-block';
+       badge.style.background = '#e74c3c';
+       badge.textContent = 'SESSION BLOCKED';
+       return;
+   }
+   
+   try {
+       const now = new Date();
+       const nowH = now.getUTCHours();
+       const nowM = now.getUTCMinutes();
+       const nowTimeStr = nowH.toString().padStart(2, '0') + ':' + nowM.toString().padStart(2, '0');
+       
+       const ranges = custom_str.split(',').map(r => r.trim()).filter(Boolean);
+       let allowed = false;
+       for (const r of ranges) {
+           const [st, en] = r.split('-');
+           if (!st || !en) continue;
+           
+           if (st <= en) {
+               if (st <= nowTimeStr && nowTimeStr <= en) allowed = true;
+           } else { 
+               if (nowTimeStr >= st || nowTimeStr <= en) allowed = true;
+           }
+       }
+       
+       badge.style.display = 'inline-block';
+       badge.style.background = allowed ? '#2ecc71' : '#e74c3c';
+       badge.textContent = allowed ? 'SESSION ACTIVE' : 'SESSION BLOCKED';
+   } catch (e) {
+       badge.style.display = 'none';
+   }
+}, 5000);
 
 </script>
 </body>
