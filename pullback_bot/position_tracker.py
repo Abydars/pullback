@@ -445,6 +445,72 @@ async def _paper_tick() -> None:
                     final_pct = final_pnl / (entry * qty) * 100 if entry * qty else 0
                     close_time = int(time.time() * 1000)
 
+                    # ── SMART PORTFOLIO PRUNING ───────────────────────────────
+                    if close_reason == "SMART_TP" and final_pnl > 0:
+                        import scanner
+                        weak_candidates = []
+                        weak_loss = 0.0
+                        
+                        for ot in open_trades:
+                            oid = ot["id"]
+                            if oid == tid or ot.get("mode") != trade.get("mode"): 
+                                continue
+                                
+                            osym = ot["symbol"]
+                            omark = mark_prices.get(osym)
+                            if not omark:
+                                continue
+                                
+                            oentry = float(ot["entry_price"])
+                            oqty   = float(ot["qty"])
+                            odir   = ot["direction"]
+                            
+                            oraw = (omark - oentry) * oqty if odir == "LONG" else (oentry - omark) * oqty
+                            opnl = _net_pnl(oraw, oentry, omark, oqty)
+                            oroepct = (opnl / (oentry * oqty / int(ot.get("leverage") or config.MAX_LEVERAGE))) * 100
+                            
+                            if opnl < 0 and oroepct < -5:
+                                # Re-evaluate 15m Momentum for this losing trade
+                                o_klines = scanner._kline_buffers.get(osym, {}).get("15m", [])
+                                if len(o_klines) >= 5:
+                                    orsi = _compute_fast_rsi(o_klines, period=5)
+                                    is_dead = (odir == "LONG" and orsi < 45) or (odir == "SHORT" and orsi > 55)
+                                    if is_dead:
+                                        weak_candidates.append({
+                                            "trade": ot, "mark": omark, "pnl": opnl,
+                                            "entry": oentry, "qty": oqty
+                                        })
+                                        weak_loss += opnl
+                        
+                        # Execute Pruning if the winner covers the dead losses!
+                        if weak_candidates and (final_pnl + weak_loss > 0):
+                            logger.info("SMART PRUNING: Leader %s (Pnl: %.4f) covers %d dead trades (Loss: %.4f)", 
+                                        symbol, final_pnl, len(weak_candidates), weak_loss)
+                            for w in weak_candidates:
+                                wt = w["trade"]
+                                wtid = wt["id"]
+                                wpct = w["pnl"] / (w["entry"] * w["qty"]) * 100 if w["entry"] * w["qty"] else 0
+                                await db.update_trade_close(
+                                    trade_id=wtid,
+                                    close_price=w["mark"],
+                                    close_time=close_time,
+                                    pnl_usdt=round(w["pnl"], 4),
+                                    pnl_pct=round(wpct, 2),
+                                    close_reason="SMART_PRUNED"
+                                )
+                                paper_unrealized.pop(wtid, None)
+                                _trail_active.pop(wtid, None)
+                                _trail_extreme.pop(wtid, None)
+                                await wsb.broadcaster.broadcast("trade_closed", {
+                                    **wt,
+                                    "close_price":  w["mark"],
+                                    "close_time":   close_time,
+                                    "close_reason": "SMART_PRUNED",
+                                    "pnl_usdt":     round(w["pnl"], 4),
+                                    "pnl_pct":      round(wpct, 2),
+                                })
+                    # ──────────────────────────────────────────────────────────
+
                     await db.update_trade_close(
                         trade_id=tid,
                         close_price=hit_price,
