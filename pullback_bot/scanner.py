@@ -393,7 +393,7 @@ async def _run_kline_ws() -> None:
             required.add(sym.upper())
             
         symbols = list(required)
-        chunk_size = 300  # Well below 341 max streams limit per connection
+        chunk_size = 100  # 100 symbols = 400 streams per connection (Binance hard limit is 1024 streams per connection)
         chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
         
         logger.info("Spawning %d WS shards to cover %d symbols", len(chunks), len(symbols))

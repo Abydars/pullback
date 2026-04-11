@@ -3000,6 +3000,19 @@
         if (loadId !== _loadChartId) return;
         if (!Array.isArray(candles) || candles.length === 0) return;
 
+        // Auto-adjust Y-Axis precision for low-priced coins
+        const lastClose = candles[candles.length - 1].close;
+        let decimals = 2, minM = 0.01;
+        if (lastClose < 0.0001) { decimals = 8; minM = 0.00000001; }
+        else if (lastClose < 0.01) { decimals = 6; minM = 0.000001; }
+        else if (lastClose < 1) { decimals = 4; minM = 0.0001; }
+        else if (lastClose < 1000) { decimals = 3; minM = 0.001; }
+        
+        const pf = { type: 'price', precision: decimals, minMove: minM };
+        candleSeries.applyOptions({ priceFormat: pf });
+        ema50Series.applyOptions({ priceFormat: pf });
+        ema200Series.applyOptions({ priceFormat: pf });
+
         candleSeries.setData(candles);
         volSeries.setData(candles.map(c => ({
           time: c.time,
