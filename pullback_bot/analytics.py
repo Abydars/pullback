@@ -54,6 +54,7 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     for t in trades_sorted:
         pnl = float(t.get("pnl_usdt") or 0.0)
         is_win = pnl > 0
+        is_loss = pnl < 0
         
         # PnL & Series Flow
         total_pnl += pnl
@@ -73,7 +74,7 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
             wins += 1
             real_wins += 1
             current_loss_streak = 0
-        else:
+        elif is_loss:
             real_losers += 1
             current_loss_streak += 1
             if current_loss_streak > max_loss_streak:
@@ -85,7 +86,7 @@ def compute_analytics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         if close_ms > entry_ms:
             dur = close_ms - entry_ms
             if is_win: win_duration_ms += dur
-            else:      los_duration_ms += dur
+            elif is_loss: los_duration_ms += dur
 
         score = float(t.get("score") or 0.0)
         dt = datetime.fromtimestamp(entry_ms / 1000.0, tz=timezone.utc)

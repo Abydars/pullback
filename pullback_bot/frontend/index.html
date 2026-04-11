@@ -2242,172 +2242,134 @@
       margin-bottom: 24px;
     }
 
-    .an-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    /* ── Premium Analytics Layout ── */
+    #analytics-pane {
+      background: radial-gradient(circle at top right, rgba(20,22,28,1) 0%, rgba(11,14,17,1) 100%);
     }
 
+    .an-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .an-glass-card {
+      background: rgba(24, 26, 32, 0.4);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .an-glass-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+      border-color: rgba(255, 255, 255, 0.08);
+    }
+    .an-val {
+      font-size: 28px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: -0.5px;
+      margin-top: 4px;
+      color: #fff;
+    }
     .an-title {
       font-size: 11px;
       text-transform: uppercase;
-      color: var(--text-dim);
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-    }
-
-    .an-val {
-      font-size: 24px;
-      font-weight: 500;
-      font-family: 'JetBrains Mono', monospace;
+      color: var(--muted);
+      letter-spacing: 0.8px;
+      font-weight: 600;
     }
 
     .an-collapsible {
-      margin-bottom: 12px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
+      margin-bottom: 16px;
+      background: rgba(24, 26, 32, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      border-radius: 8px;
       overflow: hidden;
     }
 
     .an-toggle {
       width: 100%;
       text-align: left;
-      background: var(--bg-card);
+      background: transparent;
       color: var(--text);
       border: none;
-      padding: 12px 16px;
-      font-size: 14px;
-      font-weight: 500;
+      padding: 14px 18px;
+      font-size: 13px;
+      font-weight: 600;
       cursor: pointer;
-      transition: 0.2s;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      letter-spacing: 0.5px;
     }
-
-    .an-toggle:hover {
-      background: var(--bg-hover);
-    }
-
-    .an-toggle::after {
-      content: '\25BC';
-      font-size: 10px;
-      color: var(--text-dim);
-      transition: transform 0.2s;
-    }
-
-    .an-toggle.active {
-      background: var(--bg-hover);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .an-toggle.active::after {
-      transform: rotate(180deg);
-    }
-
-    .an-panel {
-      display: none;
-      padding: 16px;
-      background: rgba(0, 0, 0, 0.1);
-    }
-
-    .an-panel.show {
-      display: block;
-    }
+    .an-toggle:hover { background: rgba(255, 255, 255, 0.02); }
+    .an-toggle::after { content: '▼'; font-size: 10px; color: var(--muted); transition: 0.2s; }
+    .an-toggle.active::after { transform: rotate(180deg); color: #fff; }
+    
+    .an-panel { display: none; padding: 0 18px 18px 18px; }
+    .an-panel.show { display: block; animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 
     .an-bar-row {
       display: flex;
       align-items: center;
-      margin-bottom: 10px;
-      font-size: 13px;
+      margin-bottom: 12px;
+      font-size: 12px;
     }
-
     .an-bar-label {
-      width: 120px;
-      color: var(--text-dim);
+      width: 130px;
+      color: var(--muted);
       font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
-
     .an-bar-wrapper {
       flex: 1;
       margin: 0 16px;
-    }
-
-    .an-bar-bg {
-      width: 100%;
-      height: 8px;
-      background: var(--bg-hover);
+      height: 6px;
+      background: rgba(255,255,255,0.05);
       border-radius: 4px;
       overflow: hidden;
       display: flex;
     }
-
-    .an-bar-fill {
-      height: 100%;
-      transition: width 0.5s ease-out;
-    }
-
+    .an-bar-fill { height: 100%; transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
     .an-bar-stats {
-      width: 180px;
+      width: 170px;
       text-align: right;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
+      font-size: 11px;
     }
-
-    .an-sym-list {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
-    }
-
-    .an-sym-item {
-      display: flex;
-      justify-content: space-between;
-      padding: 6px 8px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .an-sym-item:last-child {
-      border-bottom: none;
-    }
-
 
     .an-insight-item {
-      padding: 12px 16px;
-      border-radius: 6px;
+      padding: 14px 18px;
+      border-radius: 8px;
       margin-bottom: 12px;
-      font-size: 13px;
-      line-height: 1.5;
+      font-size: 12px;
+      line-height: 1.6;
       border-left: 4px solid transparent;
+      backdrop-filter: blur(8px);
     }
-
     .an-insight-item.success {
-      background: rgba(16, 185, 129, 0.1);
-      border-left-color: var(--green);
-      color: var(--green);
+      background: linear-gradient(90deg, rgba(14,203,129,0.1), rgba(0,0,0,0));
+      border-left-color: var(--green); color: var(--green);
     }
-
     .an-insight-item.warning {
-      background: rgba(245, 158, 11, 0.1);
-      border-left-color: var(--amber);
-      color: var(--amber);
+      background: linear-gradient(90deg, rgba(245,158,11,0.1), rgba(0,0,0,0));
+      border-left-color: var(--amber); color: var(--amber);
     }
-
     .an-insight-item.danger {
-      background: rgba(239, 68, 68, 0.1);
-      border-left-color: var(--red);
-      color: var(--red);
+      background: linear-gradient(90deg, rgba(246,70,93,0.1), rgba(0,0,0,0));
+      border-left-color: var(--red); color: var(--red);
     }
-
     .an-insight-item.info {
-      background: rgba(59, 130, 246, 0.1);
-      border-left-color: #3b82f6;
-      color: #60a5fa;
+      background: linear-gradient(90deg, rgba(59,130,246,0.1), rgba(0,0,0,0));
+      border-left-color: var(--blue); color: #60a5fa;
     }
   </style>
 </head>
@@ -2648,32 +2610,29 @@
 
               <div id="an-insights-container" style="margin-bottom: 24px;"></div>
 
-              <div id="an-summary-grid">
-                <div class="an-card">
-                  <div class="an-title">Trades</div>
+              <div id="an-summary-grid" class="an-grid">
+                <div class="an-glass-card">
+                  <div class="an-title">Trades Executed</div>
                   <div class="an-val" id="an-val-trades">0</div>
                 </div>
-                <div class="an-card">
+                <div class="an-glass-card">
                   <div class="an-title">Win Rate</div>
                   <div class="an-val" id="an-val-wr">0.0%</div>
                 </div>
-                <div class="an-card">
-                  <div class="an-title">Total PnL</div>
+                <div class="an-glass-card">
+                  <div class="an-title">Net Profit (USDT)</div>
                   <div class="an-val" id="an-val-pnl">$0.00</div>
                 </div>
-                <div class="an-card">
-                  <div class="an-title">Avg PnL</div>
+                <div class="an-glass-card">
+                  <div class="an-title">Average PnL</div>
                   <div class="an-val" id="an-val-avg">$0.00</div>
                 </div>
               </div>
 
-              <div id="an-advanced-metrics"
-                style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 24px; margin-top: 12px;">
-                <!-- Inject V2 metrics here -->
-              </div>
+              <!-- V2 Metrics injected here -->
+              <div id="an-advanced-metrics" class="an-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 24px;"></div>
 
-              <div id="an-equity-curve"
-                style="margin-bottom: 24px; padding: 16px; background: var(--bg-hover); border-radius: 6px; position:relative;">
+              <div id="an-equity-curve" style="margin-bottom: 32px; position:relative;">
                 <!-- Inject SVG here -->
               </div>
 
@@ -5563,10 +5522,10 @@
         let winMins = (d.summary.avg_winner_duration_s / 60).toFixed(0);
         let losMins = (d.summary.avg_loser_duration_s / 60).toFixed(0);
         amCont.innerHTML = `
-        <div class="an-card"><div class="an-title">Max Drawdown</div><div class="an-val" style="color:var(--red);opacity:0.8">${_fmtAnPnl(-d.summary.max_drawdown)}</div></div>
-        <div class="an-card"><div class="an-title">Max Losing Streak</div><div class="an-val" style="color:var(--text-dim);">${d.summary.max_loss_streak}</div></div>
-        <div class="an-card"><div class="an-title">Avg Winner Hold</div><div class="an-val" style="color:var(--text-dim);">${winMins}m</div></div>
-        <div class="an-card"><div class="an-title">Avg Loser Hold</div><div class="an-val" style="color:var(--text-dim);">${losMins}m</div></div>
+        <div class="an-glass-card"><div class="an-title">Max Drawdown</div><div class="an-val" style="color:var(--red);opacity:0.9">${_fmtAnPnl(-d.summary.max_drawdown)}</div></div>
+        <div class="an-glass-card"><div class="an-title">Max Loss Streak</div><div class="an-val" style="color:#aaa;">${d.summary.max_loss_streak}</div></div>
+        <div class="an-glass-card"><div class="an-title">Avg Winner Hold</div><div class="an-val" style="color:var(--green);">${winMins}m</div></div>
+        <div class="an-glass-card"><div class="an-title">Avg Loser Hold</div><div class="an-val" style="color:var(--amber);">${losMins}m</div></div>
       `;
       }
 
@@ -5576,13 +5535,26 @@
         const arr = d.pnl_series;
         const pts = ptc(0, 100, 100, arr);
         const isProfitable = arr[arr.length - 1] >= 0;
-        const strokeColor = isProfitable ? 'var(--green)' : 'var(--red)';
+        const strokeColor = isProfitable ? '#0ECB81' : '#F6465D'; // hex for green/red
+        
+        // Add bottom corners to close the polygon for the gradient fill
+        const fillPts = `${pts} 100,100 0,100`;
+
         eqCont.innerHTML = `
-          <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px;letter-spacing:1px;text-transform:uppercase;">Master Equity Curve</div>
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:100px;overflow:visible;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.03);border-radius:4px;">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px;letter-spacing:1px;text-transform:uppercase;font-weight:700;">Master Equity Curve</div>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:140px;overflow:visible;background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.03);border-radius:8px;">
+             <defs>
+               <linearGradient id="eqGrad" x1="0" x2="0" y1="0" y2="1">
+                 <stop offset="0%" stop-color="${strokeColor}" stop-opacity="0.3"/>
+                 <stop offset="100%" stop-color="${strokeColor}" stop-opacity="0.0"/>
+               </linearGradient>
+             </defs>
              <!-- Zero line indicator -->
-             <line x1="0" y1="${100 - ((0 - Math.min(...arr, 0)) / ((Math.max(...arr, 0) - Math.min(...arr, 0)) || 1)) * 100}" x2="100" y2="${100 - ((0 - Math.min(...arr, 0)) / ((Math.max(...arr, 0) - Math.min(...arr, 0)) || 1)) * 100}" stroke="rgba(255,255,255,0.15)" stroke-dasharray="2,2" stroke-width="0.5px" />
-             <polyline points="${pts}" fill="none" stroke="${strokeColor}" stroke-width="1.5px" style="filter: drop-shadow(0 0 4px ${strokeColor});" />
+             <line x1="0" y1="${100 - ((0 - Math.min(...arr, 0)) / ((Math.max(...arr, 0) - Math.min(...arr, 0)) || 1)) * 100}" x2="100" y2="${100 - ((0 - Math.min(...arr, 0)) / ((Math.max(...arr, 0) - Math.min(...arr, 0)) || 1)) * 100}" stroke="rgba(255,255,255,0.2)" stroke-dasharray="2,2" stroke-width="0.5px" />
+             <!-- Gradient fill -->
+             <polygon points="${fillPts}" fill="url(#eqGrad)" />
+             <!-- Main line -->
+             <polyline points="${pts}" fill="none" stroke="${strokeColor}" stroke-width="1.5px" style="filter: drop-shadow(0 0 6px ${strokeColor}88);" />
           </svg>
       `;
       } else if (eqCont) {
