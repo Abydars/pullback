@@ -591,68 +591,43 @@ async def _paper_tick() -> None:
                 triggered_reason = "SMART_PORT_SL"
 
             if triggered_reason is None and min_tp_usdt != 0.0:
-                # If ALL open trades are individually in profit, let them ride their individual 
-                # trailing stops to maximize gains instead of capping the whole portfolio early.
-                all_positive = len(open_trades) > 0 and all(paper_unrealized.get(t["id"], 0.0) >= 0.0 for t in open_trades)
-                
                 global _portfolio_trail_armed, _peak_portfolio_pnl
-                if all_positive:
-                    if _portfolio_trail_armed:
-                        _portfolio_trail_armed = False
-                        _peak_portfolio_pnl    = 0.0
-                        logger.info("Portfolio trail disarmed: All individual trades are profitable. Deferring to individual trailing stops.")
-                        await wsb.broadcaster.broadcast("portfolio_trail_disarmed", {"reason": "all_positive"})
-                else:
-                    if config.PORTFOLIO_TP_MODE == "normal":
-                        # Normal mode — close immediately when PnL reaches the threshold
+                
+                if config.PORTFOLIO_TP_MODE == "normal":
+                    # Normal mode — close immediately when PnL reaches the threshold
+                    if total_unrealized >= min_tp_usdt:
+                        triggered_reason = "PORTFOLIO_TP"
+                else:  # "trailing"
+                    # Trailing floor — 3-phase arm / trail / disarm
+                    if not _portfolio_trail_armed:
+                        # Phase 2a — arm: PnL just crossed the target
                         if total_unrealized >= min_tp_usdt:
-                            triggered_reason = "PORTFOLIO_TP"
-                    else:  # "trailing"
-                        # Trailing floor — 3-phase arm / trail / disarm
-                        if not _portfolio_trail_armed:
-                            # Phase 2a — arm: PnL just crossed the target
-                            if total_unrealized >= min_tp_usdt:
-                                _portfolio_trail_armed = True
-                                _peak_portfolio_pnl    = total_unrealized
-                                logger.info(
-                                    "Portfolio trail armed: pnl=%.4f target=%.4f",
-                                    total_unrealized, min_tp_usdt,
-                                )
-                                await wsb.broadcaster.broadcast("portfolio_trail_armed", {
-                                    "total_pnl": round(total_unrealized, 4),
-                                    "target":    min_tp_usdt,
-                                })
-                        else:
-                            # Phase 2b — update peak and check floor
-                            _peak_portfolio_pnl = max(_peak_portfolio_pnl, total_unrealized)
-                            trail_factor = config.PORTFOLIO_TRAIL_FACTOR
-                            floor = min_tp_usdt + (_peak_portfolio_pnl - min_tp_usdt) * trail_factor
+                            _portfolio_trail_armed = True
+                            _peak_portfolio_pnl    = total_unrealized
+                            logger.info(
+                                "Portfolio trail armed: pnl=%.4f target=%.4f",
+                                total_unrealized, min_tp_usdt,
+                            )
+                            await wsb.broadcaster.broadcast("portfolio_trail_armed", {
+                                "total_pnl": round(total_unrealized, 4),
+                                "target":    min_tp_usdt,
+                            })
+                    else:
+                        # Phase 2b — update peak and check floor
+                        _peak_portfolio_pnl = max(_peak_portfolio_pnl, total_unrealized)
+                        trail_factor = config.PORTFOLIO_TRAIL_FACTOR
+                        floor = min_tp_usdt + (_peak_portfolio_pnl - min_tp_usdt) * trail_factor
 
-                            if _peak_portfolio_pnl > min_tp_usdt and total_unrealized <= floor:
-                                if total_unrealized >= min_tp_usdt:
-                                    # PnL is between floor and min_tp — close with guaranteed profit
-                                    triggered_reason = "PORT_TP_TRAIL"
-                                else:
-                                    # PnL dropped below min_tp — disarm without closing;
-                                    # wait for recovery back to min_tp before re-arming.
-                                    _portfolio_trail_armed = False
-                                    _peak_portfolio_pnl    = 0.0
-                                    logger.info(
-                                        "Portfolio trail disarmed — PnL %.4f dropped below "
-                                        "min target %.4f, will re-arm on recovery",
-                                        total_unrealized, min_tp_usdt,
-                                    )
-                                    await wsb.broadcaster.broadcast("portfolio_trail_disarmed", {"reason": "dropped_below_target"})
-                            elif total_unrealized < 0:
-                                # Phase 3 — disarm: portfolio went negative → reset so
-                                # the trail can re-arm when PnL recovers to the target.
-                                _portfolio_trail_armed = False
-                                _peak_portfolio_pnl    = 0.0
-                                logger.info(
-                                    "Portfolio trail disarmed (PnL went negative): pnl=%.4f",
-                                    total_unrealized,
-                                )
-                                await wsb.broadcaster.broadcast("portfolio_trail_disarmed", {"reason": "went_negative"})
+                        if _peak_portfolio_pnl > min_tp_usdt and total_unrealized <= floor:
+                            # Floor broken! Close immediately, even if slippage pushed us below min_tp_usdt.
+                            # A real trailing stop triggers as a market order once crossed.
+                            triggered_reason = "PORT_TP_TRAIL"
+                        elif total_unrealized < 0:
+                            # Edge case: fast dump wiped out all unrealized before tick fired
+                            _portfolio_trail_armed = False
+                            _peak_portfolio_pnl    = 0.0
+                            logger.info("Portfolio trail disarmed — went negative.")
+                            await wsb.broadcaster.broadcast("portfolio_trail_disarmed", {"reason": "went_negative"})
 
             if triggered_reason and open_trades:
                 logger.warning(
