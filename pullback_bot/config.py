@@ -97,11 +97,8 @@ FUNDING_GUARD_ALLOW_SHORTS: bool = _bool("FUNDING_GUARD_ALLOW_SHORTS", False)
 
 #   pullback         — trend-following reversion to EMA50/swing zone (default)
 #   breakout         — close outside 20-candle consolidation range with volume
-#   micro_scalp      — HFT 1-minute orderflow hunter targeting massive PA anomalies
-#   funding_predator — Chronological arbitrage executing on exactly 8-hour payout ticks
 #   both             — run pullback & breakout concurrently
 SIGNAL_MODE: str = _get("SIGNAL_MODE", "pullback")
-FUNDING_PREDATOR_THRESHOLD: float = _float("FUNDING_PREDATOR_THRESHOLD", 0.015)
 SIGNAL_SCORE_THRESHOLD: int = _int("SIGNAL_SCORE_THRESHOLD", 70)
 # SIGNAL_BATCH_WINDOW_S: seconds to wait after the first signal fires before
 # ranking the batch by score.  0.0 = immediate entry on first signal (fastest).
@@ -212,7 +209,6 @@ EDITABLE_KEYS: dict[str, type] = {
     "MIN_PRICE_CHANGE_PCT":      float,
     "WATCHLIST_REFRESH_MINUTES": int,
     "SIGNAL_MODE":               str,
-    "FUNDING_PREDATOR_THRESHOLD":float,
     "SIGNAL_SCORE_THRESHOLD":    int,
     "SIGNAL_BATCH_WINDOW_S":     float,
     "BTC_REGIME_FILTER":         bool,
@@ -311,8 +307,8 @@ async def update(key: str, raw_value: str) -> None:
     # Extra validation
     if key == "MODE" and value not in ("live", "paper"):
         raise ValueError("MODE must be 'live' or 'paper'")
-    if key == "SIGNAL_MODE" and value not in ("pullback", "breakout", "micro_scalp", "funding_predator", "both"):
-        raise ValueError("SIGNAL_MODE must be 'pullback', 'breakout', 'micro_scalp', 'funding_predator', or 'both'")
+    if key == "SIGNAL_MODE" and value not in ("pullback", "breakout", "both"):
+        raise ValueError("SIGNAL_MODE must be 'pullback', 'breakout', or 'both'")
     if key == "SIGNAL_SCORE_THRESHOLD" and not (0 <= value <= 100):
         raise ValueError("SIGNAL_SCORE_THRESHOLD must be 0–100")
     if key == "SIGNAL_BATCH_WINDOW_S" and not (0.0 <= value <= 10.0):

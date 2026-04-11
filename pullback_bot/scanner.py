@@ -347,9 +347,7 @@ async def _run_kline_ws_shard(symbols: list[str], shard_id: int) -> None:
                         
                         # ZERO-LATENCY DISPATCH: Route the signal engine hook dynamically based on active mode BEFORE broadcasting
                         if is_closed:
-                            if config.SIGNAL_MODE == "micro_scalp" and interval == "1m":
-                                asyncio.create_task(_evaluate_symbol(sym), name=f"eval_{sym}")
-                            elif config.SIGNAL_MODE != "micro_scalp" and interval == "5m":
+                            if interval == "5m":
                                 asyncio.create_task(_evaluate_symbol(sym), name=f"eval_{sym}")
                                 
                         # Broadcast to any UI client subscribed to this symbol/interval
@@ -422,9 +420,7 @@ async def _evaluate_symbol(symbol: str) -> None:
         k5  = _kline_buffers[symbol]["5m"]
         k1m = _kline_buffers[symbol]["1m"]
         k4h = _kline_buffers[symbol]["4h"]
-        if config.SIGNAL_MODE != "micro_scalp" and (len(k15) < 210 or len(k5) < 50 or (config.FILTER_MTF_ENABLED and len(k4h) < 150)):
-            return
-        if config.SIGNAL_MODE == "micro_scalp" and len(k1m) < 20:
+        if len(k15) < 210 or len(k5) < 50 or (config.FILTER_MTF_ENABLED and len(k4h) < 150):
             return
 
         # Cooldown — avoid spamming signals for the same symbol
@@ -434,7 +430,7 @@ async def _evaluate_symbol(symbol: str) -> None:
 
         # ── Funding Rate Execution Guard ─────────────
         funding_guard_active = False
-        if config.FUNDING_GUARD_ENABLED and config.SIGNAL_MODE != "funding_predator":
+        if config.FUNDING_GUARD_ENABLED:
             import datetime
             now_t = datetime.datetime.utcnow()
             now_mins = now_t.hour * 60 + now_t.minute
@@ -544,13 +540,6 @@ async def _evaluate_symbol(symbol: str) -> None:
             if s and not _regime_blocks(s) and not _funding_blocks(s):
                 candidates.append(s)
                 
-        if mode == "micro_scalp":
-            s = await asyncio.to_thread(
-                signal_engine.check_micro_scalp, symbol, k1m[:]
-            )
-            if s and not _regime_blocks(s) and not _funding_blocks(s):
-                candidates.append(s)
-
         if mode in ("breakout", "both"):
             s = await asyncio.to_thread(
                 signal_engine.check_breakout, symbol, k15[:], k5[:], k4h[:], _oi_cache.get(symbol, [])
@@ -850,21 +839,13 @@ async def start(order_manager=None) -> None:
     if order_manager:
         set_order_manager(order_manager)
 
-    # Boot temporal clock strategy
-    asyncio.create_task(_run_funding_predator_clock(), name="funding_predator")
+
 
     # Initial watchlist
     active_watchlist = await build_watchlist()
     
     funding_rates_map = {}
-    if config.SIGNAL_MODE == "funding_predator":
-        try:
-            import binance_client as bc
-            api_rates = await bc.get_all_premium_indices()
-            for r in api_rates:
-                if r["symbol"] in active_watchlist:
-                    funding_rates_map[r["symbol"]] = float(r.get("lastFundingRate", 0))
-        except Exception: pass
+
 
     await wsb.broadcaster.broadcast(
         "scanner_watchlist",
@@ -919,71 +900,3 @@ async def _run_oi_worker() -> None:
                 await asyncio.sleep(2)  # delay between batches
         await asyncio.sleep(300)  # poll every 5 minutes
 
-async def _run_funding_predator_clock() -> None:
-    """
-    Dedicated clock loop for the Funding Predator.
-    Executes purely on UTC temporal checks bypassing the websocket queue entirely.
-    """
-    import binance_client as bc
-    import signal_engine
-    import order_manager as om
-    
-    target_tick_hours = {0, 8, 16}
-    target_hour_pre = {7, 15, 23}
-    
-    last_ambush_hour = -1
-    
-    while True:
-        await asyncio.sleep(1)
-        if config.SIGNAL_MODE != "funding_predator":
-            continue
-            
-        now = datetime.datetime.utcnow()
-        if now.hour in target_hour_pre and now.minute == 55 and now.second == 0 and last_ambush_hour != now.hour:
-            last_ambush_hour = now.hour
-            logger.info("Funding Predator: 5 minutes to tick. Scanning /premiumIndex...")
-            try:
-                rates = await bc.get_all_premium_indices()
-                candidates = []
-                for r in rates:
-                    fr = float(r.get("lastFundingRate", 0))
-                    if fr >= config.FUNDING_PREDATOR_THRESHOLD:
-                        candidates.append((r["symbol"], fr, float(r.get("markPrice", 0))))
-                
-                if not candidates:
-                    logger.info("Funding Predator: No severe rates found. Aborting ambush.")
-                    continue
-                    
-                candidates.sort(key=lambda x: x[1], reverse=True)
-                best_target_sym, best_rate, best_mark = candidates[0]
-                
-                logger.info(f"Funding Predator: Target locked on {best_target_sym} at {best_rate*100}%. Waiting for tick...")
-                
-                # Calculate precise sleep required to hit execution window exactly, CPU stays at 0%
-                now_inner = datetime.datetime.utcnow()
-                next_hour = None
-                for t_hour in sorted(target_tick_hours):
-                    if now_inner.hour < t_hour:
-                        next_hour = t_hour
-                        break
-                if next_hour is None:
-                    next_hour = min(target_tick_hours)
-                
-                target_dt = datetime.datetime(now_inner.year, now_inner.month, now_inner.day, next_hour, 0, 1)
-                if next_hour < now_inner.hour:
-                    target_dt += datetime.timedelta(days=1)
-                    
-                sleep_seconds = (target_dt - now_inner).total_seconds()
-                
-                if sleep_seconds > 0:
-                     await asyncio.sleep(sleep_seconds)
-                
-                logger.warning(f"Funding Predator: ZERO HOUR TICK EXECUTING FIRE ON {best_target_sym}")
-                signal = signal_engine.check_funding_predator(best_target_sym, best_rate, best_mark)
-                if signal:
-                    # Direct payload bypass injection to order manager (circumventing score batches)
-                    await om.order_manager.handle_signal(signal)
-                # Cooldown so we don't rapid-trigger
-                await asyncio.sleep(60)
-            except Exception as e:
-                logger.error(f"Funding Predator Error: {e}")
