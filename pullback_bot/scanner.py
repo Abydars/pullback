@@ -683,74 +683,14 @@ async def _flush_pending_signals() -> None:
             
     batch = valid_batch
 
-    # ── Direction-cap filter ───────────────────────────────────────────────────
-    # Seed counts from already-open trades so the cap accounts for existing
-    # directional exposure, not just signals in this batch.
-    cap = config.MAX_SAME_DIRECTION
-    open_trades = await db.get_open_trades()
-    long_count  = sum(1 for t in open_trades if t["direction"] == "LONG")
-    short_count = sum(1 for t in open_trades if t["direction"] == "SHORT")
-    admitted: list[dict] = []
-    capped:   list[dict] = []
-
-    for sig in batch:
-        if sig["direction"] == "LONG":
-            if long_count < cap:
-                long_count += 1
-                admitted.append(sig)
-            else:
-                capped.append(sig)
-        else:  # SHORT
-            if short_count < cap:
-                short_count += 1
-                admitted.append(sig)
-            else:
-                capped.append(sig)
-
-    logger.info(
-        "Signal batch: %d signal(s) total, %d admitted, %d capped by MAX_SAME_DIRECTION=%d "
-        "— admitted: %s",
-        len(batch), len(admitted), len(capped), cap,
-        ", ".join(f"{s['symbol']}({s['direction'][0]},{s['score']})" for s in admitted),
-    )
-    if capped:
-        logger.info(
-            "Direction-capped (logged, not traded): %s",
-            ", ".join(f"{s['symbol']}({s['direction'][0]},{s['score']})" for s in capped),
-        )
-
-    # Log capped signals immediately with acted_on=False so they appear in history
-    for sig in capped:
-        await db.insert_scanner_log(
-            symbol=sig["symbol"],
-            score=sig["score"],
-            direction=sig["direction"],
-            timestamp=sig["timestamp"],
-            acted_on=False,
-            ml_confidence=sig.get("ml_confidence"),
-            reason="Direction Capped (MAX_SAME_DIRECTION limit reached)",
-            metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type"), "reasons": sig.get("reasons", [])})
-        )
-
-    # ── Gradual build cap (PnL-aware) ────────────────────────────────────────
-    # Limit how many new trades open in a single scan.  admitted is already
-    # sorted highest-score first so the best signals are always taken.
-    # Deferred signals are not logged — they re-appear next scan if the
-    # setup is still valid on the new candle.
-    #
-    # When existing positions are losing, adding more trades increases
-    # correlated exposure.  Scale back the per-scan limit based on how
-    # negative total unrealized PnL is relative to PORTFOLIO_MIN_TP_USDT/2:
-    #   >= 0          → full INITIAL_BATCH_SIZE (market cooperating)
-    #   > -half_target → 1 (cautious)
-    #   <= -half_target → 0 (deeply negative, stop building)
-    # When current_open == 0 always use INITIAL_BATCH_SIZE (fresh cycle).
+    # ── 1. Determine Global & PnL-aware Admission Limits ────────────────────────
     import position_tracker as _pt
     import order_manager as _om
-    total_unrealized = sum(_pt.paper_unrealized.values()) if _pt.paper_unrealized else 0.0
-
-    current_open    = len(open_trades) + len(_om._opening)  # include in-flight trades
+    
+    open_trades = await db.get_open_trades()
+    current_open = len(open_trades) + len(_om._opening)
     available_slots = config.MAX_OPEN_TRADES - current_open
+    total_unrealized = sum(_pt.paper_unrealized.values()) if _pt.paper_unrealized else 0.0
 
     if current_open == 0:
         pnl_limit = config.INITIAL_BATCH_SIZE
@@ -768,26 +708,64 @@ async def _flush_pending_signals() -> None:
             g_reason = f"Drawdown Guard Active (Unrealized: ${total_unrealized:.2f} <= -${half_target:.2f})"
 
     scan_limit = min(pnl_limit, available_slots)
-    this_scan  = admitted[:scan_limit]
-    deferred   = admitted[scan_limit:]
+    
+    if available_slots <= 0:
+        primary_reason = f"Deferred: MAX_OPEN_TRADES limit reached ({config.MAX_OPEN_TRADES} max slots full)"
+    elif pnl_limit == 0:
+        primary_reason = f"Deferred: {g_reason}"
+    else:
+        primary_reason = f"Deferred: Gradual Build Limits ({scan_limit} allowed per scan)"
 
-    if deferred:
-        # Determine the primary bottleneck blocking the remaining signals
-        if available_slots <= 0:
-            primary_reason = f"Deferred: MAX_OPEN_TRADES limit reached ({config.MAX_OPEN_TRADES} max slots full)"
-        elif pnl_limit == 0:
-            primary_reason = f"Deferred: {g_reason}"
+    # ── 2. Direction-cap filter & Trade Allocation ──────────────────────────────
+    cap = config.MAX_SAME_DIRECTION
+    long_count  = sum(1 for t in open_trades if t["direction"] == "LONG")
+    short_count = sum(1 for t in open_trades if t["direction"] == "SHORT")
+    
+    admitted: list[dict] = []
+    direction_capped: list[dict] = []
+    deferred: list[dict] = []
+
+    for sig in batch:
+        dir_cap_hit = False
+        if sig["direction"] == "LONG" and long_count >= cap:
+            dir_cap_hit = True
+        elif sig["direction"] == "SHORT" and short_count >= cap:
+            dir_cap_hit = True
+
+        # Ensure we only apply "Direction Capped" if it genuinely survived the Scan Limit.
+        # If we have 0 slots remaining (e.g. Drawdown Guard), ALL remaining batch items are Deferred.
+        if len(admitted) >= scan_limit:
+            deferred.append(sig)
+        elif dir_cap_hit:
+            direction_capped.append(sig)
         else:
-            primary_reason = f"Deferred: Gradual Build Limits ({scan_limit} allowed per scan, {len(deferred)} excessive)"
+            # We have slots available AND it passes direction cap. Welcome to the portfolio!
+            if sig["direction"] == "LONG":
+                long_count += 1
+            else:
+                short_count += 1
+            admitted.append(sig)
 
+    logger.info(
+        "Signal batch: %d total, %d admitted, %d direction-capped, %d deferred "
+        "[Limit=%d, Open=%d, Unrealized=%.2f]",
+        len(batch), len(admitted), len(direction_capped), len(deferred),
+        scan_limit, current_open, total_unrealized
+    )
+    if direction_capped:
         logger.info(
-            "Gradual build: %d opening this scan, %d deferred — "
-            "open=%d, unrealized=%.2f, limit=%d",
-            len(this_scan), len(deferred), current_open, total_unrealized, scan_limit,
+            "Direction-capped (logged): %s",
+            ", ".join(f"{s['symbol']}({s['direction'][0]},{s['score']})" for s in direction_capped),
         )
-        # Log deferred signals so they appear in scanner history / UI.
-        # acted_on=False because no trade was opened this scan; the signal
-        # may re-fire on the next candle if the setup remains valid.
+    
+    for sig in direction_capped:
+        await db.insert_scanner_log(
+            symbol=sig["symbol"], score=sig["score"], direction=sig["direction"], timestamp=sig["timestamp"],
+            acted_on=False, ml_confidence=sig.get("ml_confidence"),
+            reason=f"Direction Capped (MAX_SAME_DIRECTION={cap} limit reached)",
+            metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type"), "reasons": sig.get("reasons", [])})
+        )
+    if deferred:
         for sig in deferred:
             await db.insert_scanner_log(
                 symbol=sig["symbol"],
@@ -819,8 +797,8 @@ async def _flush_pending_signals() -> None:
             metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type"), "reasons": sig.get("reasons", [])})
         )
 
-    if this_scan:
-        await asyncio.gather(*[asyncio.create_task(_act(sig)) for sig in this_scan])
+    if admitted:
+        await asyncio.gather(*[asyncio.create_task(_act(sig)) for sig in admitted])
 
 
 # ── Mark-price WebSocket (for paper PnL) ─────────────────────────────────────
