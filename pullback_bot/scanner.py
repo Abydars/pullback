@@ -376,9 +376,23 @@ async def _run_kline_ws_shard(symbols: list[str], shard_id: int) -> None:
             backoff = min(backoff * 2, 30)
 
 async def _run_kline_ws() -> None:
-    """Manager loop that spawns sharded connections for the active watchlist."""
+    """Manager loop that spawns sharded connections for the required symbols."""
     try:
-        symbols = list(active_watchlist)
+        import db
+        import ws_broadcaster as wsb
+        
+        required = set(active_watchlist)
+        
+        # Add all open trade symbols to keep their momentum logic active!
+        open_trades = await db.get_open_trades()
+        for t in open_trades:
+            required.add(t["symbol"])
+            
+        # Add all UI-subscribed chart symbols
+        for sym, _ in wsb.broadcaster._chart_subs.values():
+            required.add(sym.upper())
+            
+        symbols = list(required)
         chunk_size = 300  # Well below 341 max streams limit per connection
         chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
         
@@ -868,6 +882,14 @@ async def start(order_manager=None) -> None:
     asyncio.create_task(_auto_train_missing_models(list(active_watchlist)))
     
     logger.info("Scanner started — evaluation driven by 15m candle close events.")
+
+def request_kline_ws_restart() -> None:
+    """Invoked explicitly by main.py when UI subscribes to a new missing symbol."""
+    global _kline_ws_task
+    if _kline_ws_task and not _kline_ws_task.done():
+        _kline_ws_task.cancel()
+    _kline_ws_task = asyncio.create_task(_run_kline_ws(), name="kline_ws")
+    logger.info("Kline WS dynamically restarted for UI/Trade requirements.")
 
 async def _run_oi_worker() -> None:
     """Periodically fetches open interest history for all active symbols."""

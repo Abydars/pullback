@@ -195,6 +195,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     symbol = msg.get("symbol", "BTCUSDT").upper()
                     interval = msg.get("interval", "15m")
                     await wsb.broadcaster.subscribe_chart(ws, symbol, interval)
+                    
+                    if symbol not in scanner._kline_buffers or not scanner._kline_buffers[symbol].get(interval, []):
+                        # The symbol is completely dead (not in active_watchlist or open trades)
+                        # We must seed it instantly and restart the WS to pick it up live
+                        await scanner._seed_klines(symbol)
+                        scanner.request_kline_ws_restart()
+
                     # Send buffered kline history for that symbol/interval
                     buf = scanner._kline_buffers.get(symbol, {}).get(interval, [])
                     await wsb.broadcaster.send_to(ws, "kline_history", {
