@@ -290,7 +290,17 @@ def generate_insights(stats: Dict[str, Any]) -> List[Dict[str, str]]:
             worst_session = s_name
     
     if worst_session and worst_pnl < -15.0:
-        insights.append({"type": "warning", "message": f"Timezone Bleed: The {worst_session} session destroys capital systematically ({worst_pnl:.2f} total loss). Turn the bot off dynamically during this window."})
+        session_utc_map = {
+            "Sydney": "21:00-06:00",
+            "Tokyo": "00:00-09:00",
+            "Asia": "00:00-08:00",
+            "London": "08:00-16:00",
+            "London/NY": "13:00-16:00",
+            "New York": "13:00-21:00",
+            "After Hours": "21:00-00:00"
+        }
+        utc_time = session_utc_map.get(worst_session, "")
+        insights.append({"type": "warning", "message": f"Timezone Bleed: The {worst_session} session ({utc_time} UTC) destroys capital systematically ({worst_pnl:.2f} total loss). Turn the bot off dynamically during this window."})
 
     # ── Duration Reversal Logic ──
     if summary["avg_loser_duration_s"] > summary["avg_winner_duration_s"] * 1.5 and summary["avg_loser_duration_s"] > 3600:
