@@ -36,6 +36,35 @@ def _net_pnl(gross: float, entry: float, close: float, qty: float) -> float:
     return gross - entry_fee - exit_fee
 
 
+def _compute_fast_rsi(candles: list[dict], period: int = 5) -> float:
+    """Computes a lightweight Wilder's RSI from a list of generic candle dicts."""
+    if not candles or len(candles) <= period:
+        return 50.0
+
+    gains = []
+    losses = []
+    for i in range(1, len(candles)):
+        change = candles[i]["close"] - candles[i-1]["close"]
+        if change > 0:
+            gains.append(change)
+            losses.append(0.0)
+        else:
+            gains.append(0.0)
+            losses.append(abs(change))
+            
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    
+    for i in range(period, len(gains)):
+        avg_gain = ((avg_gain * (period - 1)) + gains[i]) / period
+        avg_loss = ((avg_loss * (period - 1)) + losses[i]) / period
+        
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
 def _enrich_position(trade: dict, mark: float, raw_pnl: float) -> dict:
     """
     Compute derived position fields from stored trade data.
@@ -327,24 +356,54 @@ async def _paper_tick() -> None:
 
                 # ── Activate trailing (only when USE_TAKE_PROFIT + USE_TRAILING) ─
                 trail_active = _trail_active.get(tid, False)
-                if not trail_active and config.USE_TAKE_PROFIT and config.USE_TRAILING:
-                    armed = (direction == "LONG" and mark >= trail_arm) or \
-                            (direction == "SHORT" and mark <= trail_arm)
-                    if armed:
-                        _trail_active[tid] = True
-                        _trail_extreme[tid] = mark
-                        trail_active = True
-                        logger.info(
-                            "Trail armed: #%d %s %s mark=%.6f arm=%.6f",
-                            tid, symbol, direction, mark, trail_arm,
-                        )
+                
+                # Smart Engine Analysis
+                smart_rsi = None
+                if getattr(config, "SMART_TRAILING_ENABLED", True):
+                    import scanner
+                    klines = scanner._kline_buffers.get(symbol, {}).get("5m", [])
+                    if klines:
+                        smart_rsi = _compute_fast_rsi(klines, period=5)
+                        if smart_rsi is not None:
+                            # Dynamically map trail_dist based on momentum
+                            if direction == "LONG":
+                                if smart_rsi > 70: trail_dist = atr_estimate * 0.3
+                                elif smart_rsi < 55: trail_dist = atr_estimate * 0.5
+                            else:
+                                if smart_rsi < 30: trail_dist = atr_estimate * 0.3
+                                elif smart_rsi > 45: trail_dist = atr_estimate * 0.5
 
-                # ── Compute hit price ─────────────────────────────────────────
                 hit_price: Optional[float] = None
                 close_reason: Optional[str] = None
                 trail_stop: Optional[float] = None
 
-                if trail_active:
+                if not trail_active and config.USE_TAKE_PROFIT and config.USE_TRAILING:
+                    armed = (direction == "LONG" and mark >= trail_arm) or \
+                            (direction == "SHORT" and mark <= trail_arm)
+                    
+                    if armed:
+                        smart_dump = False
+                        if smart_rsi is not None:
+                            if direction == "LONG" and smart_rsi >= 75:
+                                smart_dump = True
+                            elif direction == "SHORT" and smart_rsi <= 25:
+                                smart_dump = True
+
+                        if smart_dump:
+                            hit_price = mark  # Close exactly at the exhausted mark price
+                            close_reason = "SMART_TP"
+                        else:
+                            _trail_active[tid] = True
+                            _trail_extreme[tid] = mark
+                            trail_active = True
+                            logger.info(
+                                "Trail armed: #%d %s %s mark=%.6f arm=%.6f",
+                                tid, symbol, direction, mark, trail_arm,
+                            )
+
+                if close_reason == "SMART_TP":
+                    pass # Skip other checks, execute dump
+                elif trail_active:
                     # Update extreme and derive trailing stop
                     if direction == "LONG":
                         _trail_extreme[tid] = max(_trail_extreme.get(tid, mark), mark)

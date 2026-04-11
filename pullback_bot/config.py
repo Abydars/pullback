@@ -147,6 +147,8 @@ MAX_LEVERAGE: int = _int("MAX_LEVERAGE", 20)
 # USE_TRAILING: True = trail arm activates a trailing stop.
 # False = arm price is a fixed TP; trade closes immediately when hit.
 USE_TRAILING: bool = _bool("USE_TRAILING", True)
+# SMART_TRAILING_ENABLED: Override default trailing with dynamic momentum evaluation at TP.
+SMART_TRAILING_ENABLED: bool = _bool("SMART_TRAILING_ENABLED", True)
 # USE_STOP_LOSS: True = place a hard SL order when entering a trade.
 # False = no SL order is placed (use only if you manage risk another way).
 USE_STOP_LOSS: bool = _bool("USE_STOP_LOSS", True)
@@ -223,6 +225,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "INITIAL_BATCH_SIZE":        int,
     "MAX_LEVERAGE":              int,
     "USE_TRAILING":              bool,
+    "SMART_TRAILING_ENABLED":    bool,
     "USE_STOP_LOSS":             bool,
     "USE_TAKE_PROFIT":           bool,
     "SYMBOL_COOLDOWN_MINUTES":   int,

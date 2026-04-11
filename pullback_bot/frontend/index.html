@@ -3979,6 +3979,7 @@
         SL: { cls: 'hr-sl', label: 'SL' },
         TRAIL: { cls: 'hr-trail', label: 'TRAIL' },
         TP: { cls: 'hr-tp', label: 'TP' },
+        SMART_TP: { cls: 'hr-tp', label: 'SMART TP' },
         MANUAL: { cls: 'hr-manual', label: 'MANUAL' },
         PORTFOLIO_SL: { cls: 'hr-pf-sl', label: 'PORT SL' },
         SMART_PORT_SL: { cls: 'hr-pf-sl', label: 'SMART SL' },
@@ -4499,6 +4500,10 @@
           {
             key: 'USE_TRAILING', label: 'Trailing Stop', type: 'select', options: ['true', 'false'],
             hint: 'true = trail arm activates a trailing stop that follows the peak (trail distance = 1×ATR). false = arm price is a fixed TP.'
+          },
+          {
+            key: 'SMART_TRAILING_ENABLED', label: 'Smart Engine (Take-Profit intercept)', type: 'select', options: ['true', 'false'],
+            hint: 'true = intercepts TP to check momentum. Books instant profit if dumped/exhausted; widens dynamic trailing if booming.'
           },
           {
             key: 'USE_STOP_LOSS', label: 'Stop Loss', type: 'select', options: ['true', 'false'],
