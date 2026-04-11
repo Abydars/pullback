@@ -290,27 +290,29 @@ def check_pullback(
     score = 0
     reasons: list[str] = []
 
-    # ── Parse Candles ──
+    # ── 15m Macro Indicators ──
     close15 = df15["close"]
-    high15  = df15["high"]
-    low15   = df15["low"]
-    open15  = df15["open"]
-    
     ema50 = _ema(close15, 50)
     ema200 = _ema(close15, 200)
-
-    last_close = float(close15.iloc[-1])
-    last_high  = float(high15.iloc[-1])
-    last_low   = float(low15.iloc[-1])
-    last_open  = float(open15.iloc[-1])
-
-    prev_close = float(close15.iloc[-2])
-    prev_high  = float(high15.iloc[-2])
-    prev_low   = float(low15.iloc[-2])
-    prev_open  = float(open15.iloc[-2])
-
+    
     last_ema50  = float(ema50.iloc[-1])
     last_ema200 = float(ema200.iloc[-1])
+
+    # ── 5m Execution Parameters ──
+    close5 = df5["close"]
+    high5  = df5["high"]
+    low5   = df5["low"]
+    open5  = df5["open"]
+
+    last_close = float(close5.iloc[-1])
+    last_high  = float(high5.iloc[-1])
+    last_low   = float(low5.iloc[-1])
+    last_open  = float(open5.iloc[-1])
+
+    prev_close = float(close5.iloc[-2])
+    prev_high  = float(high5.iloc[-2])
+    prev_low   = float(low5.iloc[-2])
+    prev_open  = float(open5.iloc[-2])
 
     # Indicators
     adx15      = float(_adx(df15, 14).iloc[-1])
@@ -469,9 +471,9 @@ def check_pullback(
     atr_avg20 = float(atr_series.iloc[-21:-1].mean()) if len(atr_series) > 21 else atr15
     atr_ratio = atr15 / atr_avg20 if atr_avg20 > 0 else 1.0
 
-    # Identify the true 5-candle structural swing high/low for anchoring
-    recent_low = float(df15["low"].iloc[-5:].min())
-    recent_high = float(df15["high"].iloc[-5:].max())
+    # Identify the true 5-candle 5m structural swing high/low for tight execution anchoring
+    recent_low = float(df5["low"].iloc[-5:].min())
+    recent_high = float(df5["high"].iloc[-5:].max())
 
     if direction == "LONG":
         # Anchor explicitly below the 5-candle structural fractal bottom + 0.75 ATR buffer (widened to absorb wicks)
@@ -492,7 +494,8 @@ def check_pullback(
         return None
 
     # --- ML Smart Filter ---
-    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15)
+    # Strip the last unclosed 15m live candle to match historical training perfectly
+    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15[:-1])
     if not ml_passed:
         logger.info(f"[{symbol}] ML Filter rejected pullback ({ml_conf:.2f} < threshold).")
         
@@ -543,8 +546,10 @@ def check_breakout(
         return None
 
     df15 = pd.DataFrame(klines_15m).astype(float)
+    df5 = pd.DataFrame(klines_5m).astype(float)
 
-    last        = df15.iloc[-1]
+    # ── 5m Execution Parameters ──
+    last        = df5.iloc[-1]
     last_close  = float(last["close"])
     last_high   = float(last["high"])
     last_low    = float(last["low"])
@@ -629,12 +634,9 @@ def check_breakout(
     # ── Volume surge mandate ──
     if avg_vol > 0:
         has_volume = False
-        if last_vol > avg_vol * 1.5:
+        # last_vol is now the 5m closed volume. Compare to 5m average equivalent (15m_avg / 3)
+        if last_vol > (avg_vol / 3) * 1.5:
             has_volume = True
-        elif len(klines_5m) > 1:
-            recent_5m_vol = max(float(klines_5m[-1]["volume"]), float(klines_5m[-2]["volume"]))
-            if recent_5m_vol > (avg_vol / 3) * 1.5:
-                has_volume = True
                 
         if has_volume:
             score += 20
@@ -735,7 +737,8 @@ def check_breakout(
             pass
 
     # --- ML Smart Filter ---
-    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15)
+    # Strip the last unclosed 15m live candle to match historical training perfectly
+    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15[:-1])
     if not ml_passed:
         logger.info(f"[{symbol}] ML Filter rejected BREAKOUT ({ml_conf:.2f} < threshold).")
         
