@@ -589,9 +589,29 @@ async def _evaluate_symbol(symbol: str) -> None:
                         
                         if corr > 0.85:
                             logger.info("Guard: Blocked %s %s due to POSITIVE correlation (%.2f) with open trade %s", symbol, sig["direction"], corr, open_sym)
+                            await db.insert_scanner_log(
+                                symbol=symbol,
+                                score=sig["score"],
+                                direction=sig["direction"],
+                                timestamp=now,
+                                acted_on=False,
+                                ml_confidence=sig.get("ml_confidence"),
+                                reason=f"Blocked: POSITIVE correlation ({corr:.2f}) with open trade {open_sym}",
+                                metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type"), "reasons": sig.get("reasons", [])})
+                            )
                             return
                         if corr < -0.65:
                             logger.info("Guard: Blocked %s %s due to INVERSE hedges (%.2f) with open trade %s", symbol, sig["direction"], corr, open_sym)
+                            await db.insert_scanner_log(
+                                symbol=symbol,
+                                score=sig["score"],
+                                direction=sig["direction"],
+                                timestamp=now,
+                                acted_on=False,
+                                ml_confidence=sig.get("ml_confidence"),
+                                reason=f"Blocked: INVERSE hedge ({corr:.2f}) with open trade {open_sym}",
+                                metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type"), "reasons": sig.get("reasons", [])})
+                            )
                             return
 
         _last_signal_ts[symbol] = now
@@ -734,20 +754,32 @@ async def _flush_pending_signals() -> None:
 
     if current_open == 0:
         pnl_limit = config.INITIAL_BATCH_SIZE
+        g_reason = "Fresh Cycle (Unrestricted limits)"
     else:
         half_target = config.PORTFOLIO_MIN_TP_USDT / 2
         if total_unrealized >= 0:
             pnl_limit = config.INITIAL_BATCH_SIZE
+            g_reason = f"Profitable Portfolio (Unrealized: ${total_unrealized:.2f})"
         elif half_target > 0 and total_unrealized > -half_target:
             pnl_limit = 1
+            g_reason = f"Cautious Throttle (Unrealized: ${total_unrealized:.2f})"
         else:
             pnl_limit = 0
+            g_reason = f"Drawdown Guard Active (Unrealized: ${total_unrealized:.2f} <= -${half_target:.2f})"
 
     scan_limit = min(pnl_limit, available_slots)
     this_scan  = admitted[:scan_limit]
     deferred   = admitted[scan_limit:]
 
     if deferred:
+        # Determine the primary bottleneck blocking the remaining signals
+        if available_slots <= 0:
+            primary_reason = f"Deferred: MAX_OPEN_TRADES limit reached ({config.MAX_OPEN_TRADES} max slots full)"
+        elif pnl_limit == 0:
+            primary_reason = f"Deferred: {g_reason}"
+        else:
+            primary_reason = f"Deferred: Gradual Build Limits ({scan_limit} allowed per scan, {len(deferred)} excessive)"
+
         logger.info(
             "Gradual build: %d opening this scan, %d deferred — "
             "open=%d, unrealized=%.2f, limit=%d",
@@ -764,7 +796,7 @@ async def _flush_pending_signals() -> None:
                 timestamp=sig["timestamp"],
                 acted_on=False,
                 ml_confidence=sig.get("ml_confidence"),
-                reason="Deferred (Gradual Build Limit / Drawdown Guard)",
+                reason=primary_reason,
                 metadata=json.dumps({"entry": sig.get("entry_price"), "sl": sig.get("sl_price"), "tp": sig.get("tp1_price"), "atr": sig.get("atr"), "type": sig.get("signal_type"), "reasons": sig.get("reasons", [])})
             )
 
