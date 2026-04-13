@@ -166,7 +166,8 @@ def train_for_symbol(symbol: str):
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
     
-    model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+    # class_weight="balanced" prevents the model from heavily defaulting to 0 (Chop / Failure)
+    model = RandomForestClassifier(n_estimators=200, max_depth=5, class_weight="balanced", random_state=42)
     model.fit(X_train, y_train)
     
     train_acc = model.score(X_train, y_train)
