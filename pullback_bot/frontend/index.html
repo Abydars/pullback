@@ -3031,7 +3031,18 @@
       
       // Lightweight charts requires markers to be strictly sorted by time
       markers.sort((a, b) => a.time - b.time);
-      candleSeries.setMarkers(markers);
+      
+      // Deduplicate markers on the same candle to prevent vertical stacking
+      const uniqueMarkers = [];
+      let lastTime = 0;
+      for (const m of markers) {
+          if (m.time !== lastTime) {
+              uniqueMarkers.push(m);
+              lastTime = m.time;
+          }
+      }
+
+      candleSeries.setMarkers(uniqueMarkers);
     }
 
     function clearTradeLines() {
