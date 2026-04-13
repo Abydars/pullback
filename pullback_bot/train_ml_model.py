@@ -84,7 +84,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def build_targets(df: pd.DataFrame, target_pct: float = 0.015, stop_pct: float = 0.01) -> pd.DataFrame:
     """
-    Creates target variable: 1 if high hits target_pct before low hits stop_pct.
+    Creates directional target variable: 
+      1 if LONG succeeds (hits target_pct before stop_pct)
+     -1 if SHORT succeeds (hits -target_pct before +stop_pct)
+      0 if price hits SL for both sides or chops (fails)
     Looks up to 8 candles ahead.
     """
     df = df.copy()
@@ -96,19 +99,47 @@ def build_targets(df: pd.DataFrame, target_pct: float = 0.015, stop_pct: float =
     
     for i in range(len(df) - 8):
         c = closes[i]
-        success = False
-        t_price = c * (1 + target_pct)
-        s_price = c * (1 - stop_pct)
+        
+        # LONG constraints
+        l_target = c * (1 + target_pct)
+        l_stop = c * (1 - stop_pct)
+        
+        # SHORT constraints
+        s_target = c * (1 - target_pct)
+        s_stop = c * (1 + stop_pct)
+        
+        l_success = False
+        s_success = False
         
         for j in range(1, 9):
-            if lows[i+j] <= s_price:
-                success = False
+            h = highs[i+j]
+            l = lows[i+j]
+            
+            # Evaluate LONG: If it hits stop-loss first, it's dead. Else if it hits target, it succeeds.
+            if l <= l_stop:
                 break
-            if highs[i+j] >= t_price:
-                success = True
+            if h >= l_target:
+                l_success = True
                 break
                 
-        target_hit.append(1 if success else 0)
+        for j in range(1, 9):
+            h = highs[i+j]
+            l = lows[i+j]
+            
+            # Evaluate SHORT: If it hits stop-loss (high) first, it's dead. Else if it hits target (low), it succeeds.
+            if h >= s_stop:
+                break
+            if l <= s_target:
+                s_success = True
+                break
+                
+        if l_success and not s_success:
+            target_hit.append(1)
+        elif s_success and not l_success:
+            target_hit.append(-1)
+        else:
+            # Either both succeeded (massive volatility chop, unsafe) or neither did
+            target_hit.append(0)
         
     for _ in range(8):
         target_hit.append(np.nan)

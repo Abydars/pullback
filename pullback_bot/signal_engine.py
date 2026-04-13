@@ -163,7 +163,7 @@ def _get_ml_model(symbol: str):
         _ML_MODELS[symbol] = None
     return None
 
-def _run_ml_filter(symbol: str, df: pd.DataFrame) -> tuple[bool, float, str]:
+def _run_ml_filter(symbol: str, df: pd.DataFrame, direction: str) -> tuple[bool, float, str]:
     """
     Returns (passed, confidence, reason).
     """
@@ -213,8 +213,16 @@ def _run_ml_filter(symbol: str, df: pd.DataFrame) -> tuple[bool, float, str]:
             return True, 1.0, "ml_nan_inputs"
             
         proba = model.predict_proba(current_features)[0]
-        # proba[1] is the probability of class 1 (Success)
-        success_prob = float(proba[1]) if len(proba) > 1 else float(proba[0])
+        classes = list(model.classes_)
+        
+        target_class = 1 if direction == "LONG" else -1
+        
+        if target_class in classes:
+            idx = classes.index(target_class)
+            success_prob = float(proba[idx])
+        else:
+            # If the model fundamentally didn't see enough of this class in training, fail safe
+            success_prob = 0.0
         
         threshold = getattr(config, "ML_CONFIDENCE_THRESHOLD", 0.70)
         if success_prob >= threshold:
@@ -495,7 +503,7 @@ def check_pullback(
 
     # --- ML Smart Filter ---
     # Strip the last unclosed 15m live candle to match historical training perfectly
-    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15[:-1])
+    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15[:-1], direction)
     if not ml_passed:
         logger.info(f"[{symbol}] ML Filter rejected pullback ({ml_conf:.2f} < threshold).")
         
@@ -738,7 +746,7 @@ def check_breakout(
 
     # --- ML Smart Filter ---
     # Strip the last unclosed 15m live candle to match historical training perfectly
-    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15[:-1])
+    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15[:-1], direction)
     if not ml_passed:
         logger.info(f"[{symbol}] ML Filter rejected BREAKOUT ({ml_conf:.2f} < threshold).")
         
