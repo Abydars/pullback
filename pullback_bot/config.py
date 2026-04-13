@@ -66,6 +66,8 @@ FILTER_RSI_ENABLED: bool = _bool("FILTER_RSI_ENABLED", True)
 # ── ML Smart Filter Settings ──────────────────────────────────────────────────
 ML_FILTER_ENABLED: bool = _bool("ML_FILTER_ENABLED", False)
 ML_CONFIDENCE_THRESHOLD: float = _float("ML_CONFIDENCE_THRESHOLD", 0.70)
+ML_TARGET_PCT: float = _float("ML_TARGET_PCT", 0.015)
+ML_STOP_PCT: float = _float("ML_STOP_PCT", 0.01)
 
 # ── Binance Credentials ───────────────────────────────────────────────────────
 BINANCE_API_KEY: str = _get("BINANCE_API_KEY", "")
@@ -216,6 +218,10 @@ EDITABLE_KEYS: dict[str, type] = {
     "BTC_CORR_THRESHOLD":        float,
     "CAPITAL":                   float,
     "RISK_PCT":                  float,
+    "ML_FILTER_ENABLED":         bool,
+    "ML_CONFIDENCE_THRESHOLD":   float,
+    "ML_TARGET_PCT":             float,
+    "ML_STOP_PCT":               float,
     "MAX_OPEN_TRADES":           int,
     "MAX_SAME_DIRECTION":        int,
     "INITIAL_BATCH_SIZE":        int,

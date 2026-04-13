@@ -4458,6 +4458,15 @@
         ],
       },
       {
+        section: 'ML & AI',
+        fields: [
+          { key: 'ML_FILTER_ENABLED', label: 'Enable ML Classifier', type: 'select', options: ['true', 'false'], hint: 'If true, uses the trained Random Forest model to block statistically improbable setups.' },
+          { key: 'ML_CONFIDENCE_THRESHOLD', label: 'ML Confidence Minimum', type: 'number', step: '0.01', hint: 'Minimum probability required to pass (0.0 to 1.0).' },
+          { key: 'ML_TARGET_PCT', label: 'ML Target Return (%)', type: 'number', step: '0.001', hint: 'The threshold to define a successful +1 trade for the model (e.g., 0.015 = 1.5% pump).' },
+          { key: 'ML_STOP_PCT', label: 'ML Stop-Loss (%)', type: 'number', step: '0.001', hint: 'The failure loss threshold mapped to outcome 0 by the model.' },
+        ],
+      },
+      {
         section: 'Risk / Order',
         fields: [
           {

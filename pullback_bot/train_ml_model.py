@@ -82,7 +82,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     df.dropna(inplace=True)
     return df
 
-def build_targets(df: pd.DataFrame, target_pct: float = 0.015, stop_pct: float = 0.01) -> pd.DataFrame:
+def build_targets(df: pd.DataFrame, target_pct: float = None, stop_pct: float = None) -> pd.DataFrame:
+    if target_pct is None: target_pct = config.ML_TARGET_PCT
+    if stop_pct is None: stop_pct = config.ML_STOP_PCT
     """
     Creates directional target variable: 
       1 if LONG succeeds (hits target_pct before stop_pct)
@@ -204,6 +206,8 @@ def get_active_symbols() -> list[str]:
     return [p[0] for p in usdt_pairs]
 
 if __name__ == "__main__":
+    import asyncio
+    asyncio.run(config.load_from_db())
     logger.info("Starting ML Training Pipeline...")
     # Fetch all symbols meeting scanner requirements
     symbols = get_active_symbols()
