@@ -4456,6 +4456,7 @@
             options: ['pullback', 'breakout', 'both'],
             hint: 'pullback = 15m trend · breakout = 15m box exit · both = pullback & breakout'
           },
+          { key: 'SMC_VIOLENT_BYPASS', label: 'SMC Violent Bypass (Breakouts)', type: 'select', options: ['true', 'false'], hint: 'If true, skips 5m structural retests and blindly chases breakouts if extreme volume/momentum is detected.' },
 
           { key: 'FILTER_MTF_ENABLED', label: 'MTF Alignment (4H)', type: 'select', options: ['true', 'false'], hint: 'If true, blocks 15m signals that trade against the 4H EMA 200 Macro Trend.' },
           { key: 'FILTER_OI_ENABLED', label: 'Open Interest (OI) Spike', type: 'select', options: ['true', 'false'], hint: 'If true, validates that fresh money is entering the market before permitting a breakout signal.' },

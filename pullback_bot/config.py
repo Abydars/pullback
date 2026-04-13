@@ -63,6 +63,9 @@ FILTER_OI_ENABLED: bool = _bool("FILTER_OI_ENABLED", True)
 FILTER_VWAP_ENABLED: bool = _bool("FILTER_VWAP_ENABLED", True)
 FILTER_RSI_ENABLED: bool = _bool("FILTER_RSI_ENABLED", True)
 
+# ── SMC Settings ──────────────────────────────────────────────────────────────
+SMC_VIOLENT_BYPASS: bool = _bool("SMC_VIOLENT_BYPASS", False)
+
 # ── ML Smart Filter Settings ──────────────────────────────────────────────────
 ML_FILTER_ENABLED: bool = _bool("ML_FILTER_ENABLED", False)
 ML_CONFIDENCE_THRESHOLD: float = _float("ML_CONFIDENCE_THRESHOLD", 0.70)
@@ -250,6 +253,7 @@ EDITABLE_KEYS: dict[str, type] = {
     "FILTER_OI_ENABLED":         bool,
     "FILTER_VWAP_ENABLED":       bool,
     "FILTER_RSI_ENABLED":        bool,
+    "SMC_VIOLENT_BYPASS":        bool,
 }
 
 # Keys that require a bot restart to take full effect

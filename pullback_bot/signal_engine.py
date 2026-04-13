@@ -666,9 +666,15 @@ def _check_breakout_impl(
     ob_high, ob_low = _detect_order_block(df5, bias, len(df5)-1, lookback=12)
     
     retest_tap = False
-    retest_tap = False
+    violent_bypass = False
     
-    # Strictly enforce 5M Structural Retest / Order Block validation
+    if getattr(config, "SMC_VIOLENT_BYPASS", False):
+        vol_ratio = last_15m_vol / max(avg_15m_vol, 1)
+        if vol_ratio >= 3.0 and adx_val >= 35.0:
+            violent_bypass = True
+            logger.info(f"[{symbol}] SMC Violent Bypass Activated! Ext. Vol: {vol_ratio:.2f}x ADX: {adx_val:.1f}")
+    
+    # Evaluate 5M Structural Retest / Order Block validation
     if bias == "LONG":
         tap_level = broken_level * 1.002
         if last5['low'] <= tap_level or (ob_high > 0 and last5['low'] <= ob_high):
@@ -680,7 +686,8 @@ def _check_breakout_impl(
             if _is_engulfing(last5, prev5) == "BEARISH":
                 retest_tap = True
 
-    if not retest_tap: 
+    # If it failed to retest, and didn't qualify for a momentum bypass, cancel setup
+    if not retest_tap and not violent_bypass: 
         return None
 
     score = 85 if retest_tap else 90 
