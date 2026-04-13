@@ -357,13 +357,14 @@ async def insert_scanner_log(
             "score": score,
             "direction": direction,
             "timestamp": timestamp,
-            "acted_on": acted_on,
-            "ml_confidence": ml_confidence,
-            "reason": reason,
-            "metadata": metadata
+            "acted_on": bool(acted_on),
+            "ml_confidence": float(ml_confidence) if ml_confidence is not None else None,
+            "reason": str(reason) if reason is not None else None,
+            "metadata": str(metadata) if metadata is not None else None
         })
-    except Exception:
-        pass
+    except Exception as e:
+        import traceback
+        logger.error(f"WS Broadcast error: {e}")
 
 
 async def get_recent_scanner_log(limit: int = 100, offset: int = 0) -> list[dict]:
