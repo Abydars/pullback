@@ -85,7 +85,7 @@ else:
 # ── Scanner Settings ──────────────────────────────────────────────────────────
 MIN_VOLUME_24H: float = _float("MIN_VOLUME_24H", 20_000_000)   # USDT
 MIN_PRICE_CHANGE_PCT: float = _float("MIN_PRICE_CHANGE_PCT", 0.5)
-MAX_WATCHLIST_SIZE: int = _int("MAX_WATCHLIST_SIZE", 50)       # Server optimization cap
+MAX_WATCHLIST_SIZE: int = _int("MAX_WATCHLIST_SIZE", 300)       # Increased capacity to scan full market on 32GB Server
 WATCHLIST_REFRESH_MINUTES: int = _int("WATCHLIST_REFRESH_MINUTES", 15)
 
 # ── Signal Settings ───────────────────────────────────────────────────────────
