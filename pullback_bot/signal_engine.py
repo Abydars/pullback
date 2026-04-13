@@ -525,9 +525,9 @@ def check_pullback(
     atr_avg20 = float(atr_series.iloc[-21:-1].mean()) if len(atr_series) > 21 else atr15
     atr_ratio = atr15 / atr_avg20 if atr_avg20 > 0 else 1.0
 
-    # Identify the true 5-candle 5m structural swing high/low for tight execution anchoring
-    recent_low = float(df5["low"].iloc[-5:].min())
-    recent_high = float(df5["high"].iloc[-5:].max())
+    # Identify the true 15-candle 5m structural swing high/low for secure execution anchoring (1 hour 15 mins structure)
+    recent_low = float(df5["low"].iloc[-15:].min())
+    recent_high = float(df5["high"].iloc[-15:].max())
 
     if direction == "LONG":
         # Anchor explicitly below the 5-candle structural fractal bottom + 0.75 ATR buffer (widened to absorb wicks)
