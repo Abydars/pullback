@@ -139,6 +139,52 @@ def _adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return dx.ewm(alpha=1/period, adjust=False).mean()
 
 
+# ── SMC / Price Action Helpers ────────────────────────────────────────────────
+
+def _find_swing_levels(df: pd.DataFrame, window: int = 5) -> tuple[float, float]:
+    """Finds the most recent prominent structural swing high and low using centered rolling fractals."""
+    highs = df['high'].rolling(window=window*2+1, center=True).max()
+    lows = df['low'].rolling(window=window*2+1, center=True).min()
+    
+    valid_highs = df['high'][df['high'] == highs].iloc[:-window]
+    valid_lows = df['low'][df['low'] == lows].iloc[:-window]
+    
+    recent_high = valid_highs.iloc[-1] if len(valid_highs) > 0 else df['high'].max()
+    recent_low = valid_lows.iloc[-1] if len(valid_lows) > 0 else df['low'].min()
+    return float(recent_high), float(recent_low)
+
+
+def _detect_order_block(df: pd.DataFrame, direction: str, origin_idx: int, lookback: int = 15) -> tuple[float, float]:
+    """
+    Scans backward from the breakout impulse to flag the Institutional Order Block (OB).
+    Returns (OB_High, OB_Low). If not found, returns (0, 0).
+    """
+    start_point = min(origin_idx, len(df)-1)
+    for i in range(start_point, max(0, start_point - lookback), -1):
+        c = df.iloc[i]
+        is_green = c['close'] > c['open']
+        is_red = c['close'] < c['open']
+        if direction == "LONG" and is_red:
+            return float(c['high']), float(c['low'])
+        elif direction == "SHORT" and is_green:
+            return float(c['high']), float(c['low'])
+    return 0.0, 0.0
+
+
+def _is_engulfing(curr: pd.Series, prev: pd.Series) -> str:
+    """Returns 'BULLISH', 'BEARISH', or None depending on strict engulfing criteria."""
+    curr_green = curr['close'] > curr['open']
+    curr_red = curr['close'] < curr['open']
+    prev_green = prev['close'] > prev['open']
+    prev_red = prev['close'] < prev['open']
+    
+    if curr_green and prev_red and curr['close'] > prev['open'] and curr['open'] <= prev['close']:
+        return "BULLISH"
+    if curr_red and prev_green and curr['close'] < prev['open'] and curr['open'] >= prev['close']:
+        return "BEARISH"
+    return None
+
+
 # ── ML Filter Integration ──────────────────────────────────────────────────────
 
 _ML_MODELS = {}
@@ -545,248 +591,132 @@ def check_breakout(
     oi_hist: list[dict] = [],
 ) -> Optional[dict]:
     """
-    V2 Structural Breakout / Breakdown detector.
-
-    Scans for explosive momentum breaking out of a proven consolidation Box,
-    aligned explicitly with macro-trend flow, printing shaved-head block candles.
+    SMC MTF Trend-Breakout System (4H -> 15M -> 5M)
+    1. 4H checks for strict structural bias (Higher-Highs / EMA array).
+    2. 15M identifies structural pivots and confirms a violent Breakout.
+    3. 5M scans for the generating Order Block, waits for a Retest/Pullback tap,
+       or allows a 'Violent Bypass' if momentum is statistically extreme.
     """
-    if len(klines_15m) < 50:
+    if len(klines_15m) < 50 or len(klines_5m) < 20 or len(klines_4h) < 20: 
         return None
 
+    df4 = pd.DataFrame(klines_4h).astype(float)
     df15 = pd.DataFrame(klines_15m).astype(float)
     df5 = pd.DataFrame(klines_5m).astype(float)
 
-    # ── 5m Execution Parameters ──
-    last        = df5.iloc[-1]
-    last_close  = float(last["close"])
-    last_high   = float(last["high"])
-    last_low    = float(last["low"])
-    last_vol    = float(last["volume"])
-    last_open   = float(last["open"])
-
-    # 20 confirmed candles before the breakout candle
-    lookback = df15.iloc[-21:-1]
-    resistance = float(lookback["high"].max())   # breakout level  (LONG)
-    support    = float(lookback["low"].min())    # breakdown level (SHORT)
-
-    _atr_series = _atr(df15, 14)
-    atr15       = float(_atr_series.iloc[-1])
-    _atr_avg20  = float(_atr_series.iloc[-21:-1].mean()) if len(_atr_series) > 21 else atr15
-    atr_ratio   = atr15 / _atr_avg20 if _atr_avg20 > 0 else 1.0
-    avg_vol = float(df15["volume"].iloc[-21:-1].mean())
-
-    ema50_val = float(_ema(df15["close"], 50).iloc[-1]) if len(df15) >= 50 else None
-    ema200_val = float(_ema(df15["close"], 200).iloc[-1]) if len(df15) >= 200 else None
-    rsi_val    = float(_rsi(df15["close"], 14).iloc[-1]) if len(df15) >= 14 else 50.0
-
-    score: int = 0
-    reasons: list[str] = []
-    direction: Optional[str] = None
-
-    # ── 1. The Box Mandate (Consolidation Filter) ───────────────────────────
-    range_size = resistance - support
-    if range_size > (_atr_avg20 * 8.0):
-        # Range was too wide and noisy; not a coiled spring.
-        logger.info("Breakout rejected: %s range too wide (%f vs %f max)", symbol, range_size, _atr_avg20 * 8.0)
-        return None
+    # ── Phase A: 4H Market Structure Bias ──
+    ema21_4h = _ema(df4['close'], 21)
+    ema50_4h = _ema(df4['close'], 50)
+    last_4h_close = float(df4['close'].iloc[-1])
+    
+    if last_4h_close > ema21_4h.iloc[-1] and ema21_4h.iloc[-1] > ema50_4h.iloc[-1]:
+        bias = "LONG"
+    elif last_4h_close < ema21_4h.iloc[-1] and ema21_4h.iloc[-1] < ema50_4h.iloc[-1]:
+        bias = "SHORT"
     else:
-        score += 30
-        reasons.append("structural_consolidation")
+        return None 
 
-    # ── Determine breakout direction ─────────────────────────────────────────
-    if last_close > resistance:
-        if rsi_val > 70.0:
-            logger.info("Breakout rejected: %s LONG fakeout risk (RSI=%.1f)", symbol, rsi_val)
-            return None
-            
-        extension = last_close - resistance
-        if extension > (_atr_avg20 * 1.5):
-            logger.info("Breakout rejected: %s LONG too overextended (closed %.4f beyond res)", symbol, extension)
-            return None
-            
-        direction = "LONG"
-        score += 30
-        reasons.append("breakout")
+    # ── Phase B: 15M Structural Pivot Breakout ──
+    lookback_15m = df15.iloc[-50:-1]
+    res_15m, sup_15m = _find_swing_levels(lookback_15m, window=3)
+    
+    last15 = df15.iloc[-1]
+    prev15 = df15.iloc[-2]
+    
+    adx_val = _adx(df15, 14).iloc[-1]
+    if adx_val < 20: 
+        return None
         
-    elif last_close < support:
-        if rsi_val < 30.0:
-            logger.info("Breakdown rejected: %s SHORT fakeout risk (RSI=%.1f)", symbol, rsi_val)
-            return None
-            
-        extension = support - last_close
-        if extension > (_atr_avg20 * 1.5):
-            logger.info("Breakout rejected: %s SHORT too overextended (closed %.4f below sup)", symbol, extension)
-            return None
-            
-        direction = "SHORT"
-        score += 30
-        reasons.append("breakdown")
+    last_15m_vol = last15['volume']
+    avg_15m_vol = df15['volume'].iloc[-21:-1].mean()
+    
+    breakout_confirmed = False
+    broken_level = 0.0
+    
+    if bias == "LONG":
+        if last15['close'] > res_15m and prev15['close'] <= res_15m:
+            breakout_confirmed = True
+            broken_level = res_15m
     else:
-        return None   # no breakout on this candle
-
-    # ── MTF Alignment (4-Hour Macro Trend) ────────────────────────────────────
-    if config.FILTER_MTF_ENABLED and len(klines_4h) >= 200:
-        df4h = pd.DataFrame(klines_4h).astype(float)
-        ema200_4h = _ema(df4h["close"], 200)
-        current_4h_close = float(df4h["close"].iloc[-1])
-        current_4h_ema = float(ema200_4h.iloc[-1])
+        if last15['close'] < sup_15m and prev15['close'] >= sup_15m:
+            breakout_confirmed = True
+            broken_level = sup_15m
+    
+    if not breakout_confirmed:
+        return None
         
-        if direction == "LONG" and current_4h_close < current_4h_ema:
-            logger.debug("MTF Guard: Blocked LONG Breakout on %s (Below 4H EMA)", symbol)
+    # Phase C: 5M Execution & Retest
+    last5 = df5.iloc[-1]
+    prev5 = df5.iloc[-2]
+    
+    ob_high, ob_low = _detect_order_block(df5, bias, len(df5)-1, lookback=12)
+    
+    retest_tap = False
+    violent_bypass = False
+    
+    vol_ratio = last_15m_vol / max(avg_15m_vol, 1)
+    if vol_ratio >= 3.0 and adx_val >= 35.0:
+        violent_bypass = True
+        logger.info(f"[{symbol}] SMC Violent Bypass Activated! Ext. Vol: {vol_ratio:.2f}x ADX: {adx_val:.1f}")
+        
+    if not violent_bypass:
+        if bias == "LONG":
+            tap_level = broken_level * 1.002
+            if last5['low'] <= tap_level or (ob_high > 0 and last5['low'] <= ob_high):
+                if _is_engulfing(last5, prev5) == "BULLISH":
+                    retest_tap = True
+        else:
+            tap_level = broken_level * 0.998
+            if last5['high'] >= tap_level or (ob_low > 0 and last5['high'] >= ob_low):
+                if _is_engulfing(last5, prev5) == "BEARISH":
+                    retest_tap = True
+
+        if not retest_tap: 
             return None
-        if direction == "SHORT" and current_4h_close > current_4h_ema:
-            logger.debug("MTF Guard: Blocked SHORT Breakdown on %s (Above 4H EMA)", symbol)
-            return None
-            
-        score += 20
-        reasons.append("mtf_aligned")
 
-    # ── 2. Macro-Trend Cohesion ──────────────────────────────────────────────
-    if ema50_val and ema200_val:
-        if direction == "LONG":
-            if last_close < ema50_val or last_close < ema200_val:
-                # Fighting down-trend
-                return None
-        else:
-            if last_close > ema50_val or last_close > ema200_val:
-                # Fighting up-trend
-                return None
-
-    # ── Volume surge mandate ──
-    if avg_vol > 0:
-        has_volume = False
-        # last_vol is now the 5m closed volume. Compare to 5m average equivalent (15m_avg / 3)
-        if last_vol > (avg_vol / 3) * 1.5:
-            has_volume = True
-                
-        if has_volume:
-            score += 20
-            reasons.append("volume_surge")
-        else:
-            score -= 20
-            reasons.append("low_volume_penalty")
-
-    # ── 3. Ultra-Strict Close Conviction ─────────────────────────────────────
-    candle_range = last_high - last_low
-    if candle_range > 0:
-        if direction == "LONG":
-            close_position = (last_close - last_low) / candle_range
-            if close_position >= 0.8:        # closes in extreme upper 20%
-                score += 20
-                reasons.append("shaved_conviction")
-            else:
-                # Wick rejected resistance; fail trade.
-                return None
-        else:
-            close_position = (last_high - last_close) / candle_range
-            if close_position >= 0.8:        # closes in extreme lower 20%
-                score += 20
-                reasons.append("shaved_conviction")
-            else:
-                # Wick rejected support; fail trade.
-                return None
-
-    # ── Daily VWAP Bounce ───────────────────────────────────────────────────
-    if config.FILTER_VWAP_ENABLED:
-        vwap = _compute_daily_vwap(df15)
-        if vwap > 0:
-            dist_to_vwap = abs(last_close - vwap)
-            if dist_to_vwap <= (atr15 * 0.25):
-                score += 30
-                reasons.append("daily_vwap_bounce")
-
-    # ── RSI Divergence ──────────────────────────────────────────────────────
-    if config.FILTER_RSI_ENABLED:
-        df_rsi = _rsi(df15["close"], 14)
-        if len(df_rsi) > 20:
-            recent_price_low = float(df15["low"].iloc[-10:].min())
-            recent_rsi_low = float(df_rsi.iloc[-10:].min())
-            prev_price_low = float(df15["low"].iloc[-20:-10].min())
-            prev_rsi_low = float(df_rsi.iloc[-20:-10].min())
-            
-            recent_price_high = float(df15["high"].iloc[-10:].max())
-            recent_rsi_high = float(df_rsi.iloc[-10:].max())
-            prev_price_high = float(df15["high"].iloc[-20:-10].max())
-            prev_rsi_high = float(df_rsi.iloc[-20:-10].max())
-            
-            if direction == "LONG" and recent_price_low < prev_price_low and recent_rsi_low > prev_rsi_low:
-                score += 20
-                reasons.append("bullish_rsi_div")
-            elif direction == "SHORT" and recent_price_high > prev_price_high and recent_rsi_high < prev_rsi_high:
-                score += 20
-                reasons.append("bearish_rsi_div")
-
-    # ── Score gate ────────────────────────────────────────────────────────────
-    if score < config.SIGNAL_SCORE_THRESHOLD:
-        return None
-
-    # ── Early Distance Cap (Reject overextended late breakouts) ───────────────
-    # Reject the trade if price has already traveled more than 1.0 ATR from the breakout line
-    distance = (last_close - resistance) if direction == "LONG" else (support - last_close)
-    if distance > atr15 * 1.0:
-        logger.info("Breakout signal rejected: %s %s is overextended (dist: %.5f, atr: %.5f)", symbol, direction, distance, atr15)
-        return None
-
-    # ── Entry / SL / Trail Arm ────────────────────────────────────────────────
-    entry_price = last_close
-
-    if direction == "LONG":
-        sl_price  = round(max(resistance - atr15 * 0.5, entry_price - atr15 * 2.5), 8)
-        trail_arm = round(entry_price + atr15 * 1.0, 8)
+    score = 85 if retest_tap else 90 
+    reasons = ["smc_bias", "smc_breakout"]
+    if retest_tap: reasons.append("ob_retest_tap")
+    if violent_bypass: reasons.append("violent_bypass")
+    
+    entry_price = float(last5["close"])
+    _atr_series = _atr(df5, 14)
+    atr5 = float(_atr_series.iloc[-1])
+    
+    if bias == "LONG":
+        sl_price = ob_low - (atr5 * 0.5) if ob_low > 0 else (broken_level - (atr5 * 2.0))
+        dist_pct = (entry_price - sl_price) / sl_price
+        trail_arm = entry_price * (1 + (dist_pct * 1.5)) 
     else:
-        sl_price  = round(min(support + atr15 * 0.5, entry_price + atr15 * 2.5), 8)
-        trail_arm = round(entry_price - atr15 * 1.0, 8)
+        sl_price = ob_high + (atr5 * 0.5) if ob_high > 0 else (broken_level + (atr5 * 2.0))
+        dist_pct = (sl_price - entry_price) / entry_price
+        trail_arm = entry_price * (1 - (dist_pct * 1.5))
 
-    if sl_price <= 0:
-        return None
-
-    # ── Open Interest (OI) Spike Detection ────────────────────────────────────
-    if config.FILTER_OI_ENABLED and oi_hist and len(oi_hist) > 5:
-        try:
-            oi_start = float(oi_hist[0].get("sumOpenInterest", 0))
-            oi_end = float(oi_hist[-1].get("sumOpenInterest", 0))
-            if oi_start > 0:
-                oi_change = (oi_end - oi_start) / oi_start
-                if oi_change > 0.015:  # 1.5% genuine liquidity injection
-                    score += 20
-                    reasons.append("oi_spike")
-                elif oi_change < -0.015: # -1.5% liquidity drying up / squeeze trap
-                    logger.debug("OI Guard: Blocked %s %s (OI dropping by %.2f%%)", symbol, direction, oi_change * 100)
-                    return None
-        except Exception as e:
-            logger.debug("OI parsing error %s: %s", symbol, e)
-            pass
-
-    # --- ML Smart Filter ---
-    # Strip the last unclosed 15m live candle to match historical training perfectly
-    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15[:-1], direction)
+    ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15[:-1], bias)
     if not ml_passed:
-        logger.info(f"[{symbol}] ML Filter rejected BREAKOUT ({ml_conf:.2f} < threshold).")
-        
+        logger.info(f"[{symbol}] SMC ML Filter rejected ({ml_conf:.2f} < threshold).")
     reasons.append(ml_reason)
-    if "pass" in ml_reason:
-        score += 10
-
+    
     signal: dict = {
         "symbol":       symbol,
-        "direction":    direction,
+        "direction":    bias,
         "score":        score,
         "entry_price":  round(entry_price, 8),
-        "sl_price":     sl_price,
-        "tp1_price":    trail_arm,
-        "tp2_price":    trail_arm,
-        "atr":          round(atr15, 8),
-        "atr_ratio":    round(atr_ratio, 3),
+        "sl_price":     round(sl_price, 8),
+        "tp1_price":    round(trail_arm, 8),
+        "tp2_price":    round(trail_arm, 8),
+        "atr":          round(atr5, 8),
+        "atr_ratio":    1.0, 
         "timeframe":    "15m",
-        "timestamp":    int(last["open_time"] / 1000),
+        "timestamp":    int(last5["open_time"] / 1000),
         "reasons":      reasons,
         "signal_type":  "BREAKOUT",
         "ml_passed":    ml_passed,
         "ml_confidence": ml_conf,
     }
     logger.info(
-        "V2 Breakout Signal: %s %s score=%d sl=%.6f arm=%.6f atr=%.6f reasons=%s",
-        symbol, direction, score, sl_price, trail_arm, atr15, reasons,
+        "V2 SMC Breakout Signal: %s %s score=%d sl=%.6f arm=%.6f reasons=%s",
+        symbol, bias, score, sl_price, trail_arm, reasons,
     )
     return signal
 
