@@ -5290,14 +5290,16 @@
           try {
             const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
             if (meta.entry || meta.type) {
+              const tpPct = (meta.entry && meta.tp) ? Math.abs((Number(meta.tp) - Number(meta.entry)) / Number(meta.entry) * 100).toFixed(2) + '%' : '';
+              const slPct = (meta.entry && meta.sl) ? Math.abs((Number(meta.sl) - Number(meta.entry)) / Number(meta.entry) * 100).toFixed(2) + '%' : '';
               metaHtml = `
               <tr>
                 <td colspan="7" style="padding: 4px 16px 12px 16px; border-top: none; background: rgba(0,0,0,0.15);">
                   <div style="font-size: 11px; display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-dim);">
                       ${meta.type ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 500;">⛙ ${meta.type}</span>` : ''}
                       ${meta.entry ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">⚡︎ Entry: ${meta.entry}</span>` : ''}
-                      ${meta.tp ? `<span style="background: rgba(34, 197, 94, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">✓ TP: ${meta.tp}</span>` : ''}
-                      ${meta.sl ? `<span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl}</span>` : ''}
+                      ${meta.tp ? `<span style="background: rgba(34, 197, 94, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">✓ TP: ${meta.tp} ${tpPct ? `(${tpPct})` : ''}</span>` : ''}
+                      ${meta.sl ? `<span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl} ${slPct ? `(${slPct})` : ''}</span>` : ''}
                   </div>
                 </td>
               </tr>`;
@@ -5350,14 +5352,16 @@
         try {
           const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
             if (meta.entry || meta.type) {
+              const tpPct = (meta.entry && meta.tp) ? Math.abs((Number(meta.tp) - Number(meta.entry)) / Number(meta.entry) * 100).toFixed(2) + '%' : '';
+              const slPct = (meta.entry && meta.sl) ? Math.abs((Number(meta.sl) - Number(meta.entry)) / Number(meta.entry) * 100).toFixed(2) + '%' : '';
               metaHtml = `
               <tr>
                 <td colspan="7" style="padding: 4px 16px 12px 16px; border-top: none; background: rgba(0,0,0,0.15);">
                   <div style="font-size: 11px; display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-dim);">
                       ${meta.type ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; font-weight: 500;">⛙ ${meta.type}</span>` : ''}
                       ${meta.entry ? `<span style="background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">⚡︎ Entry: ${meta.entry}</span>` : ''}
-                      ${meta.tp ? `<span style="background: rgba(34, 197, 94, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">✓ TP: ${meta.tp}</span>` : ''}
-                      ${meta.sl ? `<span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl}</span>` : ''}
+                      ${meta.tp ? `<span style="background: rgba(34, 197, 94, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">✓ TP: ${meta.tp} ${tpPct ? `(${tpPct})` : ''}</span>` : ''}
+                      ${meta.sl ? `<span style="background: rgba(255,0,0,0.1); padding: 2px 6px; border-radius: 4px; color: #ff6b6b;">⨯ SL: ${meta.sl} ${slPct ? `(${slPct})` : ''}</span>` : ''}
                   </div>
                 </td>
               </tr>`;
