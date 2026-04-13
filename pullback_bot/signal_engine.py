@@ -568,7 +568,7 @@ def check_pullback(
         "atr":         round(atr15, 8),
         "atr_ratio":   round(atr_ratio, 3),
         "timeframe":   "15m",
-        "timestamp":   int(last["open_time"] / 1000),
+        "timestamp":   int(klines_15m[-1]["open_time"] / 1000),
         "reasons":     reasons,
         "signal_type": "PULLBACK",
         "ml_passed":   ml_passed,
@@ -584,6 +584,20 @@ def check_pullback(
 # ── Breakout / Breakdown ───────────────────────────────────────────────────────
 
 def check_breakout(
+    symbol: str,
+    klines_15m: list[dict],
+    klines_5m: list[dict],
+    klines_4h: list[dict] = [],
+    oi_hist: list[dict] = [],
+) -> Optional[dict]:
+    try:
+        return _check_breakout_impl(symbol, klines_15m, klines_5m, klines_4h, oi_hist)
+    except Exception as e:
+        import traceback
+        logger.error(f"Error in check_breakout for {symbol}: {e}\n{traceback.format_exc()}")
+        return None
+
+def _check_breakout_impl(
     symbol: str,
     klines_15m: list[dict],
     klines_5m: list[dict],
