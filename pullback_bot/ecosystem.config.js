@@ -10,7 +10,7 @@ module.exports = {
       min_uptime: "10s",
       restart_delay: 3000,
       exp_backoff_restart_delay: 100,
-      max_memory_restart: "400M",
+      max_memory_restart: "4G",
       env: {
         PYTHONUNBUFFERED: "1"
       },

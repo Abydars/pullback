@@ -103,8 +103,9 @@ async def build_watchlist() -> list[str]:
         perpetuals = await bc.get_active_perpetual_symbols()
         perp_set = {s["symbol"] for s in perpetuals}
 
+        import math
         tickers = await bc.get_24h_tickers()
-        watchlist: list[str] = []
+        candidates = []
         for t in tickers:
             sym = t["symbol"]
             if sym not in perp_set:
@@ -112,10 +113,19 @@ async def build_watchlist() -> list[str]:
             vol = float(t.get("quoteVolume", 0))
             chg = abs(float(t.get("priceChangePercent", 0)))
             if vol >= config.MIN_VOLUME_24H and chg >= config.MIN_PRICE_CHANGE_PCT:
-                watchlist.append(sym)
+                # Momentum Score incorporates absolute % move weighted by logarithmic relative volume
+                score = chg * math.log10(max(vol, 1))
+                candidates.append((sym, score))
 
-        watchlist.sort()
-        logger.info("Watchlist built: %d symbols", len(watchlist))
+        # Sort descending by Momentum Score to get the actively trending top movers
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        
+        # Enforce highly-focused limit
+        max_size = getattr(config, "MAX_WATCHLIST_SIZE", 50)
+        watchlist = [c[0] for c in candidates[:max_size]]
+        
+        watchlist.sort() # Alphabetical final sort for consistent websocket generation
+        logger.info("Watchlist built: %d symbols (Capped from %d candidates explicitly by Momentum Score)", len(watchlist), len(candidates))
         return watchlist
     except Exception as exc:
         logger.error("build_watchlist error: %s", exc)
