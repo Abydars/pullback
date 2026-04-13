@@ -5398,11 +5398,12 @@
       if (metaHtml) {
         const tempWrapper = document.createElement('table');
         tempWrapper.innerHTML = `<tbody>${metaHtml}</tbody>`;
-        const metaRow = tempWrapper.querySelector('tbody').firstChild;
-        metaRow.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-        metaRow.style.transition = 'background-color 1.5s ease-out';
-
-        tbody.prepend(metaRow);
+        const metaRow = tempWrapper.querySelector('tbody').firstElementChild;
+        if (metaRow) {
+            metaRow.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+            metaRow.style.transition = 'background-color 1.5s ease-out';
+            tbody.prepend(metaRow);
+        }
         tbody.prepend(tr);
 
         setTimeout(() => {
