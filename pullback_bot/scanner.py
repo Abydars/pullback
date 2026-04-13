@@ -862,13 +862,17 @@ async def start(order_manager=None) -> None:
         {"symbols": active_watchlist, "count": len(active_watchlist), "funding_targets": funding_rates_map},
     )
 
-    # Seed klines concurrently in batches of 10 (Binance rate-limit safe)
-    logger.info("Seeding klines for %d symbols...", len(active_watchlist))
-    batch_size = 10
-    for i in range(0, len(active_watchlist), batch_size):
-        batch = active_watchlist[i : i + batch_size]
-        await asyncio.gather(*[_seed_klines(sym) for sym in batch])
-        await asyncio.sleep(0.5)  # brief pause between batches
+    # Seed klines concurrently in the background so it doesn't block FastAPI Dashboard startup
+    async def _seed_all_klines():
+        logger.info("Background seeding klines for %d symbols...", len(active_watchlist))
+        batch_size = 10
+        for i in range(0, len(active_watchlist), batch_size):
+            batch = active_watchlist[i : i + batch_size]
+            await asyncio.gather(*[_seed_klines(sym) for sym in batch])
+            await asyncio.sleep(0.5)  # brief pause between batches
+        logger.info("Background kline seeding complete for all symbols.")
+
+    asyncio.create_task(_seed_all_klines(), name="background_kline_seed")
 
     # Start background tasks (fire and forget)
     # scanner_loop removed — evaluation is now triggered directly by the
