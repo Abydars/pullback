@@ -3824,7 +3824,7 @@
         card.innerHTML = `
       <div class="pos-card-header ${expanded ? 'expanded' : ''}" style="cursor:pointer; position:relative; padding-right:24px;" onclick="togglePosCard(${t.id})">
         <div style="display:flex; flex-direction:column; align-items:flex-start; gap:4px; max-width:65%;">
-          <span class="pos-card-sym" onclick="event.stopPropagation(); selectSymbol('${t.symbol}'); window.switchCTab('chart-pane');" style="cursor:pointer; z-index:2; line-height:1; color:var(--blue); text-decoration:underline;" title="View Chart">${t.symbol.replace('USDT', '')}<span style="font-size:10px;color:var(--muted);margin-left:2px;">/USDT</span></span>
+          <span class="pos-card-sym" onclick="event.stopPropagation(); selectSymbol('${t.symbol}'); window.switchCTab('chart-pane');" style="cursor:pointer; z-index:2; line-height:1;" title="View Chart">${t.symbol.replace('USDT', '')}<span style="font-size:10px;color:var(--muted);margin-left:2px;">/USDT</span></span>
           <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
             <span class="pos-card-dir ${isLong ? 'pos-dir-long' : 'pos-dir-short'}">${isLong ? 'LONG' : 'SHORT'}</span>
             ${armBadge}
@@ -5311,7 +5311,7 @@
 
         html += `<tr style="${borderStyle}">
           <td style="color:var(--text-dim); padding-left:16px;">${time}</td>
-          <td style="font-weight:600; cursor:pointer; color:var(--blue); text-decoration:underline;" onclick="selectSymbol('${s.symbol}'); window.switchCTab('chart-pane');" title="View Chart">${s.symbol}</td>
+          <td style="font-weight:600; cursor:pointer;" onclick="selectSymbol('${s.symbol}'); window.switchCTab('chart-pane');" title="View Chart">${s.symbol}</td>
           <td style="color:${color}">${dir}</td>
           <td>${s.score}</td>
           <td>${mllbl}</td>
@@ -5375,7 +5375,7 @@
       tr.style.cssText = borderStyle;
       tr.innerHTML = `
         <td style="color:var(--text-dim); padding-left:16px;">${time}</td>
-        <td style="font-weight:600; cursor:pointer; color:var(--blue); text-decoration:underline;" onclick="selectSymbol('${s.symbol}'); window.switchCTab('chart-pane');" title="View Chart">${s.symbol}</td>
+        <td style="font-weight:600; cursor:pointer;" onclick="selectSymbol('${s.symbol}'); window.switchCTab('chart-pane');" title="View Chart">${s.symbol}</td>
         <td style="color:${color}">${dir}</td>
         <td>${s.score}</td>
         <td>${mllbl}</td>
