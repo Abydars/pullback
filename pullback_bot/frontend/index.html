@@ -2857,12 +2857,12 @@
 
       // Candlestick — leave bottom 20% for volume
       candleSeries = mainChart.addCandlestickSeries({
-        upColor: '#a1a1aa',
-        downColor: '#52525b',
-        borderUpColor: '#a1a1aa',
-        borderDownColor: '#52525b',
-        wickUpColor: '#a1a1aa',
-        wickDownColor: '#52525b',
+        upColor: '#26a69a',
+        downColor: '#ef5350',
+        borderUpColor: '#26a69a',
+        borderDownColor: '#ef5350',
+        wickUpColor: '#26a69a',
+        wickDownColor: '#ef5350',
       });
       candleSeries.priceScale().applyOptions({
         scaleMargins: { top: 0.05, bottom: 0.22 },
@@ -2976,7 +2976,7 @@
         volSeries.setData(candles.map(c => ({
           time: c.time,
           value: c.volume,
-          color: c.close >= c.open ? 'rgba(161,161,170,0.3)' : 'rgba(82,82,91,0.3)',
+          color: c.close >= c.open ? 'rgba(38,166,154,0.3)' : 'rgba(239,83,80,0.3)',
         })));
 
         // Compute EMAs from historical data
@@ -3583,7 +3583,7 @@
       volSeries.update({
         time: data.candle.time,
         value: data.candle.volume,
-        color: data.candle.close >= data.candle.open ? 'rgba(161,161,170,0.3)' : 'rgba(82,82,91,0.3)',
+        color: data.candle.close >= data.candle.open ? 'rgba(38,166,154,0.3)' : 'rgba(239,83,80,0.3)',
       });
       // Update EMA lines
       if (data.ema50) ema50Series.update({ time: data.candle.time, value: data.ema50 });
