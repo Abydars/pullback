@@ -585,9 +585,9 @@ def check_breakout(
 
     # ── 1. The Box Mandate (Consolidation Filter) ───────────────────────────
     range_size = resistance - support
-    if range_size > (_atr_avg20 * 3.5):
+    if range_size > (_atr_avg20 * 8.0):
         # Range was too wide and noisy; not a coiled spring.
-        logger.info("Breakout rejected: %s range too wide (%f vs %f max)", symbol, range_size, _atr_avg20 * 3.5)
+        logger.info("Breakout rejected: %s range too wide (%f vs %f max)", symbol, range_size, _atr_avg20 * 8.0)
         return None
     else:
         score += 30
