@@ -3010,18 +3010,24 @@
     }
 
     function addSignalMarkers(symbol, candles) {
+      if (candles && candles.length) {
+        state.firstCandleTime = candles[0].time;
+      }
+
       const raw = sessionStorage.getItem('signals_' + symbol);
       if (!raw) return;
       const signals = JSON.parse(raw);
       if (!signals.length) return;
       
-      const markers = signals.map(sig => ({
-        time: sig.timestamp,
-        position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
-        color: sig.direction === 'LONG' ? '#22c55e' : '#ef4444',
-        shape: sig.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
-        text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.signal_type || 'PULLBACK'} ${sig.score}`
-      }));
+      const markers = signals
+        .filter(sig => !state.firstCandleTime || sig.timestamp >= state.firstCandleTime)
+        .map(sig => ({
+          time: sig.timestamp,
+          position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
+          color: sig.direction === 'LONG' ? '#22c55e' : '#ef4444',
+          shape: sig.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
+          text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.signal_type || 'PULLBACK'} ${sig.score}`
+        }));
       
       // Lightweight charts requires markers to be strictly sorted by time
       markers.sort((a, b) => a.time - b.time);
