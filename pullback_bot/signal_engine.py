@@ -522,7 +522,7 @@ def check_pullback(
         "atr":         round(atr15, 8),
         "atr_ratio":   round(atr_ratio, 3),
         "timeframe":   "15m",
-        "timestamp":   int(time.time()),
+        "timestamp":   int(last["open_time"] / 1000),
         "reasons":     reasons,
         "signal_type": "PULLBACK",
         "ml_passed":   ml_passed,
@@ -598,13 +598,26 @@ def check_breakout(
         if rsi_val > 70.0:
             logger.info("Breakout rejected: %s LONG fakeout risk (RSI=%.1f)", symbol, rsi_val)
             return None
+            
+        extension = last_close - resistance
+        if extension > (_atr_avg20 * 1.5):
+            logger.info("Breakout rejected: %s LONG too overextended (closed %.4f beyond res)", symbol, extension)
+            return None
+            
         direction = "LONG"
         score += 30
         reasons.append("breakout")
+        
     elif last_close < support:
         if rsi_val < 30.0:
             logger.info("Breakdown rejected: %s SHORT fakeout risk (RSI=%.1f)", symbol, rsi_val)
             return None
+            
+        extension = support - last_close
+        if extension > (_atr_avg20 * 1.5):
+            logger.info("Breakout rejected: %s SHORT too overextended (closed %.4f below sup)", symbol, extension)
+            return None
+            
         direction = "SHORT"
         score += 30
         reasons.append("breakdown")
@@ -765,7 +778,7 @@ def check_breakout(
         "atr":          round(atr15, 8),
         "atr_ratio":    round(atr_ratio, 3),
         "timeframe":    "15m",
-        "timestamp":    int(time.time()),
+        "timestamp":    int(last["open_time"] / 1000),
         "reasons":      reasons,
         "signal_type":  "BREAKOUT",
         "ml_passed":    ml_passed,
