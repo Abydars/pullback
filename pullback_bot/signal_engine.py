@@ -695,11 +695,11 @@ def _check_breakout_impl(
     if bias == "LONG":
         sl_price = ob_low - (atr5 * 0.5) if ob_low > 0 else (broken_level - (atr5 * 2.0))
         dist_pct = (entry_price - sl_price) / sl_price
-        trail_arm = entry_price * (1 + (dist_pct * 1.5)) 
+        trail_arm = entry_price * (1 + (dist_pct * 1.0)) 
     else:
         sl_price = ob_high + (atr5 * 0.5) if ob_high > 0 else (broken_level + (atr5 * 2.0))
         dist_pct = (sl_price - entry_price) / entry_price
-        trail_arm = entry_price * (1 - (dist_pct * 1.5))
+        trail_arm = entry_price * (1 - (dist_pct * 1.0))
 
     ml_passed, ml_conf, ml_reason = _run_ml_filter(symbol, df15[:-1], bias)
     if not ml_passed:
