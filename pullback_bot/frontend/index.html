@@ -461,6 +461,26 @@
       font-family: var(--font-mono);
     }
 
+    .strat-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      font-family: var(--font-mono);
+    }
+    .strat-pullback {
+      background: rgba(38, 166, 154, 0.12);
+      color: #26a69a;
+      border: 1px solid rgba(38, 166, 154, 0.3);
+    }
+    .strat-breakout {
+      background: rgba(14, 165, 233, 0.12);
+      color: #0ea5e9;
+      border: 1px solid rgba(14, 165, 233, 0.3);
+    }
+
     .tier-badge {
       display: inline-block;
       padding: 2px 6px;
@@ -3024,7 +3044,9 @@
         .map(sig => ({
           time: sig.timestamp,
           position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
-          color: sig.direction === 'LONG' ? '#22c55e' : '#ef4444',
+          color: sig.signal_type === 'BREAKOUT' 
+            ? (sig.direction === 'LONG' ? '#0ea5e9' : '#a855f7') 
+            : (sig.direction === 'LONG' ? '#26a69a' : '#ef5350'),
           shape: sig.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
           text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.signal_type || 'PULLBACK'} ${sig.score}`
         }));
@@ -3906,7 +3928,7 @@
         <div class="pos-kv"><span class="k">Fee</span><span class="v" style="color:var(--muted)">$${(t.fee_usdt ?? 0).toFixed(4)}</span></div>
         <div class="pos-kv"><span class="k">Qty</span><span class="v">${t.qty}</span></div>
         <div class="pos-kv"><span class="k">Lev</span><span class="v">${t.leverage ?? '—'}×</span></div>
-        <div class="pos-kv"><span class="k">Strategy</span><span class="v" style="font-size:10px;letter-spacing:.05em">${t.signal_type ?? 'PULLBACK'}</span></div>
+        <div class="pos-kv"><span class="k">Strategy</span><span class="strat-badge ${t.signal_type === 'BREAKOUT' ? 'strat-breakout' : 'strat-pullback'}">${t.signal_type ?? 'PULLBACK'}</span></div>
         <div class="pos-kv"><span class="k">Score</span><span class="v">${t.signal_score ?? '—'}</span></div>
         <div class="pos-kv"><span class="k">AI Filter</span><span class="v" style="color:var(--cyan)">${t.ml_confidence != null ? (t.ml_confidence * 100).toFixed(0) + '%' : '—'}</span></div>
         <div class="pos-kv"><span class="k">Open</span><span class="v">${t.duration ?? '—'}</span></div>
@@ -4039,7 +4061,7 @@
         <td style="color:var(--muted)">${t.qty}</td>
         <td style="color:var(--muted)">${lev}×</td>
         <td style="color:var(--muted)">${marginStr}</td>
-        <td style="color:var(--muted);font-size:10px">${t.signal_type ?? 'PULLBACK'}</td>
+        <td><span class="strat-badge ${t.signal_type === 'BREAKOUT' ? 'strat-breakout' : 'strat-pullback'}">${t.signal_type ?? 'PULLBACK'}</span></td>
         <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
         <td style="color:var(--cyan)">${t.ml_confidence != null ? (t.ml_confidence * 100).toFixed(0) + '%' : '—'}</td>
         <td style="color:var(--muted)">${durStr}</td>
@@ -4136,7 +4158,7 @@
         <td style="color:var(--muted)">${t.qty}</td>
         <td style="color:var(--muted)">${lev}×</td>
         <td style="color:var(--muted)">${marginStr}</td>
-        <td style="color:var(--muted);font-size:10px">${t.signal_type ?? 'PULLBACK'}</td>
+        <td><span class="strat-badge ${t.signal_type === 'BREAKOUT' ? 'strat-breakout' : 'strat-pullback'}">${t.signal_type ?? 'PULLBACK'}</span></td>
         <td style="color:var(--muted)">${t.signal_score ?? '—'}</td>
         <td style="color:var(--cyan)">${t.ml_confidence != null ? (t.ml_confidence * 100).toFixed(0) + '%' : '—'}</td>
         <td style="color:var(--muted)">${durStr}</td>
