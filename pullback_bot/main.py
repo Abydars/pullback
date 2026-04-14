@@ -143,6 +143,7 @@ async def _status_broadcast_loop() -> None:
             open_count = await db.count_open_trades()
             await wsb.broadcaster.broadcast("system_status", {
                 "mode": config.MODE,
+                "trading_enabled": getattr(config, "TRADING_ENABLED", True),
                 "timestamp": int(time.time()),
                 "open_positions": open_count,
                 "watchlist_count": len(scanner.active_watchlist),

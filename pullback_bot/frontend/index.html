@@ -3683,6 +3683,19 @@
       document.getElementById('st-open').textContent = data.open_positions ?? 0;
       // Server time — overwritten by the live clock interval immediately after
       if (data.btc_regime) onBtcRegime({ regime: data.btc_regime });
+
+      const trBtn = document.getElementById('btn-toggle-trading');
+      if ('trading_enabled' in data) {
+        if (data.trading_enabled) {
+          trBtn.textContent = "🟢 TRADING ON";
+          trBtn.style.color = "var(--green)";
+          trBtn.style.borderColor = "var(--green)";
+        } else {
+          trBtn.textContent = "🔴 TRADING OFF";
+          trBtn.style.color = "var(--red)";
+          trBtn.style.borderColor = "var(--red)";
+        }
+      }
     }
 
     function onBtcRegime(data) {
@@ -4379,19 +4392,6 @@
       el.textContent = fmtUsdt(total);
       el.style.color = total >= 0 ? 'var(--green)' : 'var(--red)';
       document.getElementById('st-open').textContent = Object.keys(state.openTrades).length;
-      document.getElementById('server-time').textContent = new Date(d.timestamp * 1000).toLocaleTimeString([], { hour12: false });
-        
-        const trBtn = document.getElementById('btn-toggle-trading');
-        if (d.trading_enabled) {
-          trBtn.textContent = "🟢 TRADING ON";
-          trBtn.style.color = "var(--green)";
-          trBtn.style.borderColor = "var(--green)";
-        } else {
-          trBtn.textContent = "🔴 TRADING OFF";
-          trBtn.style.color = "var(--red)";
-          trBtn.style.borderColor = "var(--red)";
-        }
-      } catch (e) {}
     }
 
     function updateModeBadge(mode) {
