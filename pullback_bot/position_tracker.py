@@ -382,28 +382,15 @@ async def _paper_tick() -> None:
                             (direction == "SHORT" and mark <= trail_arm)
                     
                     if armed:
-                        smart_dump = False
-                        if smart_rsi is not None:
-                            if direction == "LONG" and smart_rsi >= 75:
-                                smart_dump = True
-                            elif direction == "SHORT" and smart_rsi <= 25:
-                                smart_dump = True
+                        _trail_active[tid] = True
+                        _trail_extreme[tid] = mark
+                        trail_active = True
+                        logger.info(
+                            "Trail armed: #%d %s %s mark=%.6f arm=%.6f",
+                            tid, symbol, direction, mark, trail_arm,
+                        )
 
-                        if smart_dump:
-                            hit_price = mark  # Close exactly at the exhausted mark price
-                            close_reason = "SMART_TP"
-                        else:
-                            _trail_active[tid] = True
-                            _trail_extreme[tid] = mark
-                            trail_active = True
-                            logger.info(
-                                "Trail armed: #%d %s %s mark=%.6f arm=%.6f",
-                                tid, symbol, direction, mark, trail_arm,
-                            )
-
-                if close_reason == "SMART_TP":
-                    pass # Skip other checks, execute dump
-                elif trail_active:
+                if trail_active:
                     # Update extreme and derive trailing stop
                     if direction == "LONG":
                         _trail_extreme[tid] = max(_trail_extreme.get(tid, mark), mark)
@@ -446,7 +433,7 @@ async def _paper_tick() -> None:
                     close_time = int(time.time() * 1000)
 
                     # ── SMART PORTFOLIO PRUNING ───────────────────────────────
-                    if close_reason == "SMART_TP" and final_pnl > 0:
+                    if close_reason in ("SMART_TP", "TRAIL", "TP") and final_pnl > 0:
                         import scanner
                         weak_candidates = []
                         weak_loss = 0.0
