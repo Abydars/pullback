@@ -341,7 +341,7 @@ class OrderManager:
         tick    = bc.get_tick_size(symbol)
         side    = "BUY" if direction == "LONG" else "SELL"
         sl_side = "SELL" if direction == "LONG" else "BUY"
-        position_side = direction if getattr(config, "HEDGE_MODE_ENABLED", True) else None
+        position_side = direction if getattr(config, "HEDGE_MODE_ENABLED", False) else None
 
         # ── Steps 1 & 2: leverage + entry — abort entirely on failure ──────────
         # Only here is it safe to return False; the position doesn't exist yet.

@@ -98,11 +98,14 @@ async def on_startup() -> None:
     # 1b. Overlay DB-persisted config on top of .env defaults
     await config.load_from_db()
 
-    # 2. Exchange info (populates symbol filter cache for order sizing)
+    # 2. Exchange info and Hedge Mode
     try:
         await bc.get_exchange_info()
+        hedge_val = await bc.check_hedge_mode()
+        config.HEDGE_MODE_ENABLED = hedge_val
+        logger.info("Binance Account Hedge Mode: %s", hedge_val)
     except Exception as exc:
-        logger.warning("Exchange info fetch failed: %s (non-fatal)", exc)
+        logger.warning("Exchange info / Hedge mode fetch failed: %s (non-fatal)", exc)
 
     # 3. Start Core Binance WS API for Execution
     asyncio.create_task(bc.start_ws_api_client(), name="binance_ws_api")

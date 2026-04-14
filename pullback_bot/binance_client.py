@@ -201,6 +201,17 @@ async def get_exchange_info() -> dict:
     logger.info("Exchange info loaded: %d symbols", len(_exchange_info_cache))
     return data
 
+async def check_hedge_mode() -> bool:
+    """Fetch user's position mode preference from Binance (True=Hedge, False=One-Way)."""
+    try:
+        data = await _get("/fapi/v1/positionSide/dual", signed=True)
+        return bool(data.get("dualSidePosition", False))
+    except Exception as exc:
+        logger.warning(
+            "Could not fetch Hedge Mode setting: %s. Defaulting to False (One-Way)", exc
+        )
+        return False
+
 
 async def get_active_perpetual_symbols() -> list[dict]:
     """Return list of USDT-M perpetual symbols that are currently TRADING."""
@@ -299,7 +310,7 @@ async def place_market_order(
         "quantity": qty,
     }
     import config
-    hedge_mode = getattr(config, "HEDGE_MODE_ENABLED", True)
+    hedge_mode = getattr(config, "HEDGE_MODE_ENABLED", False)
     
     if reduce_only and hedge_mode:
         if not position_side:
@@ -328,7 +339,7 @@ async def place_stop_market_order(
     }
     
     import config
-    hedge_mode = getattr(config, "HEDGE_MODE_ENABLED", True)
+    hedge_mode = getattr(config, "HEDGE_MODE_ENABLED", False)
 
     if close_position and hedge_mode:
         if not position_side:
@@ -357,7 +368,7 @@ async def place_take_profit_market_order(
     }
 
     import config
-    hedge_mode = getattr(config, "HEDGE_MODE_ENABLED", True)
+    hedge_mode = getattr(config, "HEDGE_MODE_ENABLED", False)
 
     if close_position and hedge_mode:
         if not position_side:
