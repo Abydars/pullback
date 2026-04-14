@@ -57,6 +57,8 @@ def _float(key: str, default: float) -> float:
 MODE: str = _get("MODE", "paper")               # "live" | "paper"
 assert MODE in ("live", "paper"), f"MODE must be 'live' or 'paper', got '{MODE}'"
 
+TRADING_ENABLED: bool = _bool("TRADING_ENABLED", True)
+
 # ── Institutional Confirmations (Filters) ─────────────────────────────────────
 FILTER_MTF_ENABLED: bool = _bool("FILTER_MTF_ENABLED", True)
 FILTER_OI_ENABLED: bool = _bool("FILTER_OI_ENABLED", True)
@@ -247,6 +249,8 @@ EDITABLE_KEYS: dict[str, type] = {
     "SMART_PORT_SL_MIN_AGE_MINUTES":  int,
     "LOG_LEVEL":                 str,
     "MODE":                      str,
+    "TRADING_ENABLED":           bool,
+    "BINANCE_TESTNET":           bool,
     "WEB_PASSWORD":              str,
     "ML_FILTER_ENABLED":         bool,
     "ML_CONFIDENCE_THRESHOLD":   float,

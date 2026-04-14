@@ -166,6 +166,11 @@ class OrderManager:
         score       = signal["score"]
         signal_type = signal.get("signal_type", "PULLBACK")
 
+        # ── -1. Master Trade Switch Guard ───────────────────────────────────────
+        if getattr(config, "TRADING_ENABLED", True) is False:
+            logger.info("Signal %s %s skipped — Trading is currently PAUSED globally", symbol, direction)
+            return False, "Trading is OFF"
+
         # ── 0. Portfolio Trailing Guard (Wait-and-See) ────────────────────────
         import sys
         _pt = sys.modules.get("position_tracker")

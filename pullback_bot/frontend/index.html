@@ -2107,13 +2107,18 @@
       }
 
       #header {
-        gap: 10px;
-        padding: 10px 12px;
+        gap: 6px;
+        padding: 8px;
         flex-wrap: wrap;
-        justify-content: space-between;
+        justify-content: flex-start;
         align-items: center;
         height: auto;
         min-height: 44px;
+      }
+
+      #header .stat-pill, 
+      #btn-sizing {
+        display: none !important;
       }
 
       #header>* {
@@ -2459,6 +2464,7 @@
         </button>
         <span class="logo"></span>
       </div>
+      <button id="btn-toggle-trading" class="mode-badge" onclick="toggleTrading()" title="Pause/Resume bot from taking new signals" style="cursor:pointer;">Loading...</button>
       <span id="mode-badge" class="mode-badge mode-paper">PAPER</span>
       <span id="session-badge" class="mode-badge" style="display:none; font-weight:800;"></span>
       <span id="btc-regime-badge" class="regime-badge regime-neutral">BTC –</span>
@@ -4373,6 +4379,19 @@
       el.textContent = fmtUsdt(total);
       el.style.color = total >= 0 ? 'var(--green)' : 'var(--red)';
       document.getElementById('st-open').textContent = Object.keys(state.openTrades).length;
+      document.getElementById('server-time').textContent = new Date(d.timestamp * 1000).toLocaleTimeString([], { hour12: false });
+        
+        const trBtn = document.getElementById('btn-toggle-trading');
+        if (d.trading_enabled) {
+          trBtn.textContent = "🟢 TRADING ON";
+          trBtn.style.color = "var(--green)";
+          trBtn.style.borderColor = "var(--green)";
+        } else {
+          trBtn.textContent = "🔴 TRADING OFF";
+          trBtn.style.color = "var(--red)";
+          trBtn.style.borderColor = "var(--red)";
+        }
+      } catch (e) {}
     }
 
     function updateModeBadge(mode) {
@@ -4700,6 +4719,12 @@
           <div>${input}${extraDivs}<div class="cfg-row-err" id="err-${f.key}"></div></div>
         </div>`;
         }
+        if (sec.section === 'Exchange API') {
+          html += `<div class="cfg-row" style="border:none; padding-top:4px;">
+                     <div></div>
+                     <div><button type="button" class="btn" style="background:#2c3e50" onclick="testBinanceApi(this)">Test API Connection</button></div>
+                   </div>`;
+        }
         html += '</div>';
       }
 
@@ -4736,6 +4761,44 @@
       } catch {
         hintDiv.innerHTML = '<span style="color:var(--red)">Format err: (e.g. 12:00-14:00)</span>';
       }
+    async function toggleTrading() {
+      const btn = document.getElementById('btn-toggle-trading');
+      const isCurrentlyOn = btn.textContent.includes('ON');
+      const nextState = !isCurrentlyOn;
+      
+      try {
+        const r = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ TRADING_ENABLED: nextState })
+        });
+        const d = await r.json();
+        if (d.ok) {
+          showToast(nextState ? "Trading Resumed" : "Trading Paused", "success");
+          fetchStatus(); // immediate UI refresh
+        }
+      } catch (err) {
+        showToast("Error updating state", "error");
+      }
+    }
+
+    async function testBinanceApi(btn) {
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "Testing...";
+      try {
+        const r = await fetch('/api/admin/test-binance', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          showToast(d.message, 'success');
+        } else {
+          showToast(d.message, 'error');
+        }
+      } catch (e) {
+        showToast("Network Error", "error");
+      }
+      btn.disabled = false;
+      btn.textContent = original;
     }
 
     async function saveConfig() {
@@ -4784,7 +4847,12 @@
           _cfgCurrent = { ..._cfgCurrent, ...payload };
           let note = `Saved ${data.applied.length} setting(s).`;
           if (data.needs_restart?.length) {
-            note += ` Restart required for: ${data.needs_restart.join(', ')}.`;
+            note += ` Settings saved.`;
+            if (confirm(`Restart required for: ${data.needs_restart.join(', ')}.\n\nDo you want to magically restart the bot now (via PM2)?`)) {
+              showToast("Restarting server...", "info");
+              fetch("/api/admin/restart", { method: "POST" }).catch(e => console.error(e));
+              setTimeout(() => location.reload(), 3000);
+            }
           }
           msg.textContent = note;
           msg.className = 'ok';

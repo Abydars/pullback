@@ -22,6 +22,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import signal
 import time
 import base64
 from pathlib import Path
@@ -576,10 +578,34 @@ async def api_config_post(request: Request) -> JSONResponse:
     })
 
 
+@app.post("/api/admin/restart")
+async def api_admin_restart() -> JSONResponse:
+    """Soft kill the bot. PM2 will autorestart it."""
+    async def _die() -> None:
+        await asyncio.sleep(1)
+        os.kill(os.getpid(), signal.SIGINT)
+
+    asyncio.create_task(_die())
+    return JSONResponse({"ok": True, "message": "Restarting..."})
+
+
+@app.post("/api/admin/test-binance")
+async def api_test_binance() -> JSONResponse:
+    try:
+        import binance_client as bc
+        res = await bc._get("/fapi/v2/account", signed=True)
+        if "feeTier" in res or "totalWalletBalance" in res or "assets" in res:
+            return JSONResponse({"ok": True, "message": "Binance API connected successfully!"})
+        return JSONResponse({"ok": False, "message": "Connected, but unexpected response."})
+    except Exception as e:
+        return JSONResponse({"ok": False, "message": f"Connection failed: {e}"})
+
+
 @app.get("/api/status")
 async def api_status() -> JSONResponse:
     return JSONResponse({
         "mode": config.MODE,
+        "trading_enabled": config.TRADING_ENABLED,
         "testnet": config.BINANCE_TESTNET,
         "watchlist_count": len(scanner.active_watchlist),
         "open_positions": await db.count_open_trades(),
