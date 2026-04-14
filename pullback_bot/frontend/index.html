@@ -4761,6 +4761,8 @@
       } catch {
         hintDiv.innerHTML = '<span style="color:var(--red)">Format err: (e.g. 12:00-14:00)</span>';
       }
+    }
+
     async function toggleTrading() {
       const btn = document.getElementById('btn-toggle-trading');
       const isCurrentlyOn = btn.textContent.includes('ON');
@@ -4775,7 +4777,7 @@
         const d = await r.json();
         if (d.ok) {
           showToast(nextState ? "Trading Resumed" : "Trading Paused", "success");
-          fetchStatus(); // immediate UI refresh
+          window.location.reload(); // immediate UI refresh
         }
       } catch (err) {
         showToast("Error updating state", "error");
