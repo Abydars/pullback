@@ -1,7 +1,26 @@
+const fs = require('fs');
+
+let appName = "pullback-bot";
+
+try {
+  if (fs.existsSync('.env')) {
+    const envFile = fs.readFileSync('.env', 'utf8');
+    const match = envFile.match(/^PM2_APP_NAME=(.*)$/m);
+    if (match && match[1]) {
+      appName = match[1].trim().replace(/^["']|["']$/g, '');
+    }
+  }
+} catch (e) {
+  // Ignored
+}
+
+// Command-line env variables take priority if passed directly
+appName = process.env.PM2_APP_NAME || appName;
+
 module.exports = {
   apps: [
     {
-      name: "pullback-bot",
+      name: appName,
       script: "main.py",
       interpreter: "./venv/bin/python",
       watch: false,
