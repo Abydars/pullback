@@ -79,7 +79,12 @@ async def _calc_qty_and_leverage(
         return 0.0, config.MAX_LEVERAGE
 
     max_lev  = max(1, config.MAX_LEVERAGE)
+    
     capital  = config.CAPITAL
+    if config.MODE == "live":
+        import binance_client as bc
+        capital = await bc.get_balance() or capital
+        
     risk_pct = config.RISK_PCT
 
     if capital <= 0 or risk_pct <= 0:
@@ -267,6 +272,13 @@ class OrderManager:
 
     # ── Paper mode ─────────────────────────────────────────────────────────────
 
+    async def _fetch_and_update_entry_fee(self, trade_id: int, symbol: str, order_id: str):
+        import asyncio
+        await asyncio.sleep(2.0) # Settle buffer
+        fee = await bc.get_order_commission(symbol, order_id)
+        if fee > 0:
+            await db.update_trade_entry_fee(trade_id, fee)
+
     async def _paper_open(
         self,
         symbol: str,
@@ -330,33 +342,47 @@ class OrderManager:
         tick    = bc.get_tick_size(symbol)
         side    = "BUY" if direction == "LONG" else "SELL"
         sl_side = "SELL" if direction == "LONG" else "BUY"
+        position_side = direction if getattr(config, "HEDGE_MODE_ENABLED", True) else None
 
         # ── Steps 1 & 2: leverage + entry — abort entirely on failure ──────────
         # Only here is it safe to return False; the position doesn't exist yet.
         try:
-            await bc.set_leverage(symbol, leverage)
+            import asyncio
+            lev_resp = await bc.set_leverage(symbol, leverage)
+            actual_leverage = int(lev_resp.get("leverage", leverage) or leverage)
+            
             order = await bc.place_market_order(
-                symbol=symbol, side=side, qty=qty
+                symbol=symbol, side=side, qty=qty, position_side=position_side
             )
             binance_order_id = str(order.get("orderId", ""))
-            actual_entry     = float(order.get("avgPrice") or entry)
+            actual_entry     = float(order.get("avgPrice") or 0.0)
+            actual_qty       = float(order.get("executedQty") or 0.0)
+            
+            # Binance WS order returns may omit avgPrice instantly. Fetch exact status if missing.
+            if (actual_entry <= 0.0 or actual_qty <= 0.0) and binance_order_id:
+                await asyncio.sleep(0.5) # Allow internal matching engine to settle
+                order_status = await bc.get_order(symbol, binance_order_id)
+                actual_entry = float(order_status.get("avgPrice") or actual_entry)
+                actual_qty   = float(order_status.get("executedQty") or actual_qty)
+                
+            if actual_entry <= 0.0:
+                actual_entry = entry
+            if actual_qty <= 0.0:
+                actual_qty = qty
+                
         except Exception as exc:
             logger.error("Live entry failed for %s: %s", symbol, exc)
             return False, f"Live Entry Error: {exc}"
 
         # ── Step 3: Catastrophic Stop Loss (Safety Net Only) ──────────────────
-        # Actual SL and TP management is handled virtually by position_tracker.py
-        # Here we place a 2.5x ATR physical stop just in case the server crashes.
         if config.USE_STOP_LOSS:
             try:
-                # Normal SL is 1.5x ATR. Catastrophic is 2.5x ATR.
                 catastrophic_sl = actual_entry - (atr * 2.5) if direction == "LONG" else actual_entry + (atr * 2.5)
-                # Ensure we don't go below 0 for longs
                 if catastrophic_sl <= 0 and direction == "LONG":
-                    catastrophic_sl = tick  # min positive value
+                    catastrophic_sl = tick
 
                 await bc.place_stop_market_order(
-                    symbol=symbol, side=sl_side, stop_price=bc.round_step(catastrophic_sl, tick), close_position=True
+                    symbol=symbol, side=sl_side, stop_price=bc.round_step(catastrophic_sl, tick), close_position=True, position_side=position_side
                 )
                 logger.info("Placed catastrophic safety SL for %s at %.4f", symbol, catastrophic_sl)
             except Exception as exc:
@@ -375,16 +401,21 @@ class OrderManager:
                 sl_price=sl,
                 tp1_price=tp1,
                 tp2_price=tp2,
-                qty=qty,
+                qty=actual_qty,
                 mode="live",
                 entry_time=now_ms,
                 signal_score=score,
-                leverage=leverage,
+                leverage=actual_leverage,
                 binance_order_id=binance_order_id,
                 signal_type=signal_type,
                 session_id=session_id,
                 ml_confidence=ml_confidence,
             )
+            
+            import asyncio
+            if binance_order_id:
+                asyncio.create_task(self._fetch_and_update_entry_fee(trade_id, symbol, binance_order_id))
+
             logger.info(
                 "Live trade opened: #%d %s %s entry=%.6f leverage=%dx order=%s",
                 trade_id, symbol, direction, actual_entry, leverage, binance_order_id,

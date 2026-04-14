@@ -86,20 +86,24 @@ class UserDataStream:
         status = order.get("X")       # execution status
         order_type = order.get("o")   # order type string
 
-        # Only process filled closing orders
-        if status != "FILLED" or order_type not in _CLOSE_ORDER_TYPES:
+        if status != "FILLED":
             return
 
         symbol = order.get("s", "")
         fill_price = float(order.get("L", 0) or 0)   # last fill price
-        close_reason = _CLOSE_REASON_MAP.get(order_type, "FILLED")
-
+        
         if not symbol or fill_price <= 0:
-            logger.warning(
-                "User data stream: missing symbol or fill price for %s order", order_type
-            )
+            logger.warning("User data stream: missing symbol or fill price")
             return
-
+            
+        # Determine if this order acts as a closing/reducing trade
+        is_closing = (
+            order_type in _CLOSE_ORDER_TYPES
+            or order.get("R")  # reduceOnly
+            or order.get("cp") # closePosition
+            or float(order.get("rp", 0)) != 0 # realized profit
+        )
+        
         # Find an open live trade for this symbol
         open_trades = await db.get_open_trades()
         matching = [
@@ -107,13 +111,26 @@ class UserDataStream:
             if t.get("symbol") == symbol and t.get("mode") == "live"
         ]
         if not matching:
-            logger.debug(
-                "User data stream: %s fill for %s but no open live trade found",
-                order_type, symbol,
-            )
+            # Not tracking this symbol, or no live trade open
             return
 
         trade = matching[0]
+        direction = trade["direction"]
+        
+        if not is_closing:
+            # Check by opposing sides (Hedge vs One-Way Mode)
+            order_side = order.get("S", "")
+            order_ps = order.get("ps", "BOTH")
+            if order_ps == "BOTH":
+                is_closing = (direction == "LONG" and order_side == "SELL") or (direction == "SHORT" and order_side == "BUY")
+            else:
+                is_closing = (direction == "LONG" and order_ps == "LONG" and order_side == "SELL") or \
+                             (direction == "SHORT" and order_ps == "SHORT" and order_side == "BUY")
+                             
+        if not is_closing:
+            return
+            
+        close_reason = _CLOSE_REASON_MAP.get(order_type, "MANUAL_CLOSE")
         trade_id = trade["id"]
         entry = float(trade["entry_price"])
         qty = float(trade["qty"])
@@ -124,8 +141,24 @@ class UserDataStream:
         else:
             gross = (entry - fill_price) * qty
 
-        taker_fee_rate = 0.0004
-        pnl = gross - (entry * qty * taker_fee_rate) - (fill_price * qty * taker_fee_rate)
+        close_order_id = str(order.get("i", ""))
+        entry_fee = float(trade.get("entry_fee", 0.0))
+        close_fee = 0.0
+        
+        import asyncio
+        import binance_client as bc
+        if close_order_id:
+            # Buffering 1.5s to allow matching engine to settle the userTrade commission internally
+            await asyncio.sleep(1.5)
+            close_fee = await bc.get_order_commission(symbol, close_order_id)
+            
+        if entry_fee > 0 or close_fee > 0:
+            pnl = gross - entry_fee - close_fee
+        else:
+            # Fallback estimation if Binance API fails
+            taker_fee_rate = 0.0004
+            pnl = gross - (entry * qty * taker_fee_rate) - (fill_price * qty * taker_fee_rate)
+
         pnl_pct = pnl / (entry * qty) * 100 if entry * qty else 0.0
         close_time = int(time.time() * 1000)
 
@@ -136,6 +169,7 @@ class UserDataStream:
             pnl_usdt=round(pnl, 4),
             pnl_pct=round(pnl_pct, 2),
             close_reason=close_reason,
+            close_fee=close_fee,
         )
 
         await wsb.broadcaster.broadcast("position_closed", {

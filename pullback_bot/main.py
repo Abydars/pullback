@@ -141,6 +141,11 @@ async def _status_broadcast_loop() -> None:
         await asyncio.sleep(5)
         try:
             open_count = await db.count_open_trades()
+            
+            capital = getattr(config, "PORTFOLIO_SIZE", 0.0)
+            if config.MODE == "live":
+                capital = await bc.get_balance() or capital
+            
             await wsb.broadcaster.broadcast("system_status", {
                 "mode": config.MODE,
                 "trading_enabled": getattr(config, "TRADING_ENABLED", True),
@@ -149,6 +154,7 @@ async def _status_broadcast_loop() -> None:
                 "watchlist_count": len(scanner.active_watchlist),
                 "ws_clients": wsb.broadcaster.client_count,
                 "btc_regime": scanner._last_btc_regime,
+                "capital": capital,
             })
         except Exception as exc:
             logger.debug("status_broadcast error: %s", exc)

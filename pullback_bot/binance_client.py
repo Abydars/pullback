@@ -46,9 +46,10 @@ def _get_private_key():
         logger.error("Failed to load Ed25519 private key: %s", e)
         return None
 
-def _sign_ed25519(params: dict) -> str:
-    # Do not sort here. The query string signed MUST exactly match the order of params sent via HTTP.
-    query_string = urlencode(params)
+def _sign_ed25519(params: dict, sort: bool = False) -> str:
+    # REST queries require exact insertion order. WS JSON payloads require alphabetical sorting.
+    p = dict(sorted(params.items())) if sort else params
+    query_string = urlencode(p)
     
     pk = _get_private_key()
     if not pk:
@@ -105,7 +106,7 @@ async def _ws_request(method: str, params: dict, signed: bool = True) -> dict:
     payload_params["apiKey"] = config.BINANCE_API_KEY
     if signed:
         payload_params["timestamp"] = int(time.time() * 1000)
-        payload_params["signature"] = _sign_ed25519(payload_params)
+        payload_params["signature"] = _sign_ed25519(payload_params, sort=True)
         
     payload = {
         "id": req_id,
@@ -255,6 +256,14 @@ async def get_positions() -> list[dict]:
     """Get all open positions (signed)."""
     return await _get("/fapi/v2/positionRisk", params={}, signed=True)
 
+async def get_balance() -> float:
+    """Fetch exact account wallet balance."""
+    try:
+        res = await _get("/fapi/v2/account", params={}, signed=True)
+        return float(res.get("availableBalance", 0.0))
+    except Exception as e:
+        logger.error(f"Failed to fetch wallet balance: {e}")
+        return 0.0
 
 # ── Account / Order methods (signed) ──────────────────────────────────────────
 
@@ -270,6 +279,7 @@ async def place_market_order(
     side: str,         # BUY | SELL
     qty: float,
     reduce_only: bool = False,
+    position_side: str = None,
 ) -> dict:
     params: dict[str, Any] = {
         "symbol": symbol,
@@ -279,6 +289,8 @@ async def place_market_order(
     }
     if reduce_only:
         params["reduceOnly"] = "true"
+    if position_side:
+        params["positionSide"] = position_side
     return await _ws_request("order.place", params=params)
 
 
@@ -287,15 +299,18 @@ async def place_stop_market_order(
     side: str,
     stop_price: float,
     close_position: bool = True,
+    position_side: str = None,
 ) -> dict:
     params: dict[str, Any] = {
         "symbol": symbol,
         "side": side,
         "type": "STOP_MARKET",
-        "stopPrice": round(stop_price, 8),
+        "stopPrice": round(stop_price, 6),
         "closePosition": "true" if close_position else "false",
     }
-    return await _ws_request("order.place", params=params)
+    if position_side:
+        params["positionSide"] = position_side
+    return await _post("/fapi/v1/order", params=params)
 
 
 async def place_take_profit_market_order(
@@ -303,19 +318,63 @@ async def place_take_profit_market_order(
     side: str,
     stop_price: float,
     close_position: bool = True,
+    position_side: str = None,
 ) -> dict:
     params: dict[str, Any] = {
         "symbol": symbol,
         "side": side,
         "type": "TAKE_PROFIT_MARKET",
-        "stopPrice": round(stop_price, 8),
+        "stopPrice": round(stop_price, 6),
         "closePosition": "true" if close_position else "false",
     }
-    return await _ws_request("order.place", params=params)
+    if position_side:
+        params["positionSide"] = position_side
+    return await _post("/fapi/v1/order", params=params)
 
 
 async def cancel_order(symbol: str, order_id: int) -> dict:
     return await _ws_request("order.cancel", params={"symbol": symbol, "orderId": order_id})
+
+async def get_order(symbol: str, order_id: str) -> dict:
+    return await _get("/fapi/v1/order", params={"symbol": symbol, "orderId": order_id}, signed=True)
+
+async def get_order_commission(symbol: str, order_id: str) -> float:
+    """
+    Fetch exact trading commissions incurred by an order ID.
+    Converts any non-USDT commission fee (e.g. BNB) into USDT using the prevailing mark price.
+    Returns the total USDT-normalized commission.
+    """
+    try:
+        trades = await _get("/fapi/v1/userTrades", params={"symbol": symbol, "orderId": order_id}, signed=True)
+        total_usdt_commission = 0.0
+        
+        # Cache for asset mark prices to avoid redundant queries during normalization
+        mark_prices = {}
+        
+        for t in trades:
+            comm = float(t.get("commission", 0))
+            asset = str(t.get("commissionAsset", ""))
+            
+            if asset.upper() == "USDT" or comm == 0:
+                total_usdt_commission += comm
+                continue
+                
+            # If fee was charged in BNB or another token, normalize to USDT
+            pair = f"{asset.upper()}USDT"
+            if pair not in mark_prices:
+                try:
+                    price_res = await _get("/fapi/v1/premiumIndex", params={"symbol": pair}, signed=False)
+                    mark_prices[pair] = float(price_res["markPrice"])
+                except Exception:
+                    mark_prices[pair] = 1.0 # fallback if pair isn't valid, very rare
+                    
+            converted_comm = comm * mark_prices[pair]
+            total_usdt_commission += converted_comm
+
+        return total_usdt_commission
+    except Exception as e:
+        logger.error(f"Failed to fetch commission for order {order_id} ({symbol}): {e}")
+        return 0.0
 
 
 async def cancel_all_orders(symbol: str) -> dict:

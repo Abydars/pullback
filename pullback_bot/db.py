@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS trades (
     close_time  INTEGER,
     close_price REAL,
     close_reason TEXT,                     -- SL | TRAIL | MANUAL | PORTFOLIO_SL | PORTFOLIO_TP | …
+    entry_fee   REAL DEFAULT 0.0,
+    close_fee   REAL DEFAULT 0.0,
     pnl_usdt    REAL,
     pnl_pct     REAL,
     signal_score INTEGER,
@@ -99,6 +101,8 @@ async def init_db() -> None:
             "ALTER TABLE scanner_log ADD COLUMN ml_confidence REAL",
             "ALTER TABLE scanner_log ADD COLUMN reason TEXT",
             "ALTER TABLE scanner_log ADD COLUMN metadata TEXT",
+            "ALTER TABLE trades ADD COLUMN entry_fee REAL DEFAULT 0.0",
+            "ALTER TABLE trades ADD COLUMN close_fee REAL DEFAULT 0.0",
         ]:
             try:
                 await db.execute(col_sql)
@@ -158,15 +162,24 @@ async def update_trade_close(
     pnl_pct: float,
     status: str = "CLOSED",
     close_reason: Optional[str] = None,
+    close_fee: float = 0.0,
 ) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
             UPDATE trades
-            SET close_price=?, close_time=?, pnl_usdt=?, pnl_pct=?, status=?, close_reason=?
+            SET close_price=?, close_time=?, pnl_usdt=?, pnl_pct=?, status=?, close_reason=?, close_fee=?
             WHERE id=?
             """,
-            (close_price, close_time, pnl_usdt, pnl_pct, status, close_reason, trade_id),
+            (close_price, close_time, pnl_usdt, pnl_pct, status, close_reason, close_fee, trade_id),
+        )
+        await db.commit()
+
+async def update_trade_entry_fee(trade_id: int, entry_fee: float) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE trades SET entry_fee=? WHERE id=?",
+            (entry_fee, trade_id),
         )
         await db.commit()
 

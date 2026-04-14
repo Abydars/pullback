@@ -2495,6 +2495,7 @@
       <span id="session-badge" class="mode-badge" style="display:none; font-weight:800;"></span>
       <span id="btc-regime-badge" class="regime-badge regime-neutral">BTC –</span>
       <div id="conn-dot" title="WebSocket connection"></div>
+      <span class="stat-pill">Capital: $<span id="h-capital">0</span></span>
       <span class="stat-pill">Positions: <span id="h-open">0</span></span>
       <span class="stat-pill">Watchlist: <span id="h-watch">0</span></span>
       <span class="stat-pill">Clients: <span id="h-clients">0</span></span>
@@ -3707,6 +3708,11 @@
       document.getElementById('h-watch').textContent = data.watchlist_count ?? 0;
       document.getElementById('h-clients').textContent = data.ws_clients ?? 0;
       document.getElementById('st-open').textContent = data.open_positions ?? 0;
+      if (data.capital !== undefined) {
+         window.liveCapital = data.capital;
+         const hc = document.getElementById('h-capital');
+         if (hc) hc.textContent = (data.capital).toFixed(2);
+      }
       // Server time — overwritten by the live clock interval immediately after
       if (data.btc_regime) onBtcRegime({ regime: data.btc_regime });
 
@@ -4938,7 +4944,7 @@
     }
 
     function renderSizingContent(cfg) {
-      const capital = cfg.CAPITAL || 0;
+      const capital = window.liveCapital > 0 ? window.liveCapital : (cfg.CAPITAL || 0);
       const riskPct = cfg.RISK_PCT || 2;
       const maxOpen = cfg.MAX_OPEN_TRADES || 5;
       const maxLev = cfg.MAX_LEVERAGE || 20;
@@ -5120,7 +5126,8 @@
 
       // Estimate size (mirrors dynamic-leverage backend _calc_qty_and_leverage)
       const riskUsdt = parseFloat(document.getElementById('trade-entry').dataset.riskUsdt || '0');
-      const capital = parseFloat(document.getElementById('trade-entry').dataset.capital || '0');
+      const capBase = parseFloat(document.getElementById('trade-entry').dataset.capital || '0');
+      const capital = window.liveCapital > 0 ? window.liveCapital : capBase;
       const maxLev = parseInt(document.getElementById('trade-entry').dataset.maxLev || '20');
       const slDist = Math.abs(entry - sl);
 
