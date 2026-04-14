@@ -287,6 +287,14 @@ async def place_market_order(
         "type": "MARKET",
         "quantity": qty,
     }
+    import config
+    hedge_mode = getattr(config, "HEDGE_MODE_ENABLED", True)
+    
+    if reduce_only and hedge_mode:
+        if not position_side:
+            position_side = "LONG" if side == "SELL" else "SHORT"
+        reduce_only = False
+        
     if reduce_only:
         params["reduceOnly"] = "true"
     if position_side:
@@ -306,8 +314,18 @@ async def place_stop_market_order(
         "side": side,
         "type": "STOP_MARKET",
         "stopPrice": round(stop_price, 6),
-        "closePosition": "true" if close_position else "false",
     }
+    
+    import config
+    hedge_mode = getattr(config, "HEDGE_MODE_ENABLED", True)
+
+    if close_position and hedge_mode:
+        if not position_side:
+            position_side = "LONG" if side == "SELL" else "SHORT"
+        close_position = False
+
+    if close_position:
+        params["closePosition"] = "true"
     if position_side:
         params["positionSide"] = position_side
     return await _post("/fapi/v1/order", params=params)
@@ -325,8 +343,18 @@ async def place_take_profit_market_order(
         "side": side,
         "type": "TAKE_PROFIT_MARKET",
         "stopPrice": round(stop_price, 6),
-        "closePosition": "true" if close_position else "false",
     }
+
+    import config
+    hedge_mode = getattr(config, "HEDGE_MODE_ENABLED", True)
+
+    if close_position and hedge_mode:
+        if not position_side:
+            position_side = "LONG" if side == "SELL" else "SHORT"
+        close_position = False
+
+    if close_position:
+        params["closePosition"] = "true"
     if position_side:
         params["positionSide"] = position_side
     return await _post("/fapi/v1/order", params=params)
