@@ -500,10 +500,10 @@ async def _evaluate_symbol(symbol: str) -> None:
             _last_btc_regime = regime
             await wsb.broadcaster.broadcast("btc_regime", {"regime": regime})
 
-        def _regime_blocks(sig: dict) -> bool:
-            """Return True if this signal should be suppressed by the regime filter."""
+        def _regime_blocks(sig: dict) -> tuple[bool, str]:
+            """Return (blocked, reason) if this signal should be suppressed by the regime filter."""
             if symbol == "BTCUSDT":
-                return False   # never block BTC itself
+                return False, ""   # never block BTC itself
             if regime in ("BULL_BREAKOUT", "BEAR_BREAKDOWN"):
                 # Skip blocking if the symbol is not sufficiently correlated with BTC
                 threshold = config.BTC_CORR_THRESHOLD
@@ -519,42 +519,65 @@ async def _evaluate_symbol(symbol: str) -> None:
                             "BTC %s — %s correlation=%.2f < threshold=%.2f, NOT blocking",
                             regime, symbol, corr, threshold,
                         )
-                        return False  # not correlated enough — allow signal
+                        return False, ""  # not correlated enough — allow signal
             if regime == "BULL_BREAKOUT" and sig["direction"] == "SHORT":
                 logger.debug("BTC BULL_BREAKOUT — blocking SHORT %s", symbol)
-                return True
+                return True, "BTC Regime Guard: BULL_BREAKOUT blocking SHORT"
             if regime == "BEAR_BREAKDOWN" and sig["direction"] == "LONG":
                 logger.debug("BTC BEAR_BREAKDOWN — blocking LONG %s", symbol)
-                return True
-            return False
+                return True, "BTC Regime Guard: BEAR_BREAKDOWN blocking LONG"
+            return False, ""
 
-        def _funding_blocks(sig: dict) -> bool:
+        def _funding_blocks(sig: dict) -> tuple[bool, str]:
             if not funding_guard_active:
-                return False
+                return False, ""
             allow_shorts = getattr(config, "FUNDING_GUARD_ALLOW_SHORTS", False)
             if allow_shorts:
                 if sig["direction"] == "LONG":
                     logger.debug("Funding Guard active (LONGs paused) — blocking LONG %s", symbol)
-                    return True
-                return False
+                    return True, "Funding Guard: LONGs paused"
+                return False, ""
             else:
                 logger.debug("Funding Guard active — blocking %s", symbol)
-                return True
+                return True, "Funding Guard: All pairs paused"
 
         candidates: list[dict] = []
+        
+        async def _check_and_log(s: dict) -> bool:
+            if not s: 
+                return False
+            rb, rr = _regime_blocks(s)
+            if rb:
+                import db, json
+                await db.insert_scanner_log(
+                    symbol=symbol, score=s["score"], direction=s["direction"],
+                    timestamp=now, acted_on=False, ml_confidence=s.get("ml_confidence"),
+                    reason=rr, metadata=json.dumps({"entry": s.get("entry_price"), "sl": s.get("sl_price"), "tp": s.get("tp1_price"), "atr": s.get("atr"), "type": s.get("signal_type"), "reasons": s.get("reasons", [])})
+                )
+                return False
+            fb, fr = _funding_blocks(s)
+            if fb:
+                import db, json
+                await db.insert_scanner_log(
+                    symbol=symbol, score=s["score"], direction=s["direction"],
+                    timestamp=now, acted_on=False, ml_confidence=s.get("ml_confidence"),
+                    reason=fr, metadata=json.dumps({"entry": s.get("entry_price"), "sl": s.get("sl_price"), "tp": s.get("tp1_price"), "atr": s.get("atr"), "type": s.get("signal_type"), "reasons": s.get("reasons", [])})
+                )
+                return False
+            return True
 
         if mode in ("pullback", "both"):
             s = await asyncio.to_thread(
                 signal_engine.check_pullback, symbol, k15[:], k5[:], k4h[:], _oi_cache.get(symbol, [])
             )
-            if s and not _regime_blocks(s) and not _funding_blocks(s):
+            if await _check_and_log(s):
                 candidates.append(s)
                 
         if mode in ("breakout", "both"):
             s = await asyncio.to_thread(
                 signal_engine.check_breakout, symbol, k15[:], k5[:], k4h[:], _oi_cache.get(symbol, [])
             )
-            if s and not _regime_blocks(s) and not _funding_blocks(s):
+            if await _check_and_log(s):
                 candidates.append(s)
 
         if not candidates:
