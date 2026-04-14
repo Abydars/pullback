@@ -82,8 +82,7 @@ async def _calc_qty_and_leverage(
     
     capital  = config.CAPITAL
     if config.MODE == "live":
-        import binance_client as bc
-        capital = await bc.get_balance() or capital
+        capital = await bc.get_balance(force_refresh=True) or capital
         
     risk_pct = config.RISK_PCT
 

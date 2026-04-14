@@ -256,14 +256,25 @@ async def get_positions() -> list[dict]:
     """Get all open positions (signed)."""
     return await _get("/fapi/v2/positionRisk", params={}, signed=True)
 
-async def get_balance() -> float:
-    """Fetch exact account wallet balance."""
+_last_balance = 0.0
+_last_balance_time = 0.0
+
+async def get_balance(force_refresh: bool = False) -> float:
+    """Fetch exact account wallet balance with 30s cache."""
+    global _last_balance, _last_balance_time
+    import time
+    
+    if not force_refresh and (time.time() - _last_balance_time < 30.0):
+        return _last_balance
+        
     try:
         res = await _get("/fapi/v2/account", params={}, signed=True)
-        return float(res.get("availableBalance", 0.0))
+        _last_balance = float(res.get("availableBalance", 0.0))
+        _last_balance_time = time.time()
+        return _last_balance
     except Exception as e:
         logger.error(f"Failed to fetch wallet balance: {e}")
-        return 0.0
+        return _last_balance
 
 # ── Account / Order methods (signed) ──────────────────────────────────────────
 
