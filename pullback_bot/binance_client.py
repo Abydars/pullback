@@ -20,15 +20,10 @@ import config
 
 logger = logging.getLogger(__name__)
 
-_BASE = config.BINANCE_REST_BASE
-_API_KEY = config.BINANCE_API_KEY
-_SECRET = config.BINANCE_API_SECRET
-
 # Exchange info cache: {symbol -> symbol_info dict}
 _exchange_info_cache: dict[str, dict] = {}
 
 _WS_API_URL = "wss://testnet.binancefuture.com/ws-fapi/v1" if config.BINANCE_TESTNET else "wss://ws-fapi.binance.com/ws-fapi/v1"
-_PRIVATE_KEY_STR = config.BINANCE_PRIVATE_KEY
 _private_key_obj = None
 
 def _get_private_key():
@@ -36,10 +31,11 @@ def _get_private_key():
     if _private_key_obj:
         return _private_key_obj
         
-    if not _PRIVATE_KEY_STR:
+    k = config.BINANCE_PRIVATE_KEY
+    if not k:
         return None
         
-    pem_data = _PRIVATE_KEY_STR.replace("\\n", "\n").encode("utf-8")
+    pem_data = k.replace("\\n", "\n").encode("utf-8")
     if b"BEGIN PRIVATE KEY" not in pem_data:
         pem_data = b"-----BEGIN PRIVATE KEY-----\n" + pem_data + b"\n-----END PRIVATE KEY-----\n"
 
@@ -72,8 +68,9 @@ async def start_ws_api_client():
     backoff = 1
     while True:
         try:
-            logger.info("Connecting to Binance WS API: %s", _WS_API_URL)
-            async with websockets.connect(_WS_API_URL, ping_interval=20, ping_timeout=10) as ws:
+            ws_url = "wss://testnet.binancefuture.com/ws-fapi/v1" if config.BINANCE_TESTNET else "wss://ws-fapi.binance.com/ws-fapi/v1"
+            logger.info("Connecting to Binance WS API: %s", ws_url)
+            async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
                 _ws_connection = ws
                 backoff = 1
                 logger.info("Binance WS API Connected!")
@@ -134,11 +131,16 @@ async def _ws_request(method: str, params: dict, signed: bool = True) -> dict:
 # ── Signing ────────────────────────────────────────────────────────────────────
 
 def _sign(params: dict) -> dict:
-    """Append timestamp and signature to params dict (mutates and returns it)."""
+    """Append timestamp and signature to params. Uses Ed25519 if PK exists, else HMAC."""
     params["timestamp"] = int(time.time() * 1000)
+    
+    if config.BINANCE_PRIVATE_KEY:
+        params["signature"] = _sign_ed25519(params)
+        return params
+
     query = urlencode(params)
     sig = hmac.new(
-        _SECRET.encode("utf-8"),
+        config.BINANCE_API_SECRET.encode("utf-8"),
         query.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
@@ -147,13 +149,13 @@ def _sign(params: dict) -> dict:
 
 
 def _headers() -> dict:
-    return {"X-MBX-APIKEY": _API_KEY}
+    return {"X-MBX-APIKEY": config.BINANCE_API_KEY}
 
 
 # ── Generic request helpers ────────────────────────────────────────────────────
 
 async def _get(path: str, params: Optional[dict] = None, signed: bool = False) -> Any:
-    url = f"{_BASE}{path}"
+    url = f"{config.BINANCE_REST_BASE}{path}"
     p = params.copy() if params else {}
     if signed:
         p = _sign(p)
@@ -166,7 +168,7 @@ async def _get(path: str, params: Optional[dict] = None, signed: bool = False) -
 
 
 async def _post(path: str, params: dict, signed: bool = True) -> Any:
-    url = f"{_BASE}{path}"
+    url = f"{config.BINANCE_REST_BASE}{path}"
     p = _sign(params.copy()) if signed else params.copy()
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(url, params=p, headers=_headers())
@@ -177,7 +179,7 @@ async def _post(path: str, params: dict, signed: bool = True) -> Any:
 
 
 async def _delete(path: str, params: dict, signed: bool = True) -> Any:
-    url = f"{_BASE}{path}"
+    url = f"{config.BINANCE_REST_BASE}{path}"
     p = _sign(params.copy()) if signed else params.copy()
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.delete(url, params=p, headers=_headers())
