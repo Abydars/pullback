@@ -160,22 +160,29 @@ async def _broadcast_stats() -> None:
 
 # ── PAPER mode: PnL simulation ────────────────────────────────────────────────
 
-async def _close_all_paper(
+async def _close_all_positions(
     trades: list[dict],
     mark_prices: dict,
     reason: str,
 ) -> None:
-    """Close every trade in `trades` at current mark price (paper mode)."""
+    """Close every trade in `trades` at current mark price."""
     total_pnl = 0.0
     for trade in trades:
-        if trade.get("mode") != "paper":
-            continue
         tid = trade["id"]
         symbol = trade["symbol"]
         mark = mark_prices.get(symbol) or float(trade["entry_price"])
         direction = trade["direction"]
         entry = float(trade["entry_price"])
         qty   = float(trade["qty"])
+
+        if trade.get("mode") == "live":
+            close_side = "SELL" if direction == "LONG" else "BUY"
+            try:
+                asyncio.create_task(
+                    bc.place_market_order(symbol=symbol, side=close_side, qty=qty, reduce_only=True)
+                )
+            except Exception as e:
+                logger.error("Failed Soft-Execution close_all for %s: %s", symbol, e)
 
         if direction == "LONG":
             gross = (mark - entry) * qty
@@ -324,8 +331,6 @@ async def _paper_tick() -> None:
             positions_payload: list[dict] = []
 
             for trade in open_trades:
-                if trade.get("mode") != "paper":
-                    continue
 
                 symbol = trade["symbol"]
                 mark = mark_prices.get(symbol)
@@ -423,7 +428,16 @@ async def _paper_tick() -> None:
                             close_reason = "TP"
 
                 if hit_price and close_reason:
-                    # Close the paper trade
+                    if trade.get("mode") == "live":
+                        close_side = "SELL" if direction == "LONG" else "BUY"
+                        try:
+                            asyncio.create_task(
+                                bc.place_market_order(symbol=symbol, side=close_side, qty=qty, reduce_only=True)
+                            )
+                        except Exception as e:
+                            logger.error("Failed Soft-Execution close for %s: %s", symbol, e)
+                            
+                    # Close the trade
                     if direction == "LONG":
                         gross = (hit_price - entry) * qty
                     else:
@@ -477,6 +491,14 @@ async def _paper_tick() -> None:
                                 wt = w["trade"]
                                 wtid = wt["id"]
                                 wpct = w["pnl"] / (w["entry"] * w["qty"]) * 100 if w["entry"] * w["qty"] else 0
+                                
+                                if wt.get("mode") == "live":
+                                    close_side = "SELL" if wt["direction"] == "LONG" else "BUY"
+                                    try:
+                                        asyncio.create_task(bc.place_market_order(symbol=wt["symbol"], side=close_side, qty=wt["qty"], reduce_only=True))
+                                    except Exception as e:
+                                        logger.error("Failed Soft-Execution prune for %s: %s", wt["symbol"], e)
+                                        
                                 await db.update_trade_close(
                                     trade_id=wtid,
                                     close_price=w["mark"],
@@ -532,23 +554,6 @@ async def _paper_tick() -> None:
                     enriched["use_stop_loss"]  = config.USE_STOP_LOSS
                     enriched["use_take_profit"] = config.USE_TAKE_PROFIT
                     positions_payload.append(enriched)
-
-            # ── Live trades: compute unrealized PnL for display ───────────────
-            for trade in open_trades:
-                if trade.get("mode") != "live":
-                    continue
-                symbol = trade["symbol"]
-                mark = mark_prices.get(symbol)
-                if not mark:
-                    positions_payload.append(_enrich_position(trade, float(trade["entry_price"]), 0.0))
-                    continue
-                entry = float(trade["entry_price"])
-                qty = float(trade["qty"])
-                direction = trade["direction"]
-                raw_pnl = (mark - entry) * qty if direction == "LONG" else (entry - mark) * qty
-                unrealized = _net_pnl(raw_pnl, entry, mark, qty)
-                paper_unrealized[trade["id"]] = unrealized
-                positions_payload.append(_enrich_position(trade, mark, unrealized))
 
             if positions_payload:
                 await wsb.broadcaster.broadcast("position_update", positions_payload)
@@ -621,7 +626,7 @@ async def _paper_tick() -> None:
                     "Portfolio stop triggered (%s): total_unrealized=%.4f",
                     triggered_reason, total_unrealized,
                 )
-                await _close_all_paper(open_trades, mark_prices, triggered_reason)
+                await _close_all_positions(open_trades, mark_prices, triggered_reason)
 
                 # Close the active session
                 import order_manager as _om  # deferred — avoids circular at module level

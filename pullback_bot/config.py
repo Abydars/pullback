@@ -75,6 +75,7 @@ ML_STOP_PCT: float = _float("ML_STOP_PCT", 0.01)
 # ── Binance Credentials ───────────────────────────────────────────────────────
 BINANCE_API_KEY: str = _get("BINANCE_API_KEY", "")
 BINANCE_API_SECRET: str = _get("BINANCE_API_SECRET", "")
+BINANCE_PRIVATE_KEY: str = _get("BINANCE_PRIVATE_KEY", "")
 BINANCE_TESTNET: bool = _bool("BINANCE_TESTNET", False)
 
 # ── Binance Endpoints ─────────────────────────────────────────────────────────
@@ -254,13 +255,16 @@ EDITABLE_KEYS: dict[str, type] = {
     "FILTER_VWAP_ENABLED":       bool,
     "FILTER_RSI_ENABLED":        bool,
     "SMC_VIOLENT_BYPASS":        bool,
+    "BINANCE_API_KEY":           str,
+    "BINANCE_API_SECRET":        str,
+    "BINANCE_PRIVATE_KEY":       str,
 }
 
 # Keys that require a bot restart to take full effect
-RESTART_REQUIRED_KEYS = {"MODE", "PORT"}
+RESTART_REQUIRED_KEYS = {"MODE", "PORT", "BINANCE_API_KEY", "BINANCE_API_SECRET", "BINANCE_PRIVATE_KEY"}
 
 # Keys that should not be sent or logged plainly if possible
-SECRET_KEYS = {"WEB_PASSWORD"}
+SECRET_KEYS = {"WEB_PASSWORD", "BINANCE_API_SECRET", "BINANCE_PRIVATE_KEY"}
 
 
 def get_all() -> dict:
@@ -268,6 +272,10 @@ def get_all() -> dict:
     d = {k: globals()[k] for k in EDITABLE_KEYS}
     if "WEB_PASSWORD" in d:
         d["WEB_PASSWORD"] = "***" if d["WEB_PASSWORD"] else ""
+    if "BINANCE_API_SECRET" in d:
+        d["BINANCE_API_SECRET"] = "***" if d["BINANCE_API_SECRET"] else ""
+    if "BINANCE_PRIVATE_KEY" in d:
+        d["BINANCE_PRIVATE_KEY"] = "***" if d["BINANCE_PRIVATE_KEY"] else ""
     return d
 
 

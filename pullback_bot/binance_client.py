@@ -6,11 +6,16 @@ import hashlib
 import hmac
 import logging
 import time
+import asyncio
+import base64
+import json
+import uuid
+import websockets
 from typing import Any, Optional
 from urllib.parse import urlencode
+from cryptography.hazmat.primitives import serialization
 
 import httpx
-
 import config
 
 logger = logging.getLogger(__name__)
@@ -21,6 +26,109 @@ _SECRET = config.BINANCE_API_SECRET
 
 # Exchange info cache: {symbol -> symbol_info dict}
 _exchange_info_cache: dict[str, dict] = {}
+
+_WS_API_URL = "wss://testnet.binancefuture.com/ws-fapi/v1" if config.BINANCE_TESTNET else "wss://ws-fapi.binance.com/ws-fapi/v1"
+_PRIVATE_KEY_STR = config.BINANCE_PRIVATE_KEY
+_private_key_obj = None
+
+def _get_private_key():
+    global _private_key_obj
+    if _private_key_obj:
+        return _private_key_obj
+        
+    if not _PRIVATE_KEY_STR:
+        return None
+        
+    pem_data = _PRIVATE_KEY_STR.replace("\\n", "\n").encode("utf-8")
+    if b"BEGIN PRIVATE KEY" not in pem_data:
+        pem_data = b"-----BEGIN PRIVATE KEY-----\n" + pem_data + b"\n-----END PRIVATE KEY-----\n"
+
+    try:
+        _private_key_obj = serialization.load_pem_private_key(pem_data, password=None)
+        return _private_key_obj
+    except Exception as e:
+        logger.error("Failed to load Ed25519 private key: %s", e)
+        return None
+
+def _sign_ed25519(params: dict) -> str:
+    sorted_params = dict(sorted(params.items()))
+    query_string = urlencode(sorted_params)
+    
+    pk = _get_private_key()
+    if not pk:
+        raise ValueError("Ed25519 Private Key is not loaded or invalid.")
+        
+    signature_bytes = pk.sign(query_string.encode("utf-8"))
+    return base64.b64encode(signature_bytes).decode("utf-8")
+
+
+# ── WS API Client ─────────────────────────────────────────────────────────────
+
+_ws_connection = None
+_pending_requests = {}
+
+async def start_ws_api_client():
+    global _ws_connection
+    backoff = 1
+    while True:
+        try:
+            logger.info("Connecting to Binance WS API: %s", _WS_API_URL)
+            async with websockets.connect(_WS_API_URL, ping_interval=20, ping_timeout=10) as ws:
+                _ws_connection = ws
+                backoff = 1
+                logger.info("Binance WS API Connected!")
+                async for message in ws:
+                    data = json.loads(message)
+                    req_id = data.get("id")
+                    if req_id and req_id in _pending_requests:
+                        fut = _pending_requests.pop(req_id)
+                        if not fut.done():
+                            fut.set_result(data)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Binance WS API connection lost: %s. Reconnecting in %ds", e, backoff)
+            _ws_connection = None
+            for req_id, fut in list(_pending_requests.items()):
+                if not fut.done():
+                    fut.set_exception(Exception(f"WS disconnected: {e}"))
+            _pending_requests.clear()
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30)
+
+async def _ws_request(method: str, params: dict, signed: bool = True) -> dict:
+    if not _ws_connection:
+        raise Exception("WebSocket API not connected. Cannot place order.")
+        
+    req_id = str(uuid.uuid4())
+    fut = asyncio.get_event_loop().create_future()
+    _pending_requests[req_id] = fut
+    
+    payload_params = params.copy()
+    payload_params["apiKey"] = config.BINANCE_API_KEY
+    if signed:
+        payload_params["timestamp"] = int(time.time() * 1000)
+        payload_params["signature"] = _sign_ed25519(payload_params)
+        
+    payload = {
+        "id": req_id,
+        "method": method,
+        "params": payload_params
+    }
+    
+    await _ws_connection.send(json.dumps(payload))
+    
+    try:
+        response = await asyncio.wait_for(fut, timeout=10.0)
+    except asyncio.TimeoutError:
+        _pending_requests.pop(req_id, None)
+        raise Exception(f"WS request timeout for {method}")
+        
+    if "error" in response:
+        raise Exception(f"Binance WS API Error: {response['error']}")
+        
+    return response.get("result", {})
+
 
 
 # ── Signing ────────────────────────────────────────────────────────────────────
@@ -169,7 +277,7 @@ async def place_market_order(
     }
     if reduce_only:
         params["reduceOnly"] = "true"
-    return await _post("/fapi/v1/order", params=params)
+    return await _ws_request("order.place", params=params)
 
 
 async def place_stop_market_order(
@@ -185,7 +293,7 @@ async def place_stop_market_order(
         "stopPrice": round(stop_price, 8),
         "closePosition": "true" if close_position else "false",
     }
-    return await _post("/fapi/v1/order", params=params)
+    return await _ws_request("order.place", params=params)
 
 
 async def place_take_profit_market_order(
@@ -201,14 +309,11 @@ async def place_take_profit_market_order(
         "stopPrice": round(stop_price, 8),
         "closePosition": "true" if close_position else "false",
     }
-    return await _post("/fapi/v1/order", params=params)
+    return await _ws_request("order.place", params=params)
 
 
 async def cancel_order(symbol: str, order_id: int) -> dict:
-    return await _delete(
-        "/fapi/v1/order",
-        params={"symbol": symbol, "orderId": order_id},
-    )
+    return await _ws_request("order.cancel", params={"symbol": symbol, "orderId": order_id})
 
 
 async def cancel_all_orders(symbol: str) -> dict:

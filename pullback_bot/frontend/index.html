@@ -470,11 +470,13 @@
       letter-spacing: .05em;
       font-family: var(--font-mono);
     }
+
     .strat-pullback {
       background: rgba(38, 166, 154, 0.12);
       color: #26a69a;
       border: 1px solid rgba(38, 166, 154, 0.3);
     }
+
     .strat-breakout {
       background: rgba(14, 165, 233, 0.12);
       color: #0ea5e9;
@@ -2264,7 +2266,7 @@
 
     /* ── Premium Analytics Layout ── */
     #analytics-pane {
-      background: radial-gradient(circle at top right, rgba(20,22,28,1) 0%, rgba(11,14,17,1) 100%);
+      background: radial-gradient(circle at top right, rgba(20, 22, 28, 1) 0%, rgba(11, 14, 17, 1) 100%);
     }
 
     .an-grid {
@@ -2285,11 +2287,13 @@
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
       transition: transform 0.2s, box-shadow 0.2s;
     }
+
     .an-glass-card:hover {
       transform: translateY(-2px);
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
       border-color: rgba(255, 255, 255, 0.08);
     }
+
     .an-val {
       font-size: 28px;
       font-weight: 700;
@@ -2298,6 +2302,7 @@
       margin-top: 4px;
       color: #fff;
     }
+
     .an-title {
       font-size: 11px;
       text-transform: uppercase;
@@ -2329,12 +2334,32 @@
       align-items: center;
       letter-spacing: 0.5px;
     }
-    .an-toggle:hover { background: rgba(255, 255, 255, 0.02); }
-    .an-toggle::after { content: '▼'; font-size: 10px; color: var(--muted); transition: 0.2s; }
-    .an-toggle.active::after { transform: rotate(180deg); color: #fff; }
-    
-    .an-panel { display: none; padding: 0 18px 18px 18px; }
-    .an-panel.show { display: block; animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+    .an-toggle:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .an-toggle::after {
+      content: '▼';
+      font-size: 10px;
+      color: var(--muted);
+      transition: 0.2s;
+    }
+
+    .an-toggle.active::after {
+      transform: rotate(180deg);
+      color: #fff;
+    }
+
+    .an-panel {
+      display: none;
+      padding: 0 18px 18px 18px;
+    }
+
+    .an-panel.show {
+      display: block;
+      animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
 
     .an-bar-row {
       display: flex;
@@ -2342,6 +2367,7 @@
       margin-bottom: 12px;
       font-size: 12px;
     }
+
     .an-bar-label {
       width: 130px;
       color: var(--muted);
@@ -2349,16 +2375,22 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
+
     .an-bar-wrapper {
       flex: 1;
       margin: 0 16px;
       height: 6px;
-      background: rgba(255,255,255,0.05);
+      background: rgba(255, 255, 255, 0.05);
       border-radius: 4px;
       overflow: hidden;
       display: flex;
     }
-    .an-bar-fill { height: 100%; transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+
+    .an-bar-fill {
+      height: 100%;
+      transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
     .an-bar-stats {
       width: 170px;
       text-align: right;
@@ -2375,21 +2407,29 @@
       border-left: 4px solid transparent;
       backdrop-filter: blur(8px);
     }
+
     .an-insight-item.success {
-      background: linear-gradient(90deg, rgba(14,203,129,0.1), rgba(0,0,0,0));
-      border-left-color: var(--green); color: var(--green);
+      background: linear-gradient(90deg, rgba(14, 203, 129, 0.1), rgba(0, 0, 0, 0));
+      border-left-color: var(--green);
+      color: var(--green);
     }
+
     .an-insight-item.warning {
-      background: linear-gradient(90deg, rgba(245,158,11,0.1), rgba(0,0,0,0));
-      border-left-color: var(--amber); color: var(--amber);
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.1), rgba(0, 0, 0, 0));
+      border-left-color: var(--amber);
+      color: var(--amber);
     }
+
     .an-insight-item.danger {
-      background: linear-gradient(90deg, rgba(246,70,93,0.1), rgba(0,0,0,0));
-      border-left-color: var(--red); color: var(--red);
+      background: linear-gradient(90deg, rgba(246, 70, 93, 0.1), rgba(0, 0, 0, 0));
+      border-left-color: var(--red);
+      color: var(--red);
     }
+
     .an-insight-item.info {
-      background: linear-gradient(90deg, rgba(59,130,246,0.1), rgba(0,0,0,0));
-      border-left-color: var(--blue); color: #60a5fa;
+      background: linear-gradient(90deg, rgba(59, 130, 246, 0.1), rgba(0, 0, 0, 0));
+      border-left-color: var(--blue);
+      color: #60a5fa;
     }
   </style>
 </head>
@@ -2650,7 +2690,8 @@
               </div>
 
               <!-- V2 Metrics injected here -->
-              <div id="an-advanced-metrics" class="an-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 24px;"></div>
+              <div id="an-advanced-metrics" class="an-grid"
+                style="grid-template-columns: repeat(4, 1fr); margin-bottom: 24px;"></div>
 
               <div id="an-equity-curve" style="margin-bottom: 32px; position:relative;">
                 <!-- Inject SVG here -->
@@ -2986,7 +3027,7 @@
         else if (lastClose < 0.01) { decimals = 6; minM = 0.000001; }
         else if (lastClose < 1) { decimals = 4; minM = 0.0001; }
         else if (lastClose < 1000) { decimals = 3; minM = 0.001; }
-        
+
         const pf = { type: 'price', precision: decimals, minMove: minM };
         candleSeries.applyOptions({ priceFormat: pf });
         ema50Series.applyOptions({ priceFormat: pf });
@@ -3038,30 +3079,30 @@
       if (!raw) return;
       const signals = JSON.parse(raw);
       if (!signals.length) return;
-      
+
       const markers = signals
         .filter(sig => !state.firstCandleTime || sig.timestamp >= state.firstCandleTime)
         .map(sig => ({
           time: sig.timestamp,
           position: sig.direction === 'LONG' ? 'belowBar' : 'aboveBar',
-          color: sig.signal_type === 'BREAKOUT' 
-            ? (sig.direction === 'LONG' ? '#0ea5e9' : '#a855f7') 
+          color: sig.signal_type === 'BREAKOUT'
+            ? (sig.direction === 'LONG' ? '#0ea5e9' : '#a855f7')
             : (sig.direction === 'LONG' ? '#26a69a' : '#ef5350'),
           shape: sig.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
           text: `${sig.direction === 'LONG' ? '▲' : '▼'} ${sig.direction} ${sig.signal_type || 'PULLBACK'} ${sig.score}`
         }));
-      
+
       // Lightweight charts requires markers to be strictly sorted by time
       markers.sort((a, b) => a.time - b.time);
-      
+
       // Deduplicate markers on the same candle to prevent vertical stacking
       const uniqueMarkers = [];
       let lastTime = 0;
       for (const m of markers) {
-          if (m.time !== lastTime) {
-              uniqueMarkers.push(m);
-              lastTime = m.time;
-          }
+        if (m.time !== lastTime) {
+          uniqueMarkers.push(m);
+          lastTime = m.time;
+        }
       }
 
       candleSeries.setMarkers(uniqueMarkers);
@@ -4585,6 +4626,14 @@
           { key: 'WEB_PASSWORD', label: 'Web UI Password', type: 'text', hint: 'Password to access the UI. Leave empty to disable. Keep as *** to keep unchanged.' },
         ],
       },
+      {
+        section: 'Exchange API',
+        fields: [
+          { key: 'BINANCE_API_KEY', label: 'Binance API Key', type: 'text', hint: 'Your Binance API Key.' },
+          { key: 'BINANCE_API_SECRET', label: 'Binance API Secret', type: 'password', hint: 'HMAC Secret or Ed25519 Secret.' },
+          { key: 'BINANCE_PRIVATE_KEY', label: 'Binance Ed25519 Private Key', type: 'password', hint: 'The Ed25519 Private Key in Base64 or PEM format.' },
+        ],
+      },
     ];
 
     let _cfgCurrent = {};   // last fetched values
@@ -5396,10 +5445,10 @@
       if (s.metadata) {
         try {
           const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
-            if (meta.entry || meta.type) {
-              const tpPct = (meta.entry && meta.tp) ? Math.abs((Number(meta.tp) - Number(meta.entry)) / Number(meta.entry) * 100).toFixed(2) + '%' : '';
-              const slPct = (meta.entry && meta.sl) ? Math.abs((Number(meta.sl) - Number(meta.entry)) / Number(meta.entry) * 100).toFixed(2) + '%' : '';
-              metaHtml = `
+          if (meta.entry || meta.type) {
+            const tpPct = (meta.entry && meta.tp) ? Math.abs((Number(meta.tp) - Number(meta.entry)) / Number(meta.entry) * 100).toFixed(2) + '%' : '';
+            const slPct = (meta.entry && meta.sl) ? Math.abs((Number(meta.sl) - Number(meta.entry)) / Number(meta.entry) * 100).toFixed(2) + '%' : '';
+            metaHtml = `
               <tr>
                 <td colspan="7" style="padding: 4px 16px 12px 16px; border-top: none; background: rgba(0,0,0,0.15);">
                   <div style="font-size: 11px; display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-dim);">
@@ -5410,7 +5459,7 @@
                   </div>
                 </td>
               </tr>`;
-            }
+          }
         } catch (e) { }
       }
 
@@ -5438,9 +5487,9 @@
         tempWrapper.innerHTML = `<tbody>${metaHtml}</tbody>`;
         const metaRow = tempWrapper.querySelector('tbody').firstElementChild;
         if (metaRow) {
-            metaRow.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-            metaRow.style.transition = 'background-color 1.5s ease-out';
-            tbody.prepend(metaRow);
+          metaRow.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+          metaRow.style.transition = 'background-color 1.5s ease-out';
+          tbody.prepend(metaRow);
         }
         tbody.prepend(tr);
 
@@ -5575,7 +5624,7 @@
         const pts = ptc(0, 100, 100, arr);
         const isProfitable = arr[arr.length - 1] >= 0;
         const strokeColor = isProfitable ? '#0ECB81' : '#F6465D'; // hex for green/red
-        
+
         // Add bottom corners to close the polygon for the gradient fill
         const fillPts = `${pts} 100,100 0,100`;
 

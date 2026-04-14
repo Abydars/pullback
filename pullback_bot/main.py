@@ -36,7 +36,6 @@ import order_manager as om
 import position_tracker
 import scanner
 import ws_broadcaster as wsb
-from ws_order_api import ws_order_api
 from user_data_stream import user_data_stream
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -103,11 +102,13 @@ async def on_startup() -> None:
     except Exception as exc:
         logger.warning("Exchange info fetch failed: %s (non-fatal)", exc)
 
-    # 3. WS order API and user data stream (live mode only)
+    # 3. Start Core Binance WS API for Execution
+    asyncio.create_task(bc.start_ws_api_client(), name="binance_ws_api")
+
+    # 3a. User data stream (live mode only)
     if config.MODE == "live":
-        await ws_order_api.start()
         await user_data_stream.start()
-        logger.info("Live mode: WS order API and user data stream started")
+        logger.info("Live mode: User data stream started")
 
     # 3b. Restore active session if open trades already have a session_id
     await om.restore_session()
@@ -129,7 +130,6 @@ async def on_startup() -> None:
 async def on_shutdown() -> None:
     logger.info("=== Pullback Bot shutting down ===")
     if config.MODE == "live":
-        await ws_order_api.stop()
         await user_data_stream.stop()
 
 

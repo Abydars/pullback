@@ -23,7 +23,6 @@ from typing import Optional, Set, Tuple
 import binance_client as bc
 import config
 import db
-from ws_order_api import ws_order_api
 
 logger = logging.getLogger(__name__)
 
@@ -331,8 +330,8 @@ class OrderManager:
         # Only here is it safe to return False; the position doesn't exist yet.
         try:
             await bc.set_leverage(symbol, leverage)
-            order = await ws_order_api.place_order(
-                symbol=symbol, side=side, type="MARKET", quantity=qty,
+            order = await bc.place_market_order(
+                symbol=symbol, side=side, qty=qty
             )
             binance_order_id = str(order.get("orderId", ""))
             actual_entry     = float(order.get("avgPrice") or entry)
@@ -340,47 +339,25 @@ class OrderManager:
             logger.error("Live entry failed for %s: %s", symbol, exc)
             return False, f"Live Entry Error: {exc}"
 
-        # ── Entry confirmed — SL / TP failures must NOT prevent DB recording ──
-        # A position without SL/TP is risky but still manageable.
-        # A position with no DB row is a ghost trade the bot can never see.
-
-        # ── Step 3: Stop Loss ─────────────────────────────────────────────────
+        # ── Step 3: Catastrophic Stop Loss (Safety Net Only) ──────────────────
+        # Actual SL and TP management is handled virtually by position_tracker.py
+        # Here we place a 2.5x ATR physical stop just in case the server crashes.
         if config.USE_STOP_LOSS:
             try:
-                await ws_order_api.place_order(
-                    symbol=symbol, side=sl_side, type="STOP_MARKET",
-                    stopPrice=bc.round_step(sl, tick),
-                    closePosition="true",
-                )
-            except Exception as exc:
-                logger.error(
-                    "CRITICAL: SL placement failed for %s (order %s) — "
-                    "position is UNPROTECTED, manual action required: %s",
-                    symbol, binance_order_id, exc,
-                )
+                # Normal SL is 1.5x ATR. Catastrophic is 2.5x ATR.
+                catastrophic_sl = actual_entry - (atr * 2.5) if direction == "LONG" else actual_entry + (atr * 2.5)
+                # Ensure we don't go below 0 for longs
+                if catastrophic_sl <= 0 and direction == "LONG":
+                    catastrophic_sl = tick  # min positive value
 
-        # ── Step 4: Take-Profit / Trailing Stop ───────────────────────────────
-        if config.USE_TAKE_PROFIT:
-            try:
-                if config.USE_TRAILING and atr > 0:
-                    # Binance enforces a hard 5.0 % maximum callbackRate.
-                    atr_pct = max(0.1, min(5.0, (atr / actual_entry) * 100))
-                    await ws_order_api.place_order(
-                        symbol=symbol, side=sl_side, type="TRAILING_STOP_MARKET",
-                        activationPrice=bc.round_step(tp1, tick),
-                        callbackRate=round(atr_pct, 1),
-                        closePosition="true",
-                    )
-                else:
-                    await ws_order_api.place_order(
-                        symbol=symbol, side=sl_side, type="TAKE_PROFIT_MARKET",
-                        stopPrice=bc.round_step(tp1, tick),
-                        closePosition="true",
-                    )
+                await bc.place_stop_market_order(
+                    symbol=symbol, side=sl_side, stop_price=bc.round_step(catastrophic_sl, tick), close_position=True
+                )
+                logger.info("Placed catastrophic safety SL for %s at %.4f", symbol, catastrophic_sl)
             except Exception as exc:
                 logger.error(
-                    "CRITICAL: TP/trail placement failed for %s (order %s) — "
-                    "no take-profit active, manual action required: %s",
+                    "Catastrophic SL placement failed for %s (order %s). "
+                    "Position is UNPROTECTED from flash crashes: %s",
                     symbol, binance_order_id, exc,
                 )
 
