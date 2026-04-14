@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS scanner_log (
     symbol    TEXT    NOT NULL,
     score     INTEGER NOT NULL,
     direction TEXT    NOT NULL,
+    timestamp INTEGER NOT NULL,
     acted_on  INTEGER NOT NULL DEFAULT 0,  -- 0=false, 1=true
     reason    TEXT,                        -- reason why acted or skipped
     metadata  TEXT                         -- JSON encoded extra details (SL, TP, etc)
