@@ -444,7 +444,7 @@ async def create_listen_key() -> str:
 async def keepalive_listen_key(listen_key: str) -> None:
     async with httpx.AsyncClient(timeout=10) as client:
         await client.put(
-            f"{_BASE}/fapi/v1/listenKey",
+            f"{config.BINANCE_REST_BASE}/fapi/v1/listenKey",
             params={"listenKey": listen_key},
             headers=_headers(),
         )

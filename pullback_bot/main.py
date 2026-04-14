@@ -46,6 +46,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("main")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="Pullback Bot", version="1.0.0")
