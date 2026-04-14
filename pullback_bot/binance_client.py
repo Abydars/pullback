@@ -47,8 +47,8 @@ def _get_private_key():
         return None
 
 def _sign_ed25519(params: dict) -> str:
-    sorted_params = dict(sorted(params.items()))
-    query_string = urlencode(sorted_params)
+    # Do not sort here. The query string signed MUST exactly match the order of params sent via HTTP.
+    query_string = urlencode(params)
     
     pk = _get_private_key()
     if not pk:
