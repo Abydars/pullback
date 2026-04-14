@@ -48,7 +48,7 @@ _MAX_WS_SYMBOLS = 1024 // 3  # 341
 # kline buffers: symbol -> interval -> list[candle_dict]
 # Each candle dict: {open, high, low, close, volume}
 _kline_buffers: dict[str, dict[str, list[dict]]] = defaultdict(
-    lambda: {"1m": [], "5m": [], "15m": []}
+    lambda: {"1m": [], "5m": [], "15m": [], "4h": []}
 )
 
 # Cooldown: minimum seconds between signals for the same symbol
